@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    nodeMiddleware: true,
-  },
   images: {
     remotePatterns: [
       // Cloudinary — imagens de produtos
