@@ -25,90 +25,21 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // Refresh session — IMPORTANTE: não remover esse bloco
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (user) {
-    console.log('>>> DEBUG: Logged in user UUID:', user.id)
-  }
+  // Apenas refresha a sessão — redirecionamentos por role ficam nos layouts
+  const { data: { user } } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
 
-  // Rotas públicas que não precisam de auth
   const publicRoutes = ['/login', '/register', '/auth/callback', '/']
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith('/auth/')
   )
 
-  // Sem autenticação → /login
-  if (!user) {
-    if (!isPublicRoute) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/login'
-      return NextResponse.redirect(url)
-    }
-    return supabaseResponse
-  }
-
-  // Usuário autenticado em rota pública → detectar role e redirecionar
-  if (isPublicRoute && pathname !== '/auth/callback') {
-    return redirectByRole(user, request, supabaseResponse, supabase)
-  }
-
-  // Usuário autenticado tentando acessar /admin sem ser super_admin
-  if (pathname.startsWith('/admin')) {
-    const isSuperAdmin = await checkIsSuperAdmin(supabase, user.id)
-    if (!isSuperAdmin) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/dashboard'
-      return NextResponse.redirect(url)
-    }
-  }
-
-  // Usuário autenticado tentando acessar /dashboard sem ser tenant user
-  if (pathname.startsWith('/dashboard')) {
-    const isSuperAdmin = await checkIsSuperAdmin(supabase, user.id)
-    if (isSuperAdmin) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/admin'
-      return NextResponse.redirect(url)
-    }
+  if (!user && !isPublicRoute) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
   }
 
   return supabaseResponse
-}
-
-async function checkIsSuperAdmin(
-  supabase: ReturnType<typeof createServerClient>,
-  userId: string
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('super_admins')
-    .select('id')
-    .eq('id', userId)
-    .single()
-
-  return !error && !!data
-}
-
-async function redirectByRole(
-  user: { id: string },
-  request: NextRequest,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  _supabaseResponse: any,
-  supabase: ReturnType<typeof createServerClient>
-): Promise<NextResponse> {
-  const isSuperAdmin = await checkIsSuperAdmin(supabase, user.id)
-
-  const url = request.nextUrl.clone()
-
-  if (isSuperAdmin) {
-    url.pathname = '/admin'
-  } else {
-    url.pathname = '/dashboard'
-  }
-
-  return NextResponse.redirect(url)
 }
