@@ -1,12 +1,15 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getSessionClaims } from '@/lib/supabase/get-claims'
 import { AdminSidebar } from '@/components/admin/admin-sidebar'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
-  if (!user.app_metadata?.is_super_admin) redirect('/login')
+
+  const claims = await getSessionClaims(supabase)
+  if (!claims.isSuperAdmin) redirect('/login')
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

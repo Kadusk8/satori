@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# env files — nunca commitar segredos
+.env
+.env.*
+!.env.example
+
+# scripts de debug/scratch — nunca commitar (já vazou credencial dessa forma antes)
+check-db*.mjs
+check-db*.js
+scratch_*.ts
+scratch_*.js
+*.local.mjs
+*.local.ts
+
+# node
+node_modules/
