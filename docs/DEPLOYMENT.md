@@ -1,332 +1,108 @@
-# Guia de Deploy: Multi-LLM Support
+# Guia de Deploy — ZapAgent (Neon + Vercel + Portainer)
 
-## Pré-requisitos
+Checklist de provisionamento e deploy da plataforma no estado atual (pós
+migração do Supabase pro Neon — ver [`ARCHITECTURE.md`](./ARCHITECTURE.md)).
+Greenfield: não há passo de migração de dados porque não há dados de produção
+no Supabase a preservar.
 
-- Supabase projeto criado e configurado
-- Edge Functions deployadas
-- Database migrations rodadas
-
----
-
-## Passo 1: Rodar Migration 018
-
-A migration `supabase/migrations/018_add_llm_api_keys_to_tenants.sql` adiciona as 3 colunas de API keys BYOK.
-
-### Via Supabase CLI
-
-```bash
-cd /Users/mac/zapai
-supabase db push
-```
-
-Ou manualmente no SQL Editor do Supabase Dashboard:
-
-```sql
--- Copiar o conteúdo de supabase/migrations/018_add_llm_api_keys_to_tenants.sql
-ALTER TABLE tenants
-  ADD COLUMN IF NOT EXISTS openai_api_key TEXT,
-  ADD COLUMN IF NOT EXISTS gemini_api_key TEXT,
-  ADD COLUMN IF NOT EXISTS anthropic_api_key TEXT;
-```
-
-### Verificar que rodou
-
-```sql
--- No Supabase Dashboard SQL Editor
-SELECT column_name, data_type
-FROM information_schema.columns
-WHERE table_name = 'tenants'
-  AND column_name IN ('openai_api_key', 'gemini_api_key', 'anthropic_api_key');
-
--- Deve retornar 3 linhas com data_type = 'text'
-```
-
----
-
-## Passo 2: Deploy das Edge Functions
-
-### Funções que mudaram
-
-1. **`supabase/functions/process-message/index.ts`**
-   - Agora usa `callLLM` ao invés de `callClaude`
-   - Compatível com Claude, OpenAI, Gemini
-
-2. **`supabase/functions/onboard-tenant/index.ts`**
-   - Adicionado inicialização das 3 colunas de API keys com `null`
-
-3. **`supabase/functions/_shared/llm-client.ts`** (NOVA)
-   - Cliente unificado para 3 providers
-   - OBRIGATÓRIA para que `process-message` funcione
-
-### Deploy via CLI
-
-```bash
-cd /Users/mac/zapai
-supabase functions deploy
-```
-
-Ou selectively:
-
-```bash
-supabase functions deploy process-message --no-verify
-supabase functions deploy onboard-tenant --no-verify
-```
-
-### Verificar Deploy
-
-```bash
-supabase functions list
-
-# Deve listar todas as functions:
-# - process-message
-# - onboard-tenant
-# - schedule-reminder
-# - send-whatsapp
-# - webhook-evolution
-# - setup-ai-agent
-```
-
----
-
-## Passo 3: Configurar Environment Variables
-
-### No Supabase Project Settings → Functions
-
-Configure as 3 API keys globais (fallback):
-
-```env
-# Anthropic
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-
-# OpenAI
-OPENAI_API_KEY=sk-xxxxx
-
-# Google Generative AI
-GEMINI_API_KEY=AIxxxxx
-```
-
-Se deixar em branco, o sistema vai falhar apenas quando um agente tentar usar esse provider sem chave BYOK.
-
----
-
-## Passo 4: Testar Onboarding
-
-### Cenário: Criar novo tenant
-
-1. Acesse admin panel → Tenants
-2. Clique "Novo Tenant"
-3. Preencha wizard com dados:
-   - Nome: "Teste Multi-LLM"
-   - Segmento: "serviços"
-   - Email: seu email
-   - WhatsApp number: `62999999999`
-   - Instância Evolution: `teste-multi-llm`
-   - Evolution URL: sua URL ou mock
-   - Modelo: `claude-sonnet-4-20250514`
-4. Clique "Ativar Tenant"
-
-### Checklist
-
-- ✅ Tenant criado com sucesso
-- ✅ Coluna `openai_api_key` = null
-- ✅ Coluna `gemini_api_key` = null
-- ✅ Coluna `anthropic_api_key` = null
-- ✅ Magic link enviado ao email
-
----
-
-## Passo 5: Testar Settings Page
-
-### Cenário: Configurar API keys BYOK
-
-1. Login como tenant owner
-2. Clique menu → Configurações
-3. Vê 3 cards: OpenAI, Gemini, Anthropic
-4. Preencha OpenAI API key (obtém em https://platform.openai.com/account/api-keys)
-5. Clique "Salvar Configurações"
-6. Página recarrega
-7. Vê checkmark verde em OpenAI
-
-### Checklist
-
-- ✅ Form carrega (não falha)
-- ✅ Pode salvar keys
-- ✅ Checkmark aparece quando preenchida
-- ✅ Dados persistem após reload
-
----
-
-## Passo 6: Testar AI Agents Page
-
-### Cenário: Criar agente com GPT-4o
-
-1. No dashboard, clique menu → Agentes IA
-2. Clique "Novo Agente"
-3. Preencha:
-   - Nome: "Vendedor GPT"
-   - Tipo: "Vendedor/SDR"
-   - Modelo: "GPT-4o"
-   - Ativo: ✅
-   - Padrão: ✅
-4. Clique "Criar"
-5. Agente aparece na lista com badge verde "GPT-4o"
-
-### Checklist
-
-- ✅ Pode criar agente
-- ✅ Model dropdown mostra opções (Claude, GPT, Gemini)
-- ✅ Badge cor correta (purple/Claude, green/GPT, blue/Gemini)
-- ✅ Pode editar agente
-- ✅ Pode deletar agente
-
----
-
-## Passo 7: Testar Function Calling
-
-### Cenário: Chat com busca de produtos
-
-1. Vá para chat com cliente
-2. Envie mensagem: "Quais produtos vocês têm?"
-3. Observe:
-   - IA chama `search_products` tool
-   - Retorna produtos reais do DB
-   - IA gera resposta natural
-   - LLM usado = aquele do agente
-
-### Checklist
-
-- ✅ Tool calling funciona
-- ✅ Produtos retornados são reais
-- ✅ Resposta é natural (não apenas JSON)
-- ✅ Não há erro de API key
-
-### Se der erro de API key
+## Visão geral
 
 ```
-"OPENAI_API_KEY not configured"
+apps/web (Next.js)         →  Vercel
+services/backend (Fastify) →  Portainer/Docker, sempre-ligado
+Banco                       →  Neon (Postgres)
+Realtime                    →  Pusher
+Email transacional          →  Resend
+Imagens + áudio             →  Cloudinary
 ```
 
-Significa:
-- Agente usa modelo `gpt-4o`
-- Tenant não preencheu `openai_api_key`
-- Env var `OPENAI_API_KEY` não está configurada
+## 1. Neon (banco)
 
-**Solução:** Configure a env var ou preencha a chave BYOK em Configurações.
+1. Criar um projeto no [Neon](https://neon.tech).
+2. Rodar o schema completo:
+   ```bash
+   psql "$NEON_CONNECTION_STRING" -f neon/schema.sql
+   ```
+3. Configurar a chave de criptografia usada pelas colunas sensíveis
+   (`evolution_api_key`, chaves de LLM/ElevenLabs por tenant):
+   ```sql
+   ALTER DATABASE <nome_do_banco> SET app.encryption_key = '<chave-forte-aleatória>';
+   ```
+4. Criar (ou usar) um usuário de conexão com os grants de role necessários:
+   ```sql
+   GRANT authenticated, service_role TO <seu_usuario_de_conexao>;
+   ```
+   Esse mesmo usuário/connection string serve tanto pro `apps/web`
+   (`DATABASE_URL`) quanto pro `services/backend` (`DATABASE_URL`) — o app usa
+   `SET LOCAL ROLE authenticated` por request (RLS) e o serviço backend usa
+   `SET ROLE service_role` (BYPASSRLS) por conexão.
+5. Guardar a connection string do endpoint **pooled** do Neon (`-pooler` no
+   host) — necessário pro Vercel (serverless) não estourar conexões.
 
----
+## 2. Vercel (`apps/web`)
+
+Variáveis de ambiente (ver `.env.example` na raiz):
+
+| Variável | Observação |
+|---|---|
+| `DATABASE_URL` | connection string pooled do Neon |
+| `ENCRYPTION_KEY` | mesma chave configurada no passo 1.3 |
+| `AUTH_SECRET` | gerar com `openssl rand -base64 32` |
+| `NEXT_PUBLIC_APP_URL` | URL pública do app no Vercel |
+| `RESEND_API_KEY`, `EMAIL_FROM` | conta no [Resend](https://resend.com) |
+| `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER`, `PUSHER_APP_ID`, `PUSHER_SECRET` | conta no [Pusher Channels](https://pusher.com/channels) |
+| `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`, `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET` | upload de imagem de produto direto do browser (unsigned preset) |
+| `BACKEND_URL`, `BACKEND_PUBLIC_URL`, `BACKEND_TOKEN` | URL(s) do `services/backend` no Portainer + token compartilhado |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` | fallback global (BYOK por tenant tem prioridade) |
+
+Deploy: conectar o repo no Vercel com **root directory = `apps/web`** — a Vercel detecta Next.js automaticamente, sem `vercel.json`.
+
+## 3. Portainer/Docker (`services/backend`)
+
+1. Variáveis de ambiente — ver `services/backend/.env.example`:
+   `DATABASE_URL`, `ENCRYPTION_KEY` (mesmas do passo 1), `PORT`,
+   `BACKEND_TOKEN` (deve bater com o do Vercel), `CLOUDINARY_CLOUD_NAME` +
+   `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` (upload assinado, diferente
+   do preset unsigned do frontend), `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`.
+2. Build e sobe via `docker/docker-compose.yml`:
+   ```bash
+   cd docker
+   docker compose up -d --build
+   ```
+3. Expor a porta `3001` publicamente (proxy reverso/HTTPS na frente — ex.
+   Traefik/Nginx no próprio Portainer) — essa é a URL que vira
+   `BACKEND_URL`/`BACKEND_PUBLIC_URL` no Vercel.
+4. Healthcheck: `GET /health` deve responder `{"ok":true}`.
+
+## 4. Evolution Go (por tenant)
+
+Não é provisionado pela plataforma — cada tenant já tem (ou cria) sua própria
+instância externa. No onboarding (`/admin/tenants/new`), o super admin informa
+URL + token + nome da instância; o wizard valida a conexão e registra o
+webhook (`{BACKEND_PUBLIC_URL}/webhook-evolution?ts=<segredo>`) automaticamente.
+
+## 5. Checklist de verificação pós-deploy
+
+- [ ] `neon/schema.sql` aplicado, `app.encryption_key` configurada
+- [ ] Login funciona (`/login`) e leva ao painel certo (`/admin` vs `/dashboard`)
+- [ ] `services/backend` respondendo em `GET /health`
+- [ ] Onboarding de um tenant de teste completa sem erro (todos os 7 passos do wizard)
+- [ ] Mensagem de teste no WhatsApp do tenant → aparece em `/conversations` → IA responde
+- [ ] Mover um card no kanban em duas abas abertas reflete ao vivo (Pusher configurado)
+- [ ] Email de reset de senha chega (Resend configurado)
 
 ## Troubleshooting
 
-### "Erro ao criar tenant"
+**"Erro ao criar tenant" no onboarding** — geralmente falha de conexão com a
+Evolution Go informada (URL/token errados) ou webhook_secret duplicado
+(reexecutar o onboarding é idempotente por slug).
 
-**Causas possíveis:**
-1. Migration 018 não foi rodada → execute a migration
-2. Slug duplicado → mude o nome da empresa
-3. Evolution API falhou → checa URL e key da Evolution
+**IA não responde no WhatsApp** — checar logs do `services/backend`
+(webhook recebido? `process-message` chamado após o buffer de 6s? erro de API
+key da LLM?). Sem chave BYOK do tenant nem fallback global configurado, a
+chamada à LLM falha com `"<PROVIDER>_API_KEY not configured"`.
 
-**Debug:**
-```sql
--- Verificar se as 3 colunas existem
-\d tenants
-
--- Deve aparecer:
--- openai_api_key | text
--- gemini_api_key | text
--- anthropic_api_key | text
-```
-
----
-
-### "Settings page não carrega"
-
-**Causa:** Usuário não autenticado ou tenant_id não está em `user.user_metadata`.
-
-**Debug:**
-```typescript
-// No browser console, ao carregar /settings
-const { data: { user } } = await supabase.auth.getUser()
-console.log(user.user_metadata)
-// Deve ter `tenant_id`
-```
-
----
-
-### "Tool calling retorna error de API key"
-
-**Possível causa:** `callLLM` não recebeu a API key.
-
-**Debug:**
-1. Verificar se env var está configurada:
-   ```bash
-   # No Supabase Dashboard
-   Project Settings → Functions → Environment Variables
-   ```
-
-2. Verificar se BYOK foi preenchida:
-   ```sql
-   SELECT openai_api_key, gemini_api_key, anthropic_api_key
-   FROM tenants
-   WHERE id = '...' -- seu tenant
-   ```
-
-3. Se ambas estão vazias, configure a env var global (fallback).
-
----
-
-## Rollback (se necessário)
-
-### Remover as 3 colunas (desastroso)
-
-```sql
-ALTER TABLE tenants
-  DROP COLUMN openai_api_key,
-  DROP COLUMN gemini_api_key,
-  DROP COLUMN anthropic_api_key;
-```
-
-### Ou: Desativar suporte multi-LLM
-
-1. Deixar env vars vazias
-2. Continuará funcionando com Claude (padrão)
-3. Agentes com `model != 'claude-*'` vão falhar
-
----
-
-## Monitoramento
-
-### Ver logs das Edge Functions
-
-```bash
-supabase functions logs process-message --tail
-```
-
-### Queries úteis
-
-```sql
--- Ver últimos tenants criados
-SELECT id, name, created_at
-FROM tenants
-ORDER BY created_at DESC
-LIMIT 5;
-
--- Ver agentes de um tenant
-SELECT id, name, model, is_default
-FROM ai_agents
-WHERE tenant_id = '...'
-ORDER BY created_at DESC;
-
--- Ver se API keys foram preenchidas
-SELECT id, name,
-  CASE WHEN openai_api_key IS NOT NULL THEN '✅' ELSE '❌' END as openai,
-  CASE WHEN gemini_api_key IS NOT NULL THEN '✅' ELSE '❌' END as gemini,
-  CASE WHEN anthropic_api_key IS NOT NULL THEN '✅' ELSE '❌' END as anthropic
-FROM tenants;
-```
-
----
-
-## Próximos Passos
-
-1. Deploy para produção via Vercel (frontend) + Supabase
-2. Configurar monitoria e alertas
-3. Documentação para clientes sobre como configurar keys BYOK
+**Realtime não atualiza** — confirmar que `PUSHER_APP_ID`/`PUSHER_SECRET`
+(server) e `NEXT_PUBLIC_PUSHER_KEY`/`CLUSTER` (client) batem com a mesma app
+no dashboard do Pusher; sem isso o app cai no fallback de polling/refresh
+manual silenciosamente (não é um erro visível).

@@ -16,21 +16,35 @@ O sistema atende múltiplos segmentos (clínicas, lojas, prestadores de serviço
 
 ---
 
+> **Nota de arquitetura (2026-07-03):** o backend original deste documento era
+> 100% Supabase (Auth, Storage, Realtime, Edge Functions, PostgREST). A
+> plataforma foi migrada por completo pro Neon (Postgres puro) — não havia
+> dado de produção a preservar, então o corte foi direto. **O modelo de
+> dados, os prompts da IA, as tools de function calling e a lógica de negócio
+> descritos abaixo continuam 100% válidos** — só a camada de infraestrutura
+> mudou. Onde este documento menciona Supabase Auth/Storage/Realtime/Edge
+> Functions, a implementação real hoje é: Auth.js (NextAuth v5), Cloudinary,
+> Pusher, e um serviço Node/Fastify em `services/backend/`, respectivamente.
+> Ver [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) pra arquitetura atual e
+> [`docs/legacy/supabase/README.md`](docs/legacy/supabase/README.md) pro
+> mapeamento função-por-função do que foi portado pra onde.
+
 ## Stack tecnológica
 
 | Camada | Tecnologia | Justificativa |
 |--------|-----------|---------------|
 | **IDE/Dev** | Google Antigravity + Claude Code | Desenvolvimento agent-first com skills e workflows |
-| **Frontend** | Next.js 14+ (App Router) + Tailwind CSS + shadcn/ui | SSR, RSC, tipagem forte |
-| **Backend/API** | Supabase Edge Functions (Deno/TypeScript) | Serverless, baixa latência, integrado ao banco |
-| **Banco de dados** | Supabase PostgreSQL + RLS | Multi-tenancy nativo via Row Level Security |
-| **Autenticação** | Supabase Auth (JWT) | Login, roles, magic link, OAuth |
-| **Realtime** | Supabase Realtime (Postgres Changes) | Chat ao vivo, kanban em tempo real |
-| **WhatsApp** | Evolution API v2 (self-hosted) | Open-source, suporta Baileys e Cloud API |
-| **IA/LLM** | Claude API (Anthropic) com function calling | Geração de respostas + execução de ações |
-| **Armazenamento de imagens** | Cloudinary ou MinIO (S3-compatible) | Imagens de produtos otimizadas |
-| **Fila/Jobs** | Supabase pg_cron + Database Webhooks | Lembretes, jobs agendados |
-| **Deploy** | Vercel (frontend) + VPS/Docker (Evolution API) | |
+| **Frontend** | Next.js 15 (App Router) + Tailwind CSS + shadcn/ui | SSR, RSC, tipagem forte |
+| **Backend (webhook/IA/cron)** | Node + Fastify (`services/backend/`) | Processo sempre-ligado — sem timeout de função serverless; deploy no Portainer |
+| **Banco de dados** | Neon (Postgres puro) + Drizzle ORM | Multi-tenancy via RLS emulada com GUC (`request.jwt.claims`) — ver `neon/schema.sql` |
+| **Autenticação** | Auth.js / NextAuth v5 (Credentials + bcrypt) | Login, roles, sessão JWT com claims custom |
+| **Realtime** | Pusher Channels | Chat ao vivo, kanban em tempo real; fallback gracioso quando não configurado |
+| **WhatsApp** | Evolution Go (bring-your-own-instance por tenant) | Cada tenant conecta sua própria instância externa |
+| **IA/LLM** | Claude API (Anthropic), + OpenAI/Gemini por tenant (BYOK) | Geração de respostas + execução de ações via function calling |
+| **Armazenamento de imagens/áudio** | Cloudinary | Imagens de produto + áudio recebido do WhatsApp |
+| **Email transacional** | Resend | Reset de senha e convite de operador, via token HMAC assinado |
+| **Fila/Jobs** | `node-cron` dentro de `services/backend` | Lembretes de agendamento, follow-ups automáticos |
+| **Deploy** | Vercel (`apps/web`) + Portainer/Docker (`services/backend` + Evolution Go) | |
 
 ---
 
@@ -89,63 +103,36 @@ zapagent/
 │       │   ├── products/              # ProductCard, ProductForm, ImageUploader
 │       │   └── appointments/          # Calendar, TimeSlotPicker, AppointmentCard
 │       ├── lib/
-│       │   ├── supabase/
-│       │   │   ├── client.ts          # Browser client
-│       │   │   ├── server.ts          # Server client (RSC)
-│       │   │   └── middleware.ts      # Auth middleware
-│       │   ├── cloudinary.ts          # Upload helper (ou minio.ts)
+│       │   ├── db/                    # Drizzle: schema.ts, index.ts (withClaims/withAdmin)
+│       │   ├── auth/                  # session.ts, tokens.ts, users.ts, password.ts
+│       │   ├── data/                  # Server Actions por domínio (conversations, chat, appointments, onboarding, ...)
+│       │   ├── realtime/              # channels.ts, server.ts (Pusher trigger), client.ts (Pusher subscribe)
+│       │   ├── evolution/             # client.ts — check/registro de webhook (onboarding)
+│       │   ├── email/                 # resend.ts
 │       │   └── utils.ts
-│       ├── hooks/
-│       │   ├── use-realtime.ts        # Subscribe a changes do Supabase
-│       │   ├── use-conversations.ts
-│       │   └── use-appointments.ts
-│       ├── types/
-│       │   └── database.ts            # Tipos gerados pelo Supabase CLI
+│       ├── auth.ts / auth.config.ts   # NextAuth v5
+│       ├── middleware.ts
 │       ├── tailwind.config.ts
 │       ├── next.config.ts
 │       └── package.json
-├── supabase/
-│   ├── config.toml
-│   ├── migrations/                    # SQL migrations versionadas
-│   │   ├── 001_create_super_admins.sql
-│   │   ├── 002_create_tenants.sql
-│   │   ├── 003_create_users.sql
-│   │   ├── 004_create_contacts.sql
-│   │   ├── 005_create_conversations.sql
-│   │   ├── 006_create_messages.sql
-│   │   ├── 007_create_products.sql
-│   │   ├── 008_create_appointments.sql
-│   │   ├── 009_create_kanban_stages.sql
-│   │   ├── 010_create_ai_agents.sql
-│   │   ├── 011_create_onboarding_logs.sql
-│   │   ├── 012_enable_rls.sql
-│   │   └── 013_create_functions.sql
-│   └── functions/
-│       ├── webhook-evolution/         # Recebe msgs do WhatsApp
-│       │   └── index.ts
-│       ├── process-message/           # Processa msg com IA
-│       │   └── index.ts
-│       ├── send-whatsapp/             # Envia msg via Evolution API
-│       │   └── index.ts
-│       ├── schedule-reminder/         # Dispara lembretes agendados
-│       │   └── index.ts
-│       ├── onboard-tenant/            # Cria tenant completo (chamado pelo wizard admin)
-│       │   └── index.ts
-│       ├── setup-ai-agent/            # Cria agente SDR pré-configurado
-│       │   └── index.ts
-│       └── _shared/
-│           ├── claude-client.ts       # Wrapper da Claude API
-│           ├── evolution-client.ts    # Wrapper da Evolution API
-│           ├── supabase-admin.ts      # Service role client
-│           └── types.ts
+├── services/
+│   └── backend/                       # Node/Fastify — webhook, IA, cron (deploy: Portainer)
+│       ├── src/
+│       │   ├── core/                  # webhook.ts, process-message.ts, tools.ts, send-whatsapp.ts
+│       │   ├── routes/                # webhook-evolution.ts, send-whatsapp.ts (Fastify)
+│       │   ├── cron/                  # schedule-reminder.ts, process-follow-ups.ts (node-cron)
+│       │   ├── shared/                # evolution-client.ts, llm-client.ts, claude-tools.ts, whisper/elevenlabs/cloudinary
+│       │   ├── db/                    # schema.ts, index.ts (conexão service_role)
+│       │   └── index.ts               # entrypoint Fastify + agendamento dos crons
+│       └── Dockerfile
+├── neon/
+│   └── schema.sql                     # Schema do banco (Postgres puro, RLS via GUC)
 ├── docker/
-│   ├── docker-compose.yml             # Evolution API + MinIO (se usar)
-│   └── evolution/
-│       └── .env.example
+│   └── docker-compose.yml             # services/backend
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   ├── API.md
-│   └── DEPLOYMENT.md
+│   ├── DEPLOYMENT.md
+│   └── legacy/supabase/               # Código Supabase original — arquivado, fora de uso
 └── package.json
 ```
 
@@ -524,6 +511,14 @@ CREATE TABLE appointments (
 ```
 
 ### Row Level Security (RLS)
+
+No Neon (Postgres puro, sem os helpers nativos do Supabase), `auth.jwt()` e
+`auth.role()` abaixo são um shim implementado em `neon/schema.sql` — leem a
+GUC `request.jwt.claims`, setada por request via `withClaims()`
+(`apps/web/lib/db/index.ts`). As policies e o modelo de 3 papéis são os
+mesmos; só a forma de "logar" o usuário na sessão de banco mudou. Ver
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md#rls-row-level-security).
+
 ```sql
 -- Padrão aplicado em TODAS as tabelas de tenant:
 ALTER TABLE [table] ENABLE ROW LEVEL SECURITY;
@@ -552,6 +547,13 @@ CREATE POLICY "super_admin_full_access" ON [table]
 ---
 
 ## Lógica das Edge Functions
+
+> Título histórico — não existem mais Supabase Edge Functions. A lógica
+> descrita abaixo é a mesma; a implementação real hoje é uma Server Action
+> (`onboard-tenant`/`setup-ai-agent` → `apps/web/lib/data/onboarding.ts`) ou
+> parte do serviço `services/backend/src/{core,cron}/` (as demais). Ver a
+> tabela de mapeamento em
+> [`docs/legacy/supabase/README.md`](../docs/legacy/supabase/README.md).
 
 ### 0. onboard-tenant (wizard de criação de tenant pelo super admin)
 
@@ -807,6 +809,19 @@ export const AI_TOOLS = [
 
 ## Evolution API — Integração
 
+> **Obsoleto:** as duas seções abaixo ("Evolution API — Integração" e
+> "Evolution API por tenant") descrevem rascunhos de duas etapas de projeto já
+> superadas — primeiro pela migração pra **Evolution Go** (bring-your-own-instance:
+> a plataforma **não cria nem hospeda instância**, só se conecta numa que o
+> tenant já tem), depois pela migração pro Neon. A implementação real hoje
+> está em `apps/web/lib/evolution/client.ts` (onboarding: valida conexão +
+> registra webhook) e `services/backend/src/shared/evolution-client.ts`
+> (`getEvolutionClient`, usado pelo webhook/IA/cron) — endpoints reais
+> confirmados na doc oficial do Evolution Go (`/send/text`, `/send/media`,
+> `/instance/status`, `/instance/connect`, resolução da instância pelo próprio
+> token `apikey`, não por nome na URL). Ver
+> [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) pro fluxo atual.
+
 ### Setup por tenant
 
 ```typescript
@@ -1023,6 +1038,14 @@ ENCRYPTION_KEY=sua_chave_de_criptografia_aqui
 
 ## Armazenamento de imagens
 
+Decisão final: **Cloudinary**, exclusivamente — a opção MinIO abaixo nunca foi
+adotada. Cobre tanto upload de imagem de produto direto do browser (preset
+unsigned, como no exemplo abaixo) quanto o áudio recebido do WhatsApp
+(upload assinado, feito pelo `services/backend` com `CLOUDINARY_API_KEY`/`SECRET`
+— ver `services/backend/src/shared/cloudinary.ts`; áudio entra como
+`resource_type: 'video'`, já que o Cloudinary não tem um tipo "audio" de
+primeira classe).
+
 ### Opção 1: Cloudinary (recomendado para produção)
 
 ```typescript
@@ -1122,29 +1145,35 @@ Estrutura:
 
 ## Variáveis de ambiente
 
+Lista completa e atualizada em `.env.example` (raiz, pro `apps/web`) e
+`services/backend/.env.example`. Resumo:
+
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_DB_URL=
-
-# Claude API
-ANTHROPIC_API_KEY=
-
-# Evolution API
-EVOLUTION_API_URL=http://localhost:8080
-EVOLUTION_API_GLOBAL_TOKEN=
-
-# Cloudinary (se usar)
+# apps/web — Neon + Auth.js + Pusher + Resend
+DATABASE_URL=
+ENCRYPTION_KEY=
+AUTH_SECRET=
+NEXT_PUBLIC_APP_URL=
+RESEND_API_KEY=
+EMAIL_FROM=
+NEXT_PUBLIC_PUSHER_KEY=
+NEXT_PUBLIC_PUSHER_CLUSTER=
+PUSHER_APP_ID=
+PUSHER_SECRET=
 NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=
 NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=
+BACKEND_URL=
+BACKEND_PUBLIC_URL=
+BACKEND_TOKEN=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
 
-# MinIO (se usar)
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=
-MINIO_SECRET_KEY=
-MINIO_BUCKET=zapagent
+# services/backend — mesmo DATABASE_URL/ENCRYPTION_KEY do apps/web, mais:
+PORT=3001
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
 ```
 
 ---
@@ -1163,21 +1192,20 @@ MINIO_BUCKET=zapagent
 - Comentários de código em português
 - Commit messages em português, padrão conventional commits
 
-### Supabase Edge Functions
-- Cada function em sua pasta com `index.ts`
-- Código compartilhado em `_shared/`
-- Usar `Deno.serve()` (não `serve()` importado)
-- Sempre validar input com Zod
+### services/backend (Node/Fastify)
+- Cada rota em `src/routes/`, lógica de negócio em `src/core/` (chamável direto por outras partes do serviço, sem hop HTTP interno)
+- Código compartilhado (LLM, Evolution, Whisper, ElevenLabs, Cloudinary) em `src/shared/`
+- Cron jobs via `node-cron` em `src/cron/`, agendados em `src/index.ts`
 - Sempre retornar JSON com status code apropriado
-- Log de erros com `console.error()` (aparece no Supabase Dashboard)
-- Usar service role client para operações administrativas
-- NUNCA expor o service role key no frontend
+- Log de erros com `console.error()`/`request.log.error()`
+- Conecta como `service_role` (BYPASSRLS) — nunca aceitar `tenantId` de input sem validar contra o registro correto (ex: webhook_secret, conversationId pertencente ao tenant)
+- NUNCA expor `DATABASE_URL`/`ENCRYPTION_KEY`/tokens no frontend
 
 ### Frontend (Next.js)
 - App Router com Server Components por padrão
 - Client Components apenas quando necessário (interatividade, hooks)
 - Usar `'use client'` no topo dos Client Components
-- Fetching de dados via Server Components + Supabase server client
+- Fetching de dados via Server Components + Drizzle (`withClaims`/`withAdmin`, nunca uma conexão crua)
 - Mutations via Server Actions ou API routes
 - Validação de formulários com Zod + react-hook-form
 - Loading states com Suspense e loading.tsx
