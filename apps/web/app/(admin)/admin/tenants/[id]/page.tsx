@@ -145,15 +145,11 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
           <CardContent className="space-y-2 text-sm">
             <DetailRow label="Número" value={tenant.whatsapp_number ?? '—'} />
             <DetailRow
-              label="Conexão"
-              value={tenant.whatsapp_connection_type === 'cloud_api' ? 'WhatsApp Cloud API' : 'Baileys (QR Code)'}
-            />
-            <DetailRow
               label="Status"
               value={tenant.whatsapp_connected ? 'Conectado' : 'Desconectado'}
               valueClass={tenant.whatsapp_connected ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
             />
-            <DetailRow label="Evolution URL" value={tenant.evolution_api_url ?? '—'} />
+            <DetailRow label="Evolution Go URL" value={tenant.evolution_api_url ?? '—'} />
             <DetailRow label="Instância" value={tenant.evolution_instance_name ?? '—'} />
           </CardContent>
         </Card>

@@ -31,15 +31,13 @@ export interface OnboardingPayload {
     state: string
     website: string
   }
-  // Step 2 atualizado: Evolution API por tenant (sem URL global)
+  // Step 2: Evolution Go externa, já criada e conectada pelo próprio tenant.
+  // Só validamos a conexão e registramos nosso webhook — não criamos instância.
   step2: {
-    evolutionApiUrl: string          // URL base da Evolution API do tenant
-    evolutionApiKey: string          // API Key em texto puro (será criptografada no backend)
-    instanceName: string             // Nome da instância escolhido pelo admin
+    evolutionApiUrl: string          // URL base do servidor Evolution Go do tenant
+    evolutionApiKey: string          // Token da instância (não é a GLOBAL_API_KEY do servidor). Será criptografado no backend.
+    instanceName: string             // Nome/ID da instância já existente no Evolution Go do tenant
     whatsappNumber: string
-    connectionType: 'baileys' | 'cloud_api'
-    cloudApiToken?: string
-    cloudApiBusinessId?: string
   }
   step3: {
     agentName: string

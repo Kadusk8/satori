@@ -152,11 +152,7 @@ export function StepReviewActivate() {
             {/* Step 2 */}
             <ReviewSection icon={MessageSquare} title="WhatsApp" onEdit={() => setStep(2)}>
               <ReviewRow label="Número" value={step2.whatsappNumber ?? '—'} />
-              <ReviewRow
-                label="Conexão"
-                value={step2.connectionType === 'cloud_api' ? 'WhatsApp Cloud API' : 'Baileys (QR Code)'}
-              />
-              <ReviewRow label="Evolution URL" value={step2.evolutionApiUrl ?? '—'} />
+              <ReviewRow label="Evolution Go URL" value={step2.evolutionApiUrl ?? '—'} />
               <ReviewRow label="Instância" value={step2.instanceName ?? '—'} />
             </ReviewSection>
 

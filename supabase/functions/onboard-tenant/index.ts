@@ -1,6 +1,5 @@
 import { createAdminClient } from '../_shared/supabase-admin.ts'
 import {
-  createEvolutionInstance,
   setEvolutionWebhook,
   checkEvolutionConnection,
 } from '../_shared/evolution-client.ts'
@@ -103,7 +102,6 @@ Deno.serve(async (req: Request) => {
           evolution_api_key: step2.evolutionApiKey,
           evolution_instance_name: instanceName,
           whatsapp_number: step2.whatsappNumber,
-          whatsapp_connection_type: step2.connectionType,
           business_hours: step5.businessHours,
           timezone: step5.timezone,
           appointment_duration_minutes: step5.appointmentDurationMinutes,
@@ -130,7 +128,6 @@ Deno.serve(async (req: Request) => {
             evolution_api_key: step2.evolutionApiKey,
             evolution_instance_name: instanceName,
             whatsapp_number: step2.whatsappNumber,
-            whatsapp_connection_type: step2.connectionType,
             business_hours: step5.businessHours,
             timezone: step5.timezone,
             appointment_duration_minutes: step5.appointmentDurationMinutes,
@@ -208,49 +205,42 @@ Deno.serve(async (req: Request) => {
         if (kanbanError) throw new Error(`Kanban: ${kanbanError.message}`)
       }
 
-      // ── Etapa: evolution (criar/validar instância) ─────────────
+      // ── Etapa: evolution (validar conexão com instância já existente) ──
+      // A instância já foi criada e conectada pelo próprio tenant no Evolution
+      // Go dele (externo à nossa plataforma) — aqui só confirmamos que a URL
+      // e o token informados realmente respondem por uma instância válida.
       if (!currentStepId || currentStepId === 'evolution') {
-        const evoParams = {
+        const { state, connected } = await checkEvolutionConnection({
           url: step2.evolutionApiUrl,
           apiKey: step2.evolutionApiKey,
-          instanceName,
+        })
+
+        if (state === 'not_found' || state === 'error') {
+          throw new Error(
+            `Não foi possível conectar à instância informada (state: ${state}). Confira a URL, o token e o nome da instância no Evolution Go.`
+          )
         }
 
-        // Verifica se a instância já existe antes de criar
-        const { state } = await checkEvolutionConnection(evoParams)
-
-        if (state === 'open' || state === 'connecting' || state === 'qr') {
-          // Instância já existe e está em uso — não recriar
-          console.log(`[onboard-tenant] Instância ${instanceName} já existe (state: ${state}), pulando criação`)
-        } else {
-          // Tentar criar — se já existir (403/nome em uso), ignorar e seguir
-          console.log(`[onboard-tenant] Criando instância Evolution: ${instanceName} (state atual: ${state})`)
-          try {
-            await createEvolutionInstance({
-              ...evoParams,
-              connectionType: step2.connectionType,
-              cloudApiToken: step2.cloudApiToken,
-              cloudApiBusinessId: step2.cloudApiBusinessId,
-            })
-          } catch (evoErr) {
-            const errMsg = evoErr instanceof Error ? evoErr.message : String(evoErr)
-            // "already in use" ou status 403 = instância já existe, pode continuar
-            if (errMsg.includes('already in use') || errMsg.includes('403')) {
-              console.log(`[onboard-tenant] Instância ${instanceName} já existia (ignorando erro de duplicata)`)
-            } else {
-              throw evoErr
-            }
-          }
-        }
+        console.log(`[onboard-tenant] Instância ${instanceName} validada (state: ${state}, connected: ${connected})`)
       }
 
       // ── Etapa: webhook ─────────────────────────────────────────
       if (!currentStepId || currentStepId === 'webhook') {
-        const webhookUrl = `${supabaseUrl}/functions/v1/webhook-evolution`
+        // A Evolution não autentica as chamadas de webhook que faz — o segredo
+        // por tenant (gerado por default no banco) vai embutido na própria URL
+        // e é conferido em webhook-evolution/index.ts.
+        const { data: tenantSecret, error: secretError } = await supabase
+          .from('tenants')
+          .select('webhook_secret')
+          .eq('id', tenantId)
+          .single()
+
+        if (secretError || !tenantSecret) throw new Error(`Webhook secret: ${secretError?.message ?? 'tenant não encontrado'}`)
+
+        const webhookUrl = `${supabaseUrl}/functions/v1/webhook-evolution?ts=${tenantSecret.webhook_secret}`
         await setEvolutionWebhook({
           url: step2.evolutionApiUrl,
           apiKey: step2.evolutionApiKey,
-          instanceName,
           webhookUrl,
         })
       }

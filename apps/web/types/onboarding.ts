@@ -34,9 +34,6 @@ export interface OnboardingPayload {
     evolutionApiKey: string
     instanceName: string
     whatsappNumber: string
-    connectionType: 'baileys' | 'cloud_api'
-    cloudApiToken?: string
-    cloudApiBusinessId?: string
   }
   step3: {
     agentName: string

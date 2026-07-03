@@ -7,8 +7,6 @@ export type BusinessSegment =
   | 'servicos'
   | 'outro'
 
-export type WhatsAppConnectionType = 'baileys' | 'cloud_api'
-
 export type AgentPersonality =
   | 'simpatico'
   | 'formal'
@@ -46,15 +44,13 @@ export interface Step1Data {
   website?: string
 }
 
-// Step 2
+// Step 2 — Evolution Go externa, já criada e conectada pelo tenant.
+// A gente só valida a conexão e registra nosso webhook nela.
 export interface Step2Data {
   whatsappNumber: string
-  connectionType: WhatsAppConnectionType
   evolutionApiUrl: string
   evolutionApiKey: string
   instanceName: string
-  cloudApiToken?: string
-  cloudApiBusinessId?: string
 }
 
 export type LLMProvider = 'openai' | 'gemini'
