@@ -42,6 +42,9 @@ export interface OnboardingPayload {
     greetingMessage: string
     outOfHoursMessage: string
     customRules: string
+    llmProvider: 'openai' | 'gemini'
+    llmModel: string
+    llmApiKey: string
   }
   step4: {
     products: Array<{

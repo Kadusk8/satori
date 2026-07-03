@@ -2,73 +2,54 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { AuthError } from 'next-auth'
+import { signIn, signOut } from '@/auth'
+import { getClaimsForUser } from '@/lib/auth/claims'
+import { findAuthUserByEmail, upsertAuthUser } from '@/lib/auth/users'
 
 export async function login(formData: FormData) {
-  const supabase = await createClient()
-
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-  if (error) {
-    return { error: error.message }
+  try {
+    await signIn('credentials', { email, password, redirect: false })
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return { error: 'Email ou senha incorretos.' }
+    }
+    throw error
   }
 
-  // Verificar role para redirecionar
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
-    return { error: 'Erro ao obter dados do usuário.' }
-  }
-
-  // Checar se é super admin
-  const { data: superAdmin, error: superAdminError } = await supabase
-    .from('super_admins')
-    .select('id')
-    .eq('id', user.id)
-    .single()
+  // Decide o destino pelo papel (claims montados no login).
+  const user = await findAuthUserByEmail(email)
+  const claims = user ? await getClaimsForUser(user.id) : null
 
   revalidatePath('/', 'layout')
-
-  // Se conseguiu encontrar super admin, redireciona para admin
-  // Senão redireciona para dashboard (user comum)
-  if (superAdmin) {
-    redirect('/admin')
-  } else {
-    redirect('/dashboard')
-  }
+  if (claims?.is_super_admin) redirect('/admin')
+  redirect('/dashboard')
 }
 
 export async function register(formData: FormData) {
-  const supabase = await createClient()
-
-  const email = formData.get('email') as string
+  const email = (formData.get('email') as string)?.trim().toLowerCase()
   const password = formData.get('password') as string
   const fullName = formData.get('full_name') as string
 
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-      },
-    },
-  })
-
-  if (error) {
-    return { error: error.message }
+  const existing = await findAuthUserByEmail(email)
+  if (existing) {
+    return { error: 'Já existe uma conta com esse email.' }
   }
 
+  await upsertAuthUser({ email, fullName, password, emailVerified: true })
+
+  // NOTA: um usuário auto-registrado ainda não pertence a nenhum tenant nem é
+  // super admin — o acesso real vem do onboarding (owner) ou de convite
+  // (operador). O login vai funcionar mas sem tenant/claims de painel.
   revalidatePath('/', 'layout')
   redirect('/login?registered=true')
 }
 
 export async function logout() {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
+  await signOut({ redirect: false })
   revalidatePath('/', 'layout')
   redirect('/login')
 }

@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWizardStore } from '@/lib/wizard/store'
-import { onboardTenant } from '@/lib/actions/onboard'
+import { onboardTenant } from '@/lib/data/onboarding'
+import type { OnboardingPayload } from '@/types/onboarding'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   CheckCircle2,
   Circle,
@@ -88,7 +88,10 @@ export function StepReviewActivate() {
 
     try {
       // Uma única chamada para a edge function (ela executa tudo internamente)
-      await onboardTenant(payload as any)
+      // Os steps do wizard ficam parcialmente preenchidos até o usuário navegar
+      // por todos eles — o backend/validação de cada step garante que, ao
+      // chegar aqui, os campos obrigatórios já foram preenchidos.
+      await onboardTenant(payload as unknown as OnboardingPayload)
 
       clearInterval(animationInterval)
       // Marca todos como done

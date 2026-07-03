@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useWizardStore } from '@/lib/wizard/store'
-import type { Step5Data, BusinessHours, DayHours } from '@/lib/wizard/types'
+import type { BusinessHours, DayHours } from '@/lib/wizard/types'
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/wizard/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { MessageBubble } from '@/components/chat/message-bubble'
 import type { ChatMessage } from '@/components/chat/message-bubble'
-import { createClient } from '@/lib/supabase/client'
+import { getConversationDrawer } from '@/lib/data/chat'
 import { cn } from '@/lib/utils'
 import type { KanbanConversation } from './types'
 
@@ -124,47 +124,29 @@ export function ConversationDrawer({ conversation, onClose }: ConversationDrawer
 
     async function load() {
       setIsLoading(true)
-      const supabase = createClient()
+      try {
+        const res = await getConversationDrawer(conversation!.id)
+        if (cancelled) return
 
-      // Busca detalhes da conversa + contato
-      const { data: convData } = await supabase
-        .from('conversations')
-        .select(`
-          id, status, started_at, last_message_at,
-          ai_agents ( name ),
-          contacts ( id, whatsapp_number, whatsapp_name, custom_name, email, tags, first_contact_at, last_contact_at, notes )
-        `)
-        .eq('id', conversation!.id)
-        .single()
+        if (res?.detail) setDetail(res.detail as unknown as ConversationDetail)
 
-      // Busca mensagens da conversa
-      const { data: msgs } = await supabase
-        .from('messages')
-        .select('id, sender_type, content, content_type, media_url, created_at, contact_id')
-        .eq('conversation_id', conversation!.id)
-        .order('created_at', { ascending: true })
-        .limit(100)
-
-      if (cancelled) return
-
-      if (convData) setDetail(convData as unknown as ConversationDetail)
-
-      setMessages(
-        (msgs ?? []).map((m: DBMessage) => ({
-          id: m.id,
-          senderType: m.sender_type,
-          content: m.content,
-          contentType: m.content_type as ChatMessage['contentType'],
-          mediaUrl: m.media_url ?? undefined,
-          createdAt: m.created_at,
-          senderName:
-            m.sender_type === 'ai' ? 'Assistente IA' :
-            m.sender_type === 'human' ? 'Operador' :
-            undefined,
-        }))
-      )
-
-      setIsLoading(false)
+        setMessages(
+          ((res?.messages ?? []) as unknown as DBMessage[]).map((m) => ({
+            id: m.id,
+            senderType: m.sender_type,
+            content: m.content,
+            contentType: m.content_type as ChatMessage['contentType'],
+            mediaUrl: m.media_url ?? undefined,
+            createdAt: m.created_at,
+            senderName:
+              m.sender_type === 'ai' ? 'Assistente IA' :
+              m.sender_type === 'human' ? 'Operador' :
+              undefined,
+          }))
+        )
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
     }
 
     setActiveTab('chat')

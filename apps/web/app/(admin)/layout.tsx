@@ -1,14 +1,10 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { getSessionClaims } from '@/lib/supabase/get-claims'
+import { getSessionClaims } from '@/lib/auth/session'
 import { AdminSidebar } from '@/components/admin/admin-sidebar'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const claims = await getSessionClaims(supabase)
+  const claims = await getSessionClaims()
+  if (!claims.userId) redirect('/login')
   if (!claims.isSuperAdmin) redirect('/login')
 
   return (

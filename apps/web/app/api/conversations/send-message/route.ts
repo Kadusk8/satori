@@ -1,100 +1,104 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { and, eq } from 'drizzle-orm'
+import { withClaims } from '@/lib/db'
+import { conversations, contacts, messages } from '@/lib/db/schema'
+import { getDbClaims } from '@/lib/auth/session'
+import { triggerEvent, tenantChannel, conversationChannel } from '@/lib/realtime/server'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+// Envio ao WhatsApp fica no serviço backend (Portainer, Fase 5). Guardado por
+// env: se não configurado, a mensagem é salva mas não sai pelo WhatsApp.
+const BACKEND_URL = process.env.BACKEND_URL
+const BACKEND_TOKEN = process.env.BACKEND_TOKEN
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-
-  // Verifica autenticação
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
+  const claims = await getDbClaims()
+  if (!claims?.tenant_id) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
 
   const body = await request.json()
   const { conversationId, text } = body
-
   if (!conversationId || !text?.trim()) {
     return NextResponse.json({ error: 'conversationId e text são obrigatórios' }, { status: 400 })
   }
 
-  // Busca perfil do usuário para obter tenant_id (isolamento por tenant)
-  const { data: userProfile } = await supabase
-    .from('users')
-    .select('tenant_id')
-    .eq('id', user.id)
-    .single()
+  const result = await withClaims(claims, async (tx) => {
+    const conv = await tx
+      .select({
+        id: conversations.id,
+        status: conversations.status,
+        tenantId: conversations.tenantId,
+        contactId: conversations.contactId,
+        whatsappNumber: contacts.whatsappNumber,
+      })
+      .from(conversations)
+      .innerJoin(contacts, eq(contacts.id, conversations.contactId))
+      .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, claims.tenant_id!)))
+      .limit(1)
 
-  if (!userProfile?.tenant_id) {
-    return NextResponse.json({ error: 'Usuário sem tenant associado' }, { status: 403 })
-  }
+    if (!conv[0]) return { error: 'Conversa não encontrada', status: 404 as const }
+    if (conv[0].status === 'closed') return { error: 'Conversa encerrada', status: 400 as const }
 
-  // Busca dados necessários para enviar a mensagem
-  const { data: conv, error: convError } = await supabase
-    .from('conversations')
-    .select(`
-      id, status, tenant_id, contact_id,
-      contacts ( whatsapp_number )
-    `)
-    .eq('id', conversationId)
-    .eq('tenant_id', userProfile.tenant_id)
-    .single()
+    const inserted = await tx
+      .insert(messages)
+      .values({
+        tenantId: conv[0].tenantId,
+        conversationId,
+        contactId: conv[0].contactId,
+        senderType: 'human',
+        senderId: claims.sub,
+        content: text.trim(),
+        contentType: 'text',
+      })
+      .returning({
+        id: messages.id,
+        sender_type: messages.senderType,
+        content: messages.content,
+        content_type: messages.contentType,
+        media_url: messages.mediaUrl,
+        created_at: messages.createdAt,
+        contact_id: messages.contactId,
+      })
 
-  if (convError || !conv) {
-    return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
-  }
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: new Date() })
+      .where(eq(conversations.id, conversationId))
 
-  if (conv.status === 'closed') {
-    return NextResponse.json({ error: 'Conversa encerrada' }, { status: 400 })
-  }
-
-  const contact = conv.contacts as unknown as { whatsapp_number: string }
-
-  // Salva mensagem no banco como 'human'
-  const { error: msgError } = await supabase.from('messages').insert({
-    tenant_id: conv.tenant_id,
-    conversation_id: conversationId,
-    contact_id: conv.contact_id,
-    sender_type: 'human',
-    sender_id: user.id,
-    content: text.trim(),
-    content_type: 'text',
+    return {
+      tenantId: conv[0].tenantId,
+      whatsappNumber: conv[0].whatsappNumber,
+      message: { ...inserted[0], created_at: inserted[0].created_at.toISOString() },
+    }
   })
 
-  if (msgError) {
-    return NextResponse.json({ error: 'Erro ao salvar mensagem' }, { status: 500 })
+  if ('error' in result) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
 
-  // Atualiza last_message_at
-  await supabase
-    .from('conversations')
-    .update({ last_message_at: new Date().toISOString() })
-    .eq('id', conversationId)
+  await triggerEvent(conversationChannel(conversationId), 'message:new', result.message)
+  await triggerEvent(tenantChannel(result.tenantId), 'conversation:changed', { conversationId })
 
-  // Chama send-whatsapp via service role (a edge function envia para o WhatsApp)
-  // Passa tenantId para que a edge function busque as credenciais da Evolution API
-  const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-whatsapp`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-    },
-    body: JSON.stringify({
-      tenantId: conv.tenant_id,
-      to: contact.whatsapp_number,
-      type: 'text',
-      text: text.trim(),
-      // Não passa conversationId para não salvar novamente (já salvamos acima)
-    }),
-  })
-
-  if (!sendRes.ok) {
-    const err = await sendRes.json().catch(() => ({}))
-    console.error('[send-message API] Falha ao enviar WhatsApp:', err)
-    // Não retorna erro — mensagem já foi salva no banco
-    // O operador pode ver que foi salva mas pode não ter chegado
+  // Dispara o envio ao WhatsApp pelo serviço backend (best-effort).
+  if (BACKEND_URL) {
+    try {
+      await fetch(`${BACKEND_URL}/send-whatsapp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(BACKEND_TOKEN ? { Authorization: `Bearer ${BACKEND_TOKEN}` } : {}),
+        },
+        body: JSON.stringify({
+          tenantId: result.tenantId,
+          to: result.whatsappNumber,
+          type: 'text',
+          text: text.trim(),
+        }),
+      })
+    } catch (err) {
+      console.error('[send-message] falha ao enviar WhatsApp:', err)
+      // Mensagem já salva — não falha a request.
+    }
   }
 
   return NextResponse.json({ success: true })

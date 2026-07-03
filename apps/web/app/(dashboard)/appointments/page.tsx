@@ -17,7 +17,8 @@ import {
   STATUS_CONFIG,
 } from '@/components/appointments/appointment-utils'
 import { cn } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
+import { getTenantScheduleConfig, listAppointments, saveAppointment } from '@/lib/data/appointments'
+import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
 // ── Tipos do banco ────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ function AppointmentChip({
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [tenantId, setTenantId] = useState<string | null>(null)
   const [slotConfig, setSlotConfig] = useState({
     startHour: 8,
     endHour: 18,
@@ -120,68 +122,41 @@ export default function AppointmentsPage() {
   // ── Carrega tenant config + agendamentos ──────────────────────────────────
 
   const loadData = useCallback(async () => {
-    const supabase = createClient()
-
-    // Carrega configuração do tenant (horários e duração)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const tenantId = user.user_metadata?.tenant_id ?? (user.app_metadata?.tenant_id as string | undefined)
-      if (tenantId) {
-        const { data: tenant } = await supabase
-          .from('tenants')
-          .select('appointment_duration_minutes, appointment_slot_interval_minutes, business_hours')
-          .eq('id', tenantId)
-          .single()
-
-        if (tenant) {
-          const t = tenant as unknown as DBTenant
-          const hours = t.business_hours
-          // Extrai hora de início/fim do primeiro dia útil configurado
-          const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
-          let startHour = 8
-          let endHour = 18
-          for (const day of days) {
-            const dayConfig = hours?.[day]
-            if (dayConfig) {
-              startHour = parseInt(dayConfig.start.split(':')[0], 10)
-              endHour = parseInt(dayConfig.end.split(':')[0], 10)
-              break
-            }
+    try {
+      const config = await getTenantScheduleConfig()
+      if (config) {
+        const hours = config.business_hours
+        const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        let startHour = 8
+        let endHour = 18
+        for (const day of days) {
+          const dayConfig = hours?.[day]
+          if (dayConfig) {
+            startHour = parseInt(dayConfig.start.split(':')[0], 10)
+            endHour = parseInt(dayConfig.end.split(':')[0], 10)
+            break
           }
-
-          setSlotConfig({
-            startHour,
-            endHour,
-            slotMinutes: t.appointment_slot_interval_minutes ?? 30,
-            durationMinutes: t.appointment_duration_minutes ?? 30,
-          })
         }
+        setSlotConfig({
+          startHour,
+          endHour,
+          slotMinutes: config.appointment_slot_interval_minutes ?? 30,
+          durationMinutes: config.appointment_duration_minutes ?? 30,
+        })
+        setTenantId(config.tenant_id)
       }
+
+      // Carrega agendamentos (próximos 60 dias + últimos 7)
+      const from = new Date()
+      from.setDate(from.getDate() - 7)
+      const to = new Date()
+      to.setDate(to.getDate() + 60)
+
+      const data = await listAppointments(toDateString(from), toDateString(to))
+      setAppointments(data.map((a) => mapAppointment(a as unknown as DBAppointment)))
+    } catch (err) {
+      toast.error('Erro ao carregar agendamentos: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    // Carrega agendamentos (próximos 60 dias + últimos 7)
-    const from = new Date()
-    from.setDate(from.getDate() - 7)
-    const to = new Date()
-    to.setDate(to.getDate() + 60)
-
-    const { data, error } = await supabase
-      .from('appointments')
-      .select(`
-        id, contact_id, conversation_id, assigned_to, title, notes, date, start_time, end_time, status,
-        contacts ( id, whatsapp_name, custom_name, whatsapp_number )
-      `)
-      .gte('date', toDateString(from))
-      .lte('date', toDateString(to))
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true })
-
-    if (error) {
-      toast.error('Erro ao carregar agendamentos: ' + error.message)
-      return
-    }
-
-    setAppointments((data ?? []).map((a) => mapAppointment(a as unknown as DBAppointment)))
   }, [])
 
   useEffect(() => {
@@ -189,46 +164,22 @@ export default function AppointmentsPage() {
     loadData().finally(() => setIsLoading(false))
   }, [loadData])
 
-  // ── Realtime: agendamentos ────────────────────────────────────────────────
+  // ── Realtime: qualquer agendamento alterado no tenant recarrega a lista ───
 
   useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('appointments-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'appointments' },
-        async (payload) => {
-          if (payload.eventType === 'DELETE') {
-            setAppointments((prev) => prev.filter((a) => a.id !== (payload.old as { id: string }).id))
-            return
-          }
+    if (!tenantId) return
+    const pusherClient = getPusherClient()
+    if (!pusherClient) return
 
-          const { data } = await supabase
-            .from('appointments')
-            .select(`
-              id, contact_id, conversation_id, assigned_to, title, notes, date, start_time, end_time, status,
-              contacts ( id, whatsapp_name, custom_name, whatsapp_number )
-            `)
-            .eq('id', (payload.new as { id: string }).id)
-            .single()
+    const channel = pusherClient.subscribe(tenantChannel(tenantId))
+    const handler = () => { loadData() }
+    channel.bind('appointment:changed', handler)
 
-          if (!data) return
-          const mapped = mapAppointment(data as unknown as DBAppointment)
-
-          setAppointments((prev) => {
-            const exists = prev.find((a) => a.id === mapped.id)
-            if (exists) return prev.map((a) => (a.id === mapped.id ? mapped : a))
-            return [...prev, mapped].sort((a, b) =>
-              `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`)
-            )
-          })
-        }
-      )
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [])
+    return () => {
+      channel.unbind('appointment:changed', handler)
+      pusherClient.unsubscribe(tenantChannel(tenantId))
+    }
+  }, [tenantId, loadData])
 
   // ── Slots para o dia selecionado ──────────────────────────────────────────
 
@@ -267,91 +218,27 @@ export default function AppointmentsPage() {
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async (data: Omit<Appointment, 'id'> & { id?: string }) => {
-    const supabase = createClient()
-
-    // Busca o contact_id pelo telefone ou usa o existente
-    let contactId = data.contactId
-    if (!contactId || contactId.startsWith('c')) {
-      // Tenta buscar contato pelo telefone
-      const phone = data.contactPhone.replace(/\D/g, '')
-      const { data: contact } = await supabase
-        .from('contacts')
-        .select('id')
-        .ilike('whatsapp_number', `%${phone}%`)
-        .maybeSingle()
-
-      if (contact) {
-        contactId = contact.id
-      } else {
-        // Cria contato
-        const { data: { user } } = await supabase.auth.getUser()
-        const tenantId = user?.user_metadata?.tenant_id ?? user?.app_metadata?.tenant_id
-        if (!tenantId) {
-          toast.error('Tenant não identificado')
-          return
-        }
-
-        const { data: newContact, error: contactError } = await supabase
-          .from('contacts')
-          .insert({
-            tenant_id: tenantId,
-            whatsapp_number: data.contactPhone,
-            custom_name: data.contactName,
-          })
-          .select('id')
-          .single()
-
-        if (contactError || !newContact) {
-          toast.error('Erro ao criar contato: ' + contactError?.message)
-          return
-        }
-        contactId = newContact.id
-      }
+    try {
+      await saveAppointment({
+        id: data.id,
+        contactId: data.contactId,
+        contactName: data.contactName,
+        contactPhone: data.contactPhone,
+        conversationId: data.conversationId,
+        assignedTo: data.assignedTo,
+        title: data.title,
+        notes: data.notes,
+        date: data.date,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        status: data.status,
+      })
+      toast.success(data.id ? 'Agendamento atualizado.' : 'Agendamento criado.')
+      await loadData()
+    } catch (err) {
+      toast.error('Erro ao salvar agendamento: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    const payload = {
-      contact_id: contactId,
-      conversation_id: data.conversationId ?? null,
-      assigned_to: data.assignedTo ?? null,
-      title: data.title,
-      notes: data.notes,
-      date: data.date,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      status: data.status,
-    }
-
-    if (data.id) {
-      const { error } = await supabase
-        .from('appointments')
-        .update(payload)
-        .eq('id', data.id)
-
-      if (error) {
-        toast.error('Erro ao salvar agendamento: ' + error.message)
-        return
-      }
-      toast.success('Agendamento atualizado.')
-    } else {
-      const { data: { user } } = await supabase.auth.getUser()
-      const tenantId = user?.user_metadata?.tenant_id ?? user?.app_metadata?.tenant_id
-      if (!tenantId) {
-        toast.error('Tenant não identificado')
-        return
-      }
-
-      const { error } = await supabase
-        .from('appointments')
-        .insert({ ...payload, tenant_id: tenantId })
-
-      if (error) {
-        toast.error('Erro ao criar agendamento: ' + error.message)
-        return
-      }
-      toast.success('Agendamento criado.')
-    }
-    // Realtime atualiza a lista automaticamente
-  }, [])
+  }, [loadData])
 
   const openNew = (date?: string, time?: string) =>
     setFormState({ open: true, appointment: null, defaultDate: date, defaultTime: time })

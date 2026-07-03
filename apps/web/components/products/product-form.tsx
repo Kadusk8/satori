@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ImageUploader, type UploadedImage } from './image-uploader'
 import type { Product } from './product-card'
-import { cn } from '@/lib/utils'
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),

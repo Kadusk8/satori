@@ -21,7 +21,8 @@ import { MessageBubble } from '@/components/chat/message-bubble'
 import { ChatInput } from '@/components/chat/chat-input'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { cn } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
+import { getChat, getMessagesSince, assumeConversation, closeConversation } from '@/lib/data/chat'
+import { getPusherClient, conversationChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ const statusConfig = {
   closed: { label: 'Encerrado', icon: CheckCircle2, class: 'bg-muted text-muted-foreground' },
 }
 
-function mapMessage(row: DBMessage, contactId: string): ChatMessage {
+function mapMessage(row: DBMessage): ChatMessage {
   let senderName: string | undefined
   if (row.sender_type === 'human') senderName = 'Operador'
   else if (row.sender_type === 'ai') senderName = 'Assistente IA'
@@ -95,42 +96,22 @@ export default function ChatPage() {
   useEffect(() => {
     async function load() {
       setIsLoading(true)
-      const supabase = createClient()
-
-      const { data: conv, error: convError } = await supabase
-        .from('conversations')
-        .select(`
-          id, status, priority,
-          ai_agents ( name ),
-          contacts ( id, whatsapp_name, custom_name, whatsapp_number ),
-          users ( id, full_name )
-        `)
-        .eq('id', conversationId)
-        .single()
-
-      if (convError || !conv) {
-        toast.error('Conversa não encontrada')
+      try {
+        const res = await getChat(conversationId)
+        if (!res) {
+          toast.error('Conversa não encontrada')
+          router.push('/conversations')
+          return
+        }
+        setConversation(res.conversation as unknown as DBConversation)
+        contactIdRef.current = res.conversation.contacts.id
+        setMessages(res.messages.map((m) => mapMessage(m as unknown as DBMessage)))
+      } catch {
+        toast.error('Erro ao carregar a conversa')
         router.push('/conversations')
-        return
+      } finally {
+        setIsLoading(false)
       }
-
-      setConversation(conv as unknown as DBConversation)
-      contactIdRef.current = (conv as unknown as DBConversation).contacts.id
-
-      const { data: msgs, error: msgsError } = await supabase
-        .from('messages')
-        .select('id, sender_type, content, content_type, media_url, created_at, contact_id')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-        .limit(100)
-
-      if (msgsError) {
-        toast.error('Erro ao carregar mensagens')
-      } else {
-        setMessages((msgs ?? []).map((m) => mapMessage(m as unknown as DBMessage, contactIdRef.current)))
-      }
-
-      setIsLoading(false)
     }
 
     load()
@@ -142,54 +123,41 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // ── Realtime: novas mensagens ────────────────────────────────────────────
+  // ── Atualização de mensagens (realtime via Pusher, com fallback de polling) ──
 
   useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`chat:${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        async (payload) => {
-          // Busca mensagem completa
-          const { data } = await supabase
-            .from('messages')
-            .select('id, sender_type, content, content_type, media_url, created_at, contact_id')
-            .eq('id', payload.new.id)
-            .single()
+    const pusherClient = getPusherClient()
 
-          if (!data) return
-
-          const mapped = mapMessage(data as unknown as DBMessage, contactIdRef.current)
-
+    if (!pusherClient) {
+      // Sem Pusher configurado: polling leve a cada 5s traz mensagens novas.
+      const interval = setInterval(async () => {
+        try {
+          const rows = await getMessagesSince(conversationId)
           setMessages((prev) => {
-            // Evita duplicatas (otimismo local + Realtime)
-            if (prev.find((m) => m.id === mapped.id)) return prev
-            return [...prev, mapped]
+            const known = new Set(prev.filter((m) => !m.id.startsWith('temp-')).map((m) => m.id))
+            const merged = [...prev]
+            for (const r of rows) {
+              if (!known.has(r.id)) merged.push(mapMessage(r as unknown as DBMessage))
+            }
+            return merged
           })
+        } catch {
+          // silencioso
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'conversations',
-          filter: `id=eq.${conversationId}`,
-        },
-        (payload) => {
-          setConversation((prev) => prev ? { ...prev, status: payload.new.status } : prev)
-        }
-      )
-      .subscribe()
+      }, 5000)
+      return () => clearInterval(interval)
+    }
 
-    return () => { supabase.removeChannel(channel) }
+    const channel = pusherClient.subscribe(conversationChannel(conversationId))
+    const handler = (row: DBMessage) => {
+      setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, mapMessage(row)]))
+    }
+    channel.bind('message:new', handler)
+
+    return () => {
+      channel.unbind('message:new', handler)
+      pusherClient.unsubscribe(conversationChannel(conversationId))
+    }
   }, [conversationId])
 
   // ── Enviar mensagem (operador humano) ───────────────────────────────────
@@ -236,17 +204,12 @@ export default function ChatPage() {
 
   const handleAssume = useCallback(async () => {
     setIsAssuming(true)
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('conversations')
-      .update({ status: 'human_handling' })
-      .eq('id', conversationId)
-
-    if (error) {
-      toast.error('Erro ao assumir conversa: ' + error.message)
-    } else {
+    try {
+      await assumeConversation(conversationId)
       toast.success('Conversa assumida. Você está no controle.')
       setConversation((prev) => prev ? { ...prev, status: 'human_handling' } : prev)
+    } catch (err) {
+      toast.error('Erro ao assumir conversa: ' + (err instanceof Error ? err.message : 'erro'))
     }
     setIsAssuming(false)
   }, [conversationId])
@@ -255,17 +218,12 @@ export default function ChatPage() {
 
   const handleClose = useCallback(async () => {
     setIsClosing(true)
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('conversations')
-      .update({ status: 'closed', closed_at: new Date().toISOString() })
-      .eq('id', conversationId)
-
-    if (error) {
-      toast.error('Erro ao encerrar: ' + error.message)
-    } else {
+    try {
+      await closeConversation(conversationId)
       toast.success('Conversa encerrada.')
       router.push('/conversations')
+    } catch (err) {
+      toast.error('Erro ao encerrar: ' + (err instanceof Error ? err.message : 'erro'))
     }
     setIsClosing(false)
   }, [conversationId, router])

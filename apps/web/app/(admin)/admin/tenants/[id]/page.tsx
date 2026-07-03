@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { createServiceClient } from '@/lib/supabase/server'
+import { sql } from 'drizzle-orm'
+import { withAdmin } from '@/lib/db'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -43,24 +44,45 @@ interface TenantPageProps {
   params: Promise<{ id: string }>
 }
 
+// Formas snake_case (a página lê via `select *` cru pra não reescrever a JSX).
+interface AdminTenantRow {
+  id: string; name: string; status: string; plan: string
+  business_segment: string | null; business_description: string | null
+  owner_name: string | null; owner_email: string | null; owner_phone: string | null
+  city: string | null; state: string | null; website: string | null
+  whatsapp_number: string | null; whatsapp_connected: boolean | null
+  evolution_api_url: string | null; evolution_instance_name: string | null
+  openai_api_key: string | null; gemini_api_key: string | null
+  anthropic_api_key: string | null; elevenlabs_api_key: string | null
+  max_messages_month: number; max_products: number; max_operators: number
+  messages_used_month: number; appointment_duration_minutes: number
+  timezone: string; business_hours: Record<string, { enabled?: boolean; start?: string; end?: string }> | null
+  onboarding_completed_at: string | null; created_at: string
+}
+interface AdminAgentRow {
+  id: string; name: string; system_prompt: string
+  greeting_message: string | null; out_of_hours_message: string | null
+  personality: string | null; is_active: boolean; model: string | null
+  voice_id: string | null; audio_response_enabled: boolean | null
+}
+
 export default async function TenantDetailPage({ params }: TenantPageProps) {
   const { id } = await params
-  const supabase = createServiceClient()
 
-  const { data: tenant } = await supabase
-    .from('tenants')
-    .select('*')
-    .eq('id', id)
-    .single()
+  // select * cru pra preservar as chaves snake_case usadas na JSX.
+  const { tenant, agent } = await withAdmin(async (tx) => {
+    const tRes = await tx.execute(sql`select * from tenants where id = ${id} limit 1`)
+    const aRes = await tx.execute(
+      sql`select id, name, system_prompt, greeting_message, out_of_hours_message, personality, is_active, model, voice_id, audio_response_enabled
+          from ai_agents where tenant_id = ${id} and slug = 'sdr' limit 1`
+    )
+    return {
+      tenant: (tRes.rows?.[0] as unknown as AdminTenantRow | undefined) ?? null,
+      agent: (aRes.rows?.[0] as unknown as AdminAgentRow | undefined) ?? null,
+    }
+  })
 
   if (!tenant) notFound()
-
-  const { data: agent } = await supabase
-    .from('ai_agents')
-    .select('id, name, system_prompt, greeting_message, out_of_hours_message, personality, is_active, model, voice_id, audio_response_enabled')
-    .eq('tenant_id', id)
-    .eq('slug', 'sdr')
-    .maybeSingle()
 
   const businessHours = tenant.business_hours as Record<string, { enabled?: boolean; start?: string; end?: string }> | null
 

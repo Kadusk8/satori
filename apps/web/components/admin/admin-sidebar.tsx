@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
+import { logout } from '@/app/(auth)/actions'
 import {
   LayoutDashboard,
   Building2,
@@ -27,23 +27,15 @@ const navItems = [
 
 export function AdminSidebar() {
   const pathname = usePathname()
-  const router = useRouter()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   async function handleLogout() {
     try {
       setIsLoggingOut(true)
-      console.log('[Admin Logout] Iniciando logout...')
-      const supabase = createClient()
-      const { error } = await supabase.auth.signOut()
-      console.log('[Admin Logout] signOut retornou:', { error })
-      if (error) throw error
-      console.log('[Admin Logout] Sucesso, redirecionando...')
-      toast.success('Deslogado com sucesso')
-      await new Promise(resolve => setTimeout(resolve, 500))
-      window.location.href = '/login'
+      await logout()
     } catch (err) {
-      console.error('[Admin Logout] Erro:', err)
+      // logout() faz redirect('/login') — o NEXT_REDIRECT não é erro real.
+      if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) return
       toast.error('Erro ao fazer logout: ' + (err instanceof Error ? err.message : String(err)))
       setIsLoggingOut(false)
     }

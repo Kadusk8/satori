@@ -1,15 +1,17 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, MessageSquare, Users, Package,
-  Calendar, Bot, Settings, LogOut, ChevronRight, MessagesSquare,
+  Calendar, Settings, LogOut, ChevronRight, MessagesSquare, UserCog,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { createClient } from '@/lib/supabase/client'
-import { useEffect, useState } from 'react'
+import { logout } from '@/app/(auth)/actions'
+import { getWaitingCount } from '@/lib/data/conversations'
+import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 
 function NotificationBadge({ count }: { count: number }) {
@@ -21,85 +23,43 @@ function NotificationBadge({ count }: { count: number }) {
   )
 }
 
-export function DashboardSidebar() {
-  const pathname = usePathname()
-  const router   = useRouter()
+interface DashboardSidebarProps {
+  tenantId: string | null
+}
 
-  const [waitingCount,      setWaitingCount]      = useState(0)
-  const [whatsappConnected, setWhatsappConnected] = useState(true)
+export function DashboardSidebar({ tenantId }: DashboardSidebarProps) {
+  const pathname = usePathname()
+
+  const [waitingCount, setWaitingCount] = useState(0)
+  // TODO(Fase 5): status de conexão do WhatsApp virá do serviço backend
+  // (Portainer) via evento Pusher — ainda não há produtor desse evento.
+  const [whatsappConnected] = useState(true)
   const [isLoggingOut,      setIsLoggingOut]      = useState(false)
 
   useEffect(() => {
-    const supabase = createClient()
-    async function loadCounts() {
-      const { count } = await supabase
-        .from('conversations')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'waiting_human')
-      setWaitingCount(count ?? 0)
-    }
-    loadCounts()
-  }, [])
+    if (!tenantId) return
 
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('sidebar-notifications')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
-        const newRec = payload.new as Record<string, unknown>
-        const oldRec = payload.old as Record<string, unknown>
-        const newStatus = newRec?.status as string | undefined
-        const oldStatus = oldRec?.status as string | undefined
-        if (newStatus === 'waiting_human' && oldStatus !== 'waiting_human') {
-          setWaitingCount(p => p + 1)
-          toast.warning('Nova conversa aguardando atendimento', {
-            description: 'Clique para abrir o kanban.',
-            action: { label: 'Ver', onClick: () => router.push('/conversations') },
-            duration: 8000,
-          })
-        }
-        if (oldStatus === 'waiting_human' && newStatus !== 'waiting_human') {
-          setWaitingCount(p => Math.max(0, p - 1))
-        }
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tenants' }, (payload) => {
-        if (typeof payload.new.whatsapp_connected === 'boolean') {
-          setWhatsappConnected(payload.new.whatsapp_connected)
-          if (!payload.new.whatsapp_connected) {
-            toast.error('WhatsApp desconectado', {
-              description: 'Acesse Configurações para reconectar.',
-              duration: 10000,
-            })
-          }
-        }
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [router])
+    getWaitingCount().then(setWaitingCount).catch(() => {})
+
+    const pusherClient = getPusherClient()
+    if (!pusherClient) return
+
+    const channel = pusherClient.subscribe(tenantChannel(tenantId))
+    const handler = () => { getWaitingCount().then(setWaitingCount).catch(() => {}) }
+    channel.bind('conversation:changed', handler)
+
+    return () => {
+      channel.unbind('conversation:changed', handler)
+      pusherClient.unsubscribe(tenantChannel(tenantId))
+    }
+  }, [tenantId])
 
   async function handleLogout() {
     try {
       setIsLoggingOut(true)
-      console.log('[Logout] Iniciando logout...')
-      const supabase = createClient()
-      console.log('[Logout] Supabase client criado')
-
-      const { error } = await supabase.auth.signOut()
-      console.log('[Logout] signOut retornou:', { error })
-
-      if (error) {
-        console.error('[Logout] Erro no signOut:', error)
-        throw error
-      }
-
-      console.log('[Logout] Sucesso, redirecionando...')
-      toast.success('Deslogado com sucesso')
-
-      // Aguarda um pouco antes de redirecionar
-      await new Promise(resolve => setTimeout(resolve, 500))
-      window.location.href = '/login'
+      await logout()
     } catch (err) {
-      console.error('[Logout] Erro completo:', err)
+      if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) return
       toast.error('Erro ao fazer logout: ' + (err instanceof Error ? err.message : String(err)))
       setIsLoggingOut(false)
     }
@@ -111,6 +71,7 @@ export function DashboardSidebar() {
     { label: 'Contatos',     href: '/contacts',      icon: Users,           badge: 0 },
     { label: 'Produtos',     href: '/products',      icon: Package,         badge: 0 },
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
+    { label: 'Equipe',       href: '/team',          icon: UserCog,         badge: 0 },
     { label: 'Configurações',href: '/settings',      icon: Settings,        badge: 0 },
   ]
 

@@ -1,5 +1,5 @@
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Next.js 15.5.16 (App Router)
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+Este projeto usa Next.js 15.5.16 (versão estável, não canary) — o downgrade a partir da 16 foi deliberado, por incompatibilidade com o build da Vercel. Convenções e APIs padrão do App Router se aplicam normalmente; não há necessidade de consultar documentação fora do padrão.
 <!-- END:nextjs-agent-rules -->

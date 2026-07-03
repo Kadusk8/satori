@@ -3,7 +3,6 @@ import {
   MessageSquare, Users, Bot, Clock,
   ArrowUpRight, CheckCircle2, AlertCircle, TrendingUp,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 
 const stats = [
   { title: 'Conversas hoje',   value: '24',    change: '+12%', icon: MessageSquare, colorClass: 'text-blue-400',   bgClass: 'bg-blue-400/10 border-blue-400/20' },

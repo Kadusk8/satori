@@ -2,13 +2,14 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { KanbanBoard } from '@/components/kanban/kanban-board'
 import { ConversationDrawer } from '@/components/kanban/conversation-drawer'
 import type { KanbanStage, KanbanConversation } from '@/components/kanban/types'
 import { Filter, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { createClient } from '@/lib/supabase/client'
+import { listKanban, moveConversation } from '@/lib/data/conversations'
+import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
 // ── Tipos do banco ────────────────────────────────────────────────────────────
@@ -83,62 +84,20 @@ export default function ConversationsPage() {
   const [filterPriority, setFilterPriority] = useState<FilterPriority>('all')
   const [filterSearch, setFilterSearch] = useState('')
   const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null)
-
-  // Ref para manter stages atualizadas no callback do Realtime
-  const stagesRef = useRef<KanbanStage[]>([])
-  stagesRef.current = stages
+  const [tenantId, setTenantId] = useState<string | null>(null)
 
   // ── Carrega dados iniciais ────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      toast.error('Usuário não autenticado')
-      return
+    try {
+      const { stages: stagesData, conversations: convsData, tenantId: tid } = await listKanban()
+      const mappedStages = stagesData.map(mapStage)
+      setStages(mappedStages)
+      setConversations(convsData.map((c) => mapConversation(c as unknown as DBConversation, mappedStages)))
+      setTenantId(tid)
+    } catch (err) {
+      toast.error('Erro ao carregar o kanban: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    const tenantId = user.user_metadata?.tenant_id
-    if (!tenantId) {
-      toast.error('Tenant não encontrado')
-      return
-    }
-
-    const { data: stagesData, error: stagesError } = await supabase
-      .from('kanban_stages')
-      .select('id, name, slug, color, position, is_closed')
-      .eq('tenant_id', tenantId)
-      .order('position')
-
-    if (stagesError) {
-      toast.error('Erro ao carregar estágios: ' + stagesError.message)
-      return
-    }
-
-    const mappedStages = (stagesData ?? []).map(mapStage)
-    setStages(mappedStages)
-
-    const { data: convsData, error: convsError } = await supabase
-      .from('conversations')
-      .select(`
-        id, status, priority, last_message_at, kanban_stage_id,
-        ai_agents ( name ),
-        contacts ( id, whatsapp_name, custom_name, whatsapp_number ),
-        users ( id, full_name ),
-        messages ( content )
-      `)
-      .eq('tenant_id', tenantId)
-      .not('status', 'eq', 'closed')
-      .order('last_message_at', { ascending: false })
-      .limit(200)
-
-    if (convsError) {
-      toast.error('Erro ao carregar conversas: ' + convsError.message)
-      return
-    }
-
-    setConversations((convsData ?? []).map((c) => mapConversation(c as unknown as DBConversation, mappedStages)))
   }, [])
 
   useEffect(() => {
@@ -146,65 +105,22 @@ export default function ConversationsPage() {
     loadData().finally(() => setIsLoading(false))
   }, [loadData])
 
-  // ── Supabase Realtime ─────────────────────────────────────────────────────
+  // ── Realtime: qualquer mudança em conversas do tenant recarrega o kanban ──
 
   useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('kanban-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations' },
-        async (payload) => {
-          if (payload.eventType === 'DELETE') {
-            setConversations((prev) => prev.filter((c) => c.id !== payload.old.id))
-            return
-          }
+    if (!tenantId) return
+    const pusherClient = getPusherClient()
+    if (!pusherClient) return
 
-          // Para INSERT/UPDATE, busca a conversa completa
-          const { data } = await supabase
-            .from('conversations')
-            .select(`
-              id, status, priority, last_message_at, kanban_stage_id,
-              ai_agents ( name ),
-              contacts ( id, whatsapp_name, custom_name, whatsapp_number ),
-              users ( id, full_name ),
-              messages ( content )
-            `)
-            .eq('id', payload.new.id)
-            .single()
+    const channel = pusherClient.subscribe(tenantChannel(tenantId))
+    const handler = () => { loadData() }
+    channel.bind('conversation:changed', handler)
 
-          if (!data) return
-
-          const mapped = mapConversation(data as unknown as DBConversation, stagesRef.current)
-
-          setConversations((prev) => {
-            const exists = prev.find((c) => c.id === mapped.id)
-
-            // Remove conversas fechadas do kanban
-            if (mapped.status === 'closed') {
-              return prev.filter((c) => c.id !== mapped.id)
-            }
-
-            if (exists) {
-              return prev.map((c) => (c.id === mapped.id ? mapped : c))
-            }
-
-            // Nova conversa: notifica operador se aguardando humano
-            if (mapped.status === 'waiting_human') {
-              toast.warning(`Nova conversa aguardando atendimento — ${mapped.contact.name}`, {
-                action: { label: 'Abrir', onClick: () => window.location.href = `/chat/${mapped.id}` },
-              })
-            }
-
-            return [mapped, ...prev]
-          })
-        }
-      )
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [])
+    return () => {
+      channel.unbind('conversation:changed', handler)
+      pusherClient.unsubscribe(tenantChannel(tenantId))
+    }
+  }, [tenantId, loadData])
 
   // ── Mover card (drag & drop) ──────────────────────────────────────────────
 
@@ -212,16 +128,10 @@ export default function ConversationsPage() {
     setConversations((prev) =>
       prev.map((c) => (c.id === conversationId ? { ...c, kanbanStageId: newStageId } : c))
     )
-
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('conversations')
-      .update({ kanban_stage_id: newStageId })
-      .eq('id', conversationId)
-
-    if (error) {
-      toast.error('Erro ao mover card: ' + error.message)
-      // Reverte no próximo tick (o Realtime trará o estado correto)
+    try {
+      await moveConversation(conversationId, newStageId)
+    } catch (err) {
+      toast.error('Erro ao mover card: ' + (err instanceof Error ? err.message : 'erro'))
     }
   }, [])
 

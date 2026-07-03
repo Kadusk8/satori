@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { ProductCard, type Product } from '@/components/products/product-card'
 import { ProductForm } from '@/components/products/product-form'
 import { cn } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
+import { listProducts, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
 import { toast } from 'sonner'
 
 // Configuração Cloudinary — vem do tenant no banco (fallback para dev)
@@ -55,7 +55,6 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [tenantId, setTenantId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [filterCategory, setFilterCategory] = useState('Todas')
@@ -66,31 +65,15 @@ export default function ProductsPage() {
   // ── Carrega produtos ────────────────────────────────────────────────────────
 
   const loadProducts = useCallback(async () => {
-    const supabase = createClient()
-
-    // Carrega tenant_id do usuário logado (via JWT claims ou tabela users)
-    if (!tenantId) {
-      const { data: { user } } = await supabase.auth.getUser()
-      const tid = (user?.app_metadata?.tenant_id ?? user?.user_metadata?.tenant_id) as string | undefined
-      if (tid) setTenantId(tid)
+    try {
+      const data = await listProducts()
+      const mapped = data.map((p) => mapProduct(p as unknown as DBProduct))
+      setProducts(mapped)
+      const cats = Array.from(new Set(mapped.map((p) => p.category).filter(Boolean) as string[])).sort()
+      setCategories(cats)
+    } catch (err) {
+      toast.error('Erro ao carregar produtos: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, name, description, short_description, price, price_display, category, tags, images, is_available, is_featured')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      toast.error('Erro ao carregar produtos: ' + error.message)
-      return
-    }
-
-    const mapped = (data ?? []).map((p) => mapProduct(p as unknown as DBProduct))
-    setProducts(mapped)
-
-    // Extrai categorias únicas
-    const cats = Array.from(new Set(mapped.map((p) => p.category).filter(Boolean) as string[])).sort()
-    setCategories(cats)
   }, [])
 
   useEffect(() => {
@@ -124,110 +107,55 @@ export default function ProductsPage() {
   // ── CRUD ────────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async (data: Omit<Product, 'id'> & { id?: string }) => {
-    const supabase = createClient()
+    try {
+      const { id } = await saveProduct({
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        shortDescription: data.shortDescription,
+        price: data.price,
+        priceDisplay: data.priceDisplay,
+        category: data.category,
+        tags: data.tags,
+        images: data.images,
+        isAvailable: data.isAvailable,
+        isFeatured: data.isFeatured,
+      })
 
-    // Resolve tenant_id: do state ou busca novamente
-    let tid = tenantId
-    if (!tid) {
-      const { data: { user } } = await supabase.auth.getUser()
-      tid = (user?.app_metadata?.tenant_id ?? user?.user_metadata?.tenant_id) as string | null
-      // Super admin: busca tenant pelo JWT claim is_super_admin (não tem tenant_id próprio)
-      // Nesse caso precisa que o produto já exista (update) ou que o super admin acesse via painel admin
-      if (!tid) {
-        // Tenta extrair do JWT decodificado
-        const { data: { session } } = await supabase.auth.getSession()
-        const jwt = session?.access_token
-        if (jwt) {
-          try {
-            const payload = JSON.parse(atob(jwt.split('.')[1]))
-            tid = payload.tenant_id ?? null
-          } catch { /* ignore */ }
-        }
+      if (data.id) {
+        setProducts((prev) => prev.map((p) => (p.id === data.id ? { ...p, ...data, id: data.id! } : p)))
+        toast.success('Produto atualizado.')
+      } else {
+        setProducts((prev) => [{ ...data, id }, ...prev])
+        toast.success('Produto criado.')
       }
+
+      setCategories((prev) => {
+        if (!data.category) return prev
+        return Array.from(new Set([...prev, data.category])).sort()
+      })
+    } catch (err) {
+      toast.error('Erro ao salvar produto: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    const payload = {
-      name: data.name,
-      description: data.description,
-      short_description: data.shortDescription,
-      price: data.price,
-      price_display: data.priceDisplay,
-      category: data.category,
-      tags: data.tags,
-      images: data.images,
-      is_available: data.isAvailable,
-      is_featured: data.isFeatured,
-    }
-
-    if (data.id) {
-      const { error } = await supabase
-        .from('products')
-        .update(payload)
-        .eq('id', data.id)
-
-      if (error) {
-        toast.error('Erro ao salvar produto: ' + error.message)
-        return
-      }
-
-      setProducts((prev) =>
-        prev.map((p) => (p.id === data.id ? { ...p, ...data, id: data.id! } : p))
-      )
-      toast.success('Produto atualizado.')
-    } else {
-      if (!tid) {
-        toast.error('Não foi possível identificar o tenant. Faça login novamente.')
-        return
-      }
-
-      const { data: inserted, error } = await supabase
-        .from('products')
-        .insert({ ...payload, tenant_id: tid })
-        .select('id')
-        .single()
-
-      if (error || !inserted) {
-        toast.error('Erro ao criar produto: ' + (error?.message ?? 'erro desconhecido'))
-        return
-      }
-
-      setProducts((prev) => [{ ...data, id: inserted.id }, ...prev])
-      toast.success('Produto criado.')
-    }
-
-    // Atualiza categorias
-    setCategories((prev) => {
-      if (!data.category) return prev
-      return Array.from(new Set([...prev, data.category])).sort()
-    })
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
-    const supabase = createClient()
-    const { error } = await supabase.from('products').delete().eq('id', id)
-
-    if (error) {
-      toast.error('Erro ao excluir produto: ' + error.message)
-      return
+    try {
+      await deleteProduct(id)
+      setProducts((prev) => prev.filter((p) => p.id !== id))
+      toast.success('Produto excluído.')
+    } catch (err) {
+      toast.error('Erro ao excluir produto: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    setProducts((prev) => prev.filter((p) => p.id !== id))
-    toast.success('Produto excluído.')
   }, [])
 
   const handleToggleAvailability = useCallback(async (id: string, available: boolean) => {
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('products')
-      .update({ is_available: available })
-      .eq('id', id)
-
-    if (error) {
-      toast.error('Erro ao atualizar disponibilidade: ' + error.message)
-      return
+    try {
+      await setProductAvailable(id, available)
+      setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, isAvailable: available } : p)))
+    } catch (err) {
+      toast.error('Erro ao atualizar disponibilidade: ' + (err instanceof Error ? err.message : 'erro'))
     }
-
-    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, isAvailable: available } : p)))
   }, [])
 
   const openNew = () => {

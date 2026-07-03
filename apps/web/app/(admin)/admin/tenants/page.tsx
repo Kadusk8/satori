@@ -9,10 +9,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus } from 'lucide-react'
 import { TenantsFilter } from '@/components/admin/tenants-filter'
-import { createServiceClient } from '@/lib/supabase/server'
+import { and, desc, eq, ilike, or } from 'drizzle-orm'
+import { withAdmin } from '@/lib/db'
+import { tenants as tenantsTable } from '@/lib/db/schema'
 
 const planVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   free: 'secondary',
@@ -50,32 +51,52 @@ interface TenantsPageProps {
 export default async function TenantsPage({ searchParams }: TenantsPageProps) {
   const { status, plan, q } = await searchParams
 
-  const supabase = createServiceClient()
+  const tenants = await withAdmin((tx) => {
+    const conds = []
+    if (status) conds.push(eq(tenantsTable.status, status))
+    if (plan) conds.push(eq(tenantsTable.plan, plan))
+    if (q) {
+      conds.push(
+        or(
+          ilike(tenantsTable.name, `%${q}%`),
+          ilike(tenantsTable.ownerName, `%${q}%`),
+          ilike(tenantsTable.ownerEmail, `%${q}%`)
+        )!
+      )
+    }
+    return tx
+      .select({
+        id: tenantsTable.id,
+        name: tenantsTable.name,
+        slug: tenantsTable.slug,
+        businessSegment: tenantsTable.businessSegment,
+        ownerName: tenantsTable.ownerName,
+        ownerEmail: tenantsTable.ownerEmail,
+        plan: tenantsTable.plan,
+        status: tenantsTable.status,
+        whatsappConnected: tenantsTable.whatsappConnected,
+        messagesUsedMonth: tenantsTable.messagesUsedMonth,
+        maxMessagesMonth: tenantsTable.maxMessagesMonth,
+        createdAt: tenantsTable.createdAt,
+      })
+      .from(tenantsTable)
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(desc(tenantsTable.createdAt))
+  })
 
-  let query = supabase
-    .from('tenants')
-    .select('id, name, slug, business_segment, owner_name, owner_email, plan, status, whatsapp_connected, messages_used_month, max_messages_month, created_at')
-    .order('created_at', { ascending: false })
-
-  if (status) query = query.eq('status', status)
-  if (plan) query = query.eq('plan', plan)
-  if (q) query = query.or(`name.ilike.%${q}%,owner_name.ilike.%${q}%,owner_email.ilike.%${q}%`)
-
-  const { data: tenants } = await query
-
-  const filtered = (tenants ?? []).map((t) => ({
+  const filtered = tenants.map((t) => ({
     id: t.id,
     name: t.name,
     slug: t.slug,
-    segment: t.business_segment ?? '',
-    ownerName: t.owner_name ?? '',
-    ownerEmail: t.owner_email ?? '',
+    segment: t.businessSegment ?? '',
+    ownerName: t.ownerName ?? '',
+    ownerEmail: t.ownerEmail ?? '',
     plan: t.plan,
     status: t.status,
-    whatsappConnected: t.whatsapp_connected ?? false,
-    messagesUsed: t.messages_used_month ?? 0,
-    maxMessages: t.max_messages_month ?? 1000,
-    createdAt: t.created_at,
+    whatsappConnected: t.whatsappConnected ?? false,
+    messagesUsed: t.messagesUsedMonth ?? 0,
+    maxMessages: t.maxMessagesMonth ?? 1000,
+    createdAt: (t.createdAt instanceof Date ? t.createdAt : new Date(t.createdAt)).toISOString(),
   }))
 
   return (

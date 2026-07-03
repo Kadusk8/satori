@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useWizardStore } from '@/lib/wizard/store'
-import type { ProductDraft, Step4Data } from '@/lib/wizard/types'
+import type { ProductDraft } from '@/lib/wizard/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'

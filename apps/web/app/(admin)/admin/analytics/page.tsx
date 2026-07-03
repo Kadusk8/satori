@@ -1,4 +1,6 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { desc } from 'drizzle-orm'
+import { withAdmin } from '@/lib/db'
+import { tenants as tenantsTable } from '@/lib/db/schema'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -26,14 +28,22 @@ const segmentLabel: Record<string, string> = {
 }
 
 export default async function AnalyticsPage() {
-  const supabase = createServiceClient()
-
-  const { data: tenants } = await supabase
-    .from('tenants')
-    .select('id, name, business_segment, plan, status, whatsapp_connected, messages_used_month, max_messages_month, created_at')
-    .order('messages_used_month', { ascending: false })
-
-  const all = tenants ?? []
+  const all = await withAdmin((tx) =>
+    tx
+      .select({
+        id: tenantsTable.id,
+        name: tenantsTable.name,
+        business_segment: tenantsTable.businessSegment,
+        plan: tenantsTable.plan,
+        status: tenantsTable.status,
+        whatsapp_connected: tenantsTable.whatsappConnected,
+        messages_used_month: tenantsTable.messagesUsedMonth,
+        max_messages_month: tenantsTable.maxMessagesMonth,
+        created_at: tenantsTable.createdAt,
+      })
+      .from(tenantsTable)
+      .orderBy(desc(tenantsTable.messagesUsedMonth))
+  )
 
   const totalMensagens = all.reduce((s, t) => s + (t.messages_used_month ?? 0), 0)
   const totalMax = all.reduce((s, t) => s + (t.max_messages_month ?? 0), 0)

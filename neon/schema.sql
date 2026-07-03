@@ -128,10 +128,39 @@ $$;
 
 
 -- ================================================================
+-- TABELA: auth_users — store global de identidade (substitui auth.users
+-- do Supabase). É onde ficam email + hash de senha. O UUID `id` é a
+-- identidade compartilhada: super_admins.id e users.id apontam pra cá.
+-- get_session_claims(id) resolve se o id é super admin ou usuário de tenant.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS auth_users (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email          TEXT        NOT NULL UNIQUE,
+  password_hash  TEXT,        -- bcrypt; NULL enquanto o convite/reset não define
+  email_verified TIMESTAMPTZ,
+  full_name      TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE auth_users IS 'Identidade global (email + hash de senha). Substitui auth.users do Supabase.';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_users_email ON auth_users (lower(email));
+
+CREATE TRIGGER trg_auth_users_updated_at
+  BEFORE UPDATE ON auth_users
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE auth_users ENABLE ROW LEVEL SECURITY;
+-- Só o backend (service_role) toca auth_users; login/reset rodam com bypass.
+CREATE POLICY "service_role_full_access" ON auth_users
+  FOR ALL USING (auth.role() = 'service_role');
+
+
+-- ================================================================
 -- TABELA: super_admins
 -- ================================================================
 CREATE TABLE IF NOT EXISTS super_admins (
-  id         UUID        PRIMARY KEY, -- antes: REFERENCES auth.users(id) — agora preenchido pelo seu auth
+  id         UUID        PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
   full_name  TEXT        NOT NULL,
   email      TEXT        NOT NULL UNIQUE,
   avatar_url TEXT,
@@ -250,7 +279,7 @@ CREATE POLICY "service_role_full_access" ON tenants
 -- TABELA: users (operadores do painel tenant)
 -- ================================================================
 CREATE TABLE IF NOT EXISTS users (
-  id         UUID    PRIMARY KEY, -- antes: REFERENCES auth.users(id) — agora preenchido pelo seu auth
+  id         UUID    PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
   tenant_id  UUID    NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   full_name  TEXT    NOT NULL,
   email      TEXT    NOT NULL,

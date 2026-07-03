@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { createClient } from '@/lib/supabase/client'
+import { saveAgent } from '@/lib/data/agents'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -40,7 +40,7 @@ const MODEL_OPTIONS = [
   ]},
 ]
 
-const AGENT_TYPES = [
+const AGENT_TYPES: { id: AIAgent['type']; label: string }[] = [
   { id: 'sdr', label: 'Vendedor/SDR' },
   { id: 'support', label: 'Suporte' },
   { id: 'scheduler', label: 'Agendamento' },
@@ -66,58 +66,20 @@ export function AgentForm({ agent, tenantId, onSave, onClose }: AgentFormProps) 
 
     setSaving(true)
     try {
-      const supabase = createClient()
-
-      if (agent) {
-        // Update
-        const { data, error } = await supabase
-          .from('ai_agents')
-          .update({
-            name: formData.name,
-            slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
-            model: formData.model,
-            type: formData.type,
-            is_active: formData.is_active,
-            is_default: formData.is_default,
-          })
-          .eq('id', agent.id)
-          .select()
-          .single()
-
-        if (error) {
-          toast.error('Erro ao atualizar: ' + error.message)
-          return
-        }
-
-        onSave(data as AIAgent)
-        toast.success('Agente atualizado!')
-      } else {
-        // Create
-        const { data, error } = await supabase
-          .from('ai_agents')
-          .insert({
-            tenant_id: tenantId,
-            name: formData.name,
-            slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
-            model: formData.model,
-            type: formData.type,
-            is_active: formData.is_active,
-            is_default: formData.is_default,
-            system_prompt: `Você é um assistente de IA especializado em ${formData.type === 'sdr' ? 'vendas' : formData.type === 'support' ? 'suporte' : 'agendamento'}. Seja prestativo e profissional.`,
-          })
-          .select()
-          .single()
-
-        if (error) {
-          toast.error('Erro ao criar: ' + error.message)
-          return
-        }
-
-        onSave(data as AIAgent)
-        toast.success('Agente criado!')
-      }
+      const saved = await saveAgent({
+        id: agent?.id,
+        tenantId,
+        name: formData.name,
+        slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
+        model: formData.model,
+        type: formData.type,
+        is_active: formData.is_active,
+        is_default: formData.is_default,
+      })
+      onSave(saved as AIAgent)
+      toast.success(agent ? 'Agente atualizado!' : 'Agente criado!')
     } catch (err) {
-      toast.error('Erro ao salvar agente')
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar agente')
     } finally {
       setSaving(false)
     }
@@ -160,7 +122,7 @@ export function AgentForm({ agent, tenantId, onSave, onClose }: AgentFormProps) 
               {AGENT_TYPES.map((type) => (
                 <button
                   key={type.id}
-                  onClick={() => setFormData({ ...formData, type: type.id as any })}
+                  onClick={() => setFormData({ ...formData, type: type.id })}
                   className={cn(
                     'text-sm p-2 rounded border transition-colors',
                     formData.type === type.id
