@@ -86,10 +86,51 @@ webhook (`{BACKEND_PUBLIC_URL}/webhook-evolution?ts=<segredo>`) automaticamente.
 - [ ] `neon/schema.sql` aplicado, `app.encryption_key` configurada
 - [ ] Login funciona (`/login`) e leva ao painel certo (`/admin` vs `/dashboard`)
 - [ ] `services/backend` respondendo em `GET /health`
+- [ ] `BACKEND_TOKEN` configurado (Vercel e Portainer, com o mesmo valor) — sem
+      ele, `POST /send-whatsapp` fica aberto pra qualquer um que descubra a URL
+      (o serviço loga um warning no startup se estiver ausente)
 - [ ] Onboarding de um tenant de teste completa sem erro (todos os 7 passos do wizard)
 - [ ] Mensagem de teste no WhatsApp do tenant → aparece em `/conversations` → IA responde
+- [ ] Mensagem de **áudio** de teste no WhatsApp → transcreve (Whisper) e a IA responde (esse caminho nunca foi testado ponta a ponta em nenhum ambiente real até agora)
+- [ ] Um agendamento de teste ~24h e ~1h no futuro recebe os lembretes nos horários certos (valida o fuso horário do tenant — ver nota abaixo)
 - [ ] Mover um card no kanban em duas abas abertas reflete ao vivo (Pusher configurado)
 - [ ] Email de reset de senha chega (Resend configurado)
+- [ ] CI (`.github/workflows/ci.yml`) verde: lint + typecheck + build do `apps/web`, typecheck + testes + build do `services/backend`
+
+## 6. O que este checklist NÃO cobre
+
+Provisionar as contas acima é necessário, mas não suficiente pra produção.
+Gaps conhecidos, na ordem em que valem a pena atacar:
+
+1. **Nunca testado contra serviços externos reais.** Todo o desenvolvimento e
+   smoke test rodou contra um mock do Evolution Go e um Postgres local — LLM
+   real (Anthropic/OpenAI/Gemini), Pusher, Resend e Cloudinary reais nunca
+   foram exercitados ponta a ponta.
+2. **Cobertura de teste automatizado ainda é fina.** `apps/web/e2e/` só tem
+   `auth.spec.ts` (smoke de redirecionamento); `services/backend` tem testes
+   unitários só pras funções puras mais sensíveis (`vitest run`) — nenhum dos
+   dois cobre o fluxo de IA/webhook/agendamento de ponta a ponta.
+3. **Sem rate limiting refinado.** `services/backend` tem um limite global
+   básico (`@fastify/rate-limit`, 100 req/min por IP) — não há limite
+   diferenciado por tenant nem proteção específica contra brute-force do
+   `webhook_secret` (`?ts=`) além disso.
+4. **Reverse proxy/HTTPS na frente do `services/backend` não está
+   automatizado** — o passo 3.3 acima é manual (Traefik/Nginx no próprio
+   Portainer, por sua conta).
+5. **Sem monitoramento/alerta** se o processo do `services/backend` cair — os
+   crons de lembrete/follow-up ficam parados silenciosamente até reiniciar.
+
+### Nota — bug de timezone nos lembretes (corrigido, mas fique de olho)
+
+O cálculo de "faltam 24h/1h" comparava a data/hora do agendamento (guardada
+como horário de parede na timezone do tenant, ex: `America/Sao_Paulo`) direto
+contra `new Date()`, sem converter — o que só dá certo se o processo do
+`services/backend` rodar com `TZ` igual à do tenant. Como containers Docker
+normalmente rodam em UTC, isso fazia os lembretes nunca caírem dentro da
+janela de tolerância. Corrigido em `src/shared/timezone.ts`
+(`zonedWallTimeToDate`), com teste em `src/shared/timezone.test.ts` — mas vale
+confirmar com um agendamento real de teste (item do checklist acima), já que
+nunca rodou contra um Postgres/Evolution Go de produção.
 
 ## Troubleshooting
 

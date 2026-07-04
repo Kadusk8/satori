@@ -4,6 +4,7 @@
 
 import { pool } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
+import { zonedWallTimeToDate } from '../shared/timezone.js'
 
 interface AppointmentRow {
   id: string
@@ -15,14 +16,15 @@ interface AppointmentRow {
   contact_custom_name: string | null
   contact_whatsapp_name: string | null
   evolution_instance_name: string | null
+  timezone: string | null
 }
 
-function formatTime(time: string): string {
+export function formatTime(time: string): string {
   const [h, m] = time.split(':')
   return `${h}h${m !== '00' ? m : ''}`
 }
 
-function formatDateBR(dateStr: string): string {
+export function formatDateBR(dateStr: string): string {
   const [year, month, day] = dateStr.split('-')
   return `${day}/${month}/${year}`
 }
@@ -31,7 +33,7 @@ function formatDateBR(dateStr: string): string {
 // concatenar ":00" direto (como fazia o código original) gera uma string
 // malformada tipo "...T18:06:00:00". Normaliza pra HH:MM antes de montar o
 // datetime — evita Invalid Date silencioso e o cálculo de janela quebrar.
-function toHM(time: string): string {
+export function toHM(time: string): string {
   return time.slice(0, 5)
 }
 
@@ -39,7 +41,7 @@ async function fetchCandidates(column: 'reminder_24h_sent' | 'reminder_1h_sent')
   const res = await pool.query<AppointmentRow>(
     `select a.id, a.tenant_id, a.date, a.start_time, a.title,
             c.whatsapp_number as contact_number, c.custom_name as contact_custom_name, c.whatsapp_name as contact_whatsapp_name,
-            t.evolution_instance_name
+            t.evolution_instance_name, t.timezone
      from appointments a
      join contacts c on c.id = a.contact_id
      join tenants t on t.id = a.tenant_id
@@ -55,7 +57,7 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
 
   for (const appt of await fetchCandidates('reminder_24h_sent')) {
     try {
-      const apptDateTime = new Date(`${appt.date}T${toHM(appt.start_time)}:00`)
+      const apptDateTime = zonedWallTimeToDate(appt.date, toHM(appt.start_time), appt.timezone ?? 'America/Sao_Paulo')
       const diffHours = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60)
       if (diffHours < 23 || diffHours > 25) continue
       if (!appt.evolution_instance_name) continue
@@ -79,7 +81,7 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
 
   for (const appt of await fetchCandidates('reminder_1h_sent')) {
     try {
-      const apptDateTime = new Date(`${appt.date}T${toHM(appt.start_time)}:00`)
+      const apptDateTime = zonedWallTimeToDate(appt.date, toHM(appt.start_time), appt.timezone ?? 'America/Sao_Paulo')
       const diffMinutes = (apptDateTime.getTime() - now.getTime()) / (1000 * 60)
       if (diffMinutes < 50 || diffMinutes > 70) continue
       if (!appt.evolution_instance_name) continue

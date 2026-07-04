@@ -31,7 +31,7 @@ interface BusinessHours {
   [day: string]: { enabled: boolean; start: string; end: string } | undefined
 }
 
-function isWithinBusinessHours(businessHours: BusinessHours, timezone: string): boolean {
+export function isWithinBusinessHours(businessHours: BusinessHours, timezone: string): boolean {
   const now = new Date()
   const localTime = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
@@ -54,7 +54,7 @@ function isWithinBusinessHours(businessHours: BusinessHours, timezone: string): 
   return currentTime >= dayHours.start && currentTime <= dayHours.end
 }
 
-function splitMessage(text: string, maxLength = 300): string[] {
+export function splitMessage(text: string, maxLength = 300): string[] {
   const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean)
   const parts: string[] = []
 
@@ -82,7 +82,7 @@ function splitMessage(text: string, maxLength = 300): string[] {
   return parts
 }
 
-function normalizeMessageSequence(msgs: LLMMessage[]): LLMMessage[] {
+export function normalizeMessageSequence(msgs: LLMMessage[]): LLMMessage[] {
   if (msgs.length === 0) return []
   const merged: LLMMessage[] = []
   for (const msg of msgs) {

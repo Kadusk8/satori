@@ -1,11 +1,25 @@
 import Fastify from 'fastify'
+import rateLimit from '@fastify/rate-limit'
 import cron from 'node-cron'
 import { webhookEvolutionRoutes } from './routes/webhook-evolution.js'
 import { sendWhatsappRoutes } from './routes/send-whatsapp.js'
 import { runScheduleReminder } from './cron/schedule-reminder.js'
 import { runProcessFollowUps } from './cron/process-follow-ups.js'
 
+if (!process.env.BACKEND_TOKEN) {
+  console.warn(
+    '[startup] BACKEND_TOKEN não configurado — POST /send-whatsapp vai aceitar chamadas sem autenticação. Configure BACKEND_TOKEN antes de expor este serviço publicamente.'
+  )
+}
+
 const app = Fastify({ logger: true })
+
+// Proteção básica contra brute-force do webhook_secret (?ts=) e abuso geral —
+// ambas as rotas são públicas (a Evolution Go não autentica webhooks de saída).
+await app.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
+})
 
 app.get('/health', async () => ({ ok: true }))
 

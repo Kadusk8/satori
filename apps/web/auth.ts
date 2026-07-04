@@ -1,10 +1,6 @@
 // Config do NextAuth v5 (substitui o Supabase Auth). Credentials provider +
 // sessão JWT (stateless, sem adapter de banco). Os claims de RLS são montados
 // no callback jwt via get_session_claims() e expostos na sessão.
-//
-// ADITIVO: este arquivo ainda não é importado por nenhuma página em produção.
-// A troca dos fluxos (login/layouts/middleware) é o cutover coordenado da
-// migração, travado no provisionamento do Neon (Fase 0).
 
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
