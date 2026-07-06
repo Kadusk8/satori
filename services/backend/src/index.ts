@@ -5,6 +5,7 @@ import { webhookEvolutionRoutes } from './routes/webhook-evolution.js'
 import { sendWhatsappRoutes } from './routes/send-whatsapp.js'
 import { runScheduleReminder } from './cron/schedule-reminder.js'
 import { runProcessFollowUps } from './cron/process-follow-ups.js'
+import { runResetMonthlyMessageCounts } from './cron/reset-monthly-counts.js'
 
 if (!process.env.BACKEND_TOKEN) {
   console.warn(
@@ -34,6 +35,13 @@ cron.schedule('*/15 * * * *', () => {
 // Follow-ups pendentes: a cada 60 minutos
 cron.schedule('0 * * * *', () => {
   runProcessFollowUps().catch((err) => app.log.error({ err }, '[cron] process-follow-ups falhou'))
+})
+
+// Reset do contador mensal de mensagens: meia-noite do dia 1 de cada mês
+// (equivalente ao job pg_cron 'reset-monthly-message-counts', comentado em
+// neon/schema.sql por depender de pg_net/pg_cron indisponíveis no Neon).
+cron.schedule('0 0 1 * *', () => {
+  runResetMonthlyMessageCounts().catch((err) => app.log.error({ err }, '[cron] reset-monthly-counts falhou'))
 })
 
 const port = Number(process.env.PORT ?? 3001)

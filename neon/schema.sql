@@ -44,17 +44,18 @@
 --    process-follow-ups, schedule-reminder e process-message via
 --    HTTP direto do Postgres) foram OMITIDAS. Essas chamadas precisam
 --    sair do banco e virar responsabilidade da aplicação:
---      - process-message: dispare direto no seu endpoint que recebe o
---        webhook da Evolution, sem passar pelo Postgres.
---      - schedule-reminder / process-follow-ups: viram Vercel Cron
---        Jobs (ou GitHub Actions agendado) chamando o endpoint HTTP
---        equivalente a cada 15min/60min, em vez de cron.schedule +
---        net.http_post.
+--      - process-message: chamado direto pelo webhook, sem passar pelo
+--        Postgres (services/backend/src/core/webhook.ts).
+--      - schedule-reminder / process-follow-ups: viraram node-cron
+--        rodando dentro do próprio services/backend (sempre-ligado,
+--        sem timeout de função serverless) — não Vercel Cron Jobs.
 --
--- 5. pg_cron: o único job 100% portável (reset_monthly_message_counts,
---    que não faz HTTP, só chama uma função SQL) foi mantido. Confirme
---    que pg_cron está habilitado no seu projeto Neon antes de rodar
---    essa parte (procure "Postgres extensions" nas configs do projeto).
+-- 5. pg_cron: NÃO é usado, nem pro job que seria 100% portável
+--    (reset_monthly_message_counts) — pra não depender de uma extensão
+--    que precisa ser habilitada manualmente por projeto Neon, esse job
+--    também virou node-cron em services/backend (mesmo padrão dos dois
+--    acima, roda todo dia 1 à meia-noite). A função SQL abaixo continua
+--    existindo pra manter a lógica num só lugar; quem agenda é o Node.
 --
 -- 6. app.encryption_key: os helpers de criptografia (pgcrypto) exigem
 --    isso configurado na sessão. No Neon, defina via:
@@ -997,7 +998,8 @@ BEGIN
 END;
 $$;
 
--- 10. Reset mensal do contador de mensagens (chamado via pg_cron, se disponível)
+-- 10. Reset mensal do contador de mensagens (agendado via node-cron em
+--     services/backend/src/cron/reset-monthly-counts.ts, não pg_cron)
 CREATE OR REPLACE FUNCTION reset_monthly_message_counts()
 RETURNS VOID LANGUAGE sql SECURITY DEFINER AS $$
   UPDATE tenants SET messages_used_month = 0 WHERE active = true;
@@ -1149,33 +1151,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE O
 
 
 -- ================================================================
--- PG_CRON — apenas o job 100% portável (sem pg_net/HTTP).
--- Descomente se sua extensão pg_cron estiver habilitada no Neon.
--- Os outros 3 jobs do Supabase (send-appointment-reminders,
--- process-follow-ups, invoke_process_message) dependiam de pg_net e
--- precisam virar Vercel Cron Jobs / chamadas HTTP feitas pela
--- aplicação — não têm equivalente direto em SQL aqui.
+-- PG_CRON — não usado. Os 3 jobs que existiam no Supabase (lembretes,
+-- follow-ups, reset mensal) rodam todos como node-cron dentro do
+-- services/backend (sempre-ligado), não como pg_cron/pg_net — ver
+-- services/backend/src/cron/{schedule-reminder,process-follow-ups,
+-- reset-monthly-counts}.ts e o agendamento em services/backend/src/index.ts.
 -- ================================================================
--- SELECT cron.schedule(
---   'reset-monthly-message-counts',
---   '0 0 1 * *',
---   'SELECT reset_monthly_message_counts()'
--- );
 
 
 -- ================================================================
--- FIM. Próximos passos manuais (fora deste SQL):
--- 1. ALTER DATABASE <db> SET app.encryption_key = '<sua-chave>';
--- 2. Crie um usuário de conexão pro backend e conceda service_role:
---      CREATE USER app_backend WITH PASSWORD '...';
---      GRANT service_role TO app_backend;
--- 3. Decida e implemente o novo auth (Auth.js/Clerk/custom) e ligue
---    get_session_claims() no fluxo de login.
--- 4. Recrie os 3 jobs de cron que dependiam de pg_net como Vercel
---    Cron Jobs / rotas HTTP chamadas externamente.
--- 5. Reescreva as 9 edge functions Deno como Route Handlers Next.js
---    (ou outra plataforma serverless) — Neon não tem compute.
--- 6. Substitua supabase.storage (bucket 'media') por Cloudinary/S3/MinIO.
--- 7. Substitua supabase.channel()/postgres_changes (Realtime) por
---    polling, Pusher/Ably, ou LISTEN/NOTIFY + WebSocket próprio.
+-- FIM. Próximos passos manuais (fora deste SQL), na ordem:
+-- 1. ALTER DATABASE <db> SET app.encryption_key = '<sua-chave>' — deve
+--    ser IDÊNTICA ao ENCRYPTION_KEY configurado em apps/web (Vercel) e
+--    services/backend (.env).
+-- 2. Crie (ou reaproveite) um usuário de conexão e conceda os DOIS
+--    roles — apps/web e services/backend alternam entre eles por
+--    transação/conexão, então o mesmo usuário precisa dos dois:
+--      GRANT authenticated, service_role TO SEU_USUARIO_DE_CONEXAO;
+--    Sem isso, todo `withClaims`/`withAdmin` (apps/web/lib/db/index.ts)
+--    e a conexão do services/backend falham com "permission denied to
+--    set role" assim que a aplicação for usada de verdade.
 -- ================================================================

@@ -11,7 +11,7 @@ pro mapeamento de onde cada peça antiga foi parar.
 - **`apps/web`** (Next.js 15, App Router) — painéis `/admin` (super admin) e `/dashboard` (tenant/operador). Deploy: Vercel.
 - **Neon** (Postgres puro) — banco único, com RLS via GUC (`request.jwt.claims`) emulando o comportamento do Supabase. Schema em [`neon/schema.sql`](../neon/schema.sql).
 - **Auth.js (NextAuth v5)** — autenticação por credenciais (email/senha, bcrypt), sessão JWT com claims `{sub, tenant_id, user_role, is_super_admin}` embutidos via `get_session_claims()` (função SQL).
-- **`services/backend`** (Node/Fastify) — serviço sempre-ligado que recebe o webhook do WhatsApp, roda a IA (function calling) e os crons de lembrete/follow-up. Deploy: Portainer/Docker (fora do Vercel, que tem timeout de função serverless).
+- **`services/backend`** (Node/Fastify) — serviço sempre-ligado que recebe o webhook do WhatsApp, roda a IA (function calling) e os crons de lembrete/follow-up/reset mensal de mensagens. Deploy: Portainer/Docker (fora do Vercel, que tem timeout de função serverless).
 - **Pusher** — realtime (kanban, chat, agenda, sidebar), com fallback gracioso (polling ou refresh manual) quando não configurado.
 - **Resend** — email transacional (reset de senha, convite de operador), via token HMAC assinado (`apps/web/lib/auth/tokens.ts`) — sem tabela de tokens, sem dependência de Auth provider externo.
 - **Evolution Go** — gateway de WhatsApp. Cada tenant conecta sua **própria instância externa** (bring-your-own-instance): o super admin cadastra URL, token e nome da instância no onboarding; a plataforma não cria nem hospeda instâncias.
