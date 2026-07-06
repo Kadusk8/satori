@@ -1,7 +1,7 @@
 'use server'
 
 import { randomBytes } from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql, type SQL } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
 import { tenants, users, products, aiAgents, onboardingLogs } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
@@ -15,6 +15,19 @@ import type { OnboardingPayload } from '@/types/onboarding'
 //   trg_create_default_kanban_stages (AFTER INSERT ON tenants) já cria os 6
 //   estágios padrão automaticamente.
 // - auth.admin.createUser/updateUserById → upsertAuthUser (auth_users + bcrypt).
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
+
+// evolution_api_key/openai_api_key/gemini_api_key são colunas TEXT que o
+// schema espera criptografadas (pgp_sym_encrypt via encrypt_evolution_key/
+// encrypt_llm_key — get_decrypted_evolution_key/get_tenant_llm_keys do lado
+// do services/backend assumem esse formato). Sem ENCRYPTION_KEY configurada,
+// grava em texto puro mesmo (mesmo fallback das funções SQL).
+function encryptedColumn(raw: string | null | undefined, fn: 'encrypt_evolution_key' | 'encrypt_llm_key'): SQL | string | null {
+  if (!raw) return null
+  if (!ENCRYPTION_KEY) return raw
+  return fn === 'encrypt_evolution_key' ? sql`encrypt_evolution_key(${raw}, ${ENCRYPTION_KEY})` : sql`encrypt_llm_key(${raw}, ${ENCRYPTION_KEY})`
+}
 
 function slugify(text: string): string {
   return text
@@ -143,14 +156,14 @@ export async function onboardTenant(
     state: step1.state,
     website: step1.website,
     evolutionApiUrl: step2.evolutionApiUrl.trim().replace(/\/$/, ''),
-    evolutionApiKey: step2.evolutionApiKey,
+    evolutionApiKey: encryptedColumn(step2.evolutionApiKey, 'encrypt_evolution_key'),
     evolutionInstanceName: instanceName,
     whatsappNumber: step2.whatsappNumber,
     businessHours: step5.businessHours,
     timezone: step5.timezone,
     appointmentDurationMinutes: step5.appointmentDurationMinutes,
-    openaiApiKey: step3.llmProvider === 'openai' ? step3.llmApiKey : null,
-    geminiApiKey: step3.llmProvider === 'gemini' ? step3.llmApiKey : null,
+    openaiApiKey: encryptedColumn(step3.llmProvider === 'openai' ? step3.llmApiKey : null, 'encrypt_llm_key'),
+    geminiApiKey: encryptedColumn(step3.llmProvider === 'gemini' ? step3.llmApiKey : null, 'encrypt_llm_key'),
   }
 
   // ── Tenant (cria ou atualiza, se uma tentativa anterior já criou o slug) ──
