@@ -53,17 +53,32 @@ export interface Step2Data {
   instanceName: string
 }
 
-export type LLMProvider = 'openai' | 'gemini'
+export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter'
 
 export const LLM_MODELS: Record<LLMProvider, Array<{ value: string; label: string }>> = {
+  anthropic: [
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (recomendado)' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (mais rápido)' },
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (mais capaz)' },
+  ],
   openai: [
     { value: 'gpt-4o', label: 'GPT-4o (recomendado)' },
     { value: 'gpt-4o-mini', label: 'GPT-4o Mini (mais barato)' },
     { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
   ],
   gemini: [
-    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro (recomendado)' },
-    { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (mais rápido)' },
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (recomendado)' },
+    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+  ],
+  // OpenRouter dá acesso a centenas de modelos por um único endpoint — em vez
+  // de uma lista fixa, a UI deixa digitar o slug do modelo livremente (ex:
+  // "anthropic/claude-3.7-sonnet"). Estes são só sugestões de atalho.
+  openrouter: [
+    { value: 'anthropic/claude-3.7-sonnet', label: 'Claude 3.7 Sonnet (via OpenRouter)' },
+    { value: 'openai/gpt-4o', label: 'GPT-4o (via OpenRouter)' },
+    { value: 'google/gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash (via OpenRouter)' },
+    { value: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (via OpenRouter)' },
   ],
 }
 

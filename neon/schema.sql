@@ -447,6 +447,14 @@ CREATE TABLE IF NOT EXISTS ai_agents (
   voice_id                TEXT DEFAULT NULL,
   audio_response_enabled  BOOLEAN DEFAULT false,
 
+  -- LLM individual por agente (BYOK por agente, não mais só por tenant) —
+  -- cada agente escolhe seu próprio provedor + chave. Criptografada com
+  -- pgp_sym_encrypt via encrypt_llm_key(); ler via get_agent_llm_key().
+  -- Se llm_api_key for NULL, o backend cai pra chave do tenant (BYOK antigo)
+  -- e depois pra variável de ambiente global, nessa ordem.
+  llm_provider TEXT NOT NULL DEFAULT 'anthropic' CHECK (llm_provider IN ('anthropic','openai','gemini','openrouter')),
+  llm_api_key  TEXT,
+
   total_conversations       INTEGER NOT NULL DEFAULT 0,
   total_escalations         INTEGER NOT NULL DEFAULT 0,
   avg_response_time_seconds INTEGER,
@@ -1083,15 +1091,36 @@ BEGIN
 END;
 $$;
 
+-- BYOK por agente (ai_agents.llm_api_key) — mesma criptografia de
+-- get_tenant_llm_keys, mas escopada a um único agente/provedor.
+CREATE OR REPLACE FUNCTION public.get_agent_llm_key(p_agent_id UUID, p_enc_key TEXT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+DECLARE
+  v_key TEXT; v_encrypted TEXT;
+BEGIN
+  v_key := COALESCE(p_enc_key, current_setting('app.encryption_key', true));
+  SELECT llm_api_key INTO v_encrypted FROM public.ai_agents WHERE id = p_agent_id AND llm_api_key IS NOT NULL;
+  IF v_encrypted IS NULL THEN RETURN NULL; END IF;
+  IF v_key IS NULL OR v_key = '' THEN RETURN v_encrypted; END IF;
+  BEGIN
+    RETURN pgp_sym_decrypt(decode(v_encrypted, 'base64'), v_key)::TEXT;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN v_encrypted;
+  END;
+END;
+$$;
+
 GRANT EXECUTE ON FUNCTION public.get_decrypted_evolution_key(UUID, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.encrypt_evolution_key(TEXT, TEXT)      TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_tenant_llm_keys(UUID, TEXT)        TO service_role;
 GRANT EXECUTE ON FUNCTION public.encrypt_llm_key(TEXT, TEXT)            TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_agent_llm_key(UUID, TEXT)          TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.get_decrypted_evolution_key(UUID, TEXT) FROM authenticated, anon, PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.encrypt_evolution_key(TEXT, TEXT)      FROM authenticated, anon, PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.get_tenant_llm_keys(UUID, TEXT)        FROM authenticated, anon, PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.encrypt_llm_key(TEXT, TEXT)            FROM authenticated, anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.get_agent_llm_key(UUID, TEXT)          FROM authenticated, anon, PUBLIC;
 
 
 -- ================================================================

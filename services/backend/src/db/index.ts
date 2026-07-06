@@ -76,6 +76,17 @@ export async function getTenantLlmKeys(
   return result.rows[0] ?? null
 }
 
+export async function getAgentLlmKey(
+  agentId: string,
+  encKey: string | null
+): Promise<string | null> {
+  const result = await pool.query(
+    'select get_agent_llm_key($1, $2) as key',
+    [agentId, encKey]
+  )
+  return result.rows[0]?.key ?? null
+}
+
 export async function getDecryptedEvolutionKey(
   tenantId: string,
   encKey: string | null

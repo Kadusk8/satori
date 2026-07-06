@@ -27,7 +27,7 @@ const schema = z.object({
   greetingMessage: z.string().min(5, 'Mensagem de boas-vindas obrigatória'),
   outOfHoursMessage: z.string().min(5, 'Mensagem fora do horário obrigatória'),
   customRules: z.string().optional().default(''),
-  llmProvider: z.enum(['openai', 'gemini']),
+  llmProvider: z.enum(['anthropic', 'openai', 'gemini', 'openrouter']),
   llmModel: z.string().min(1, 'Selecione o modelo'),
   llmApiKey: z.string().min(10, 'API key obrigatória'),
 })
@@ -63,8 +63,8 @@ export function StepAiAgentConfig() {
         step3.outOfHoursMessage ??
         `Olá! No momento estamos fora do horário de atendimento. Deixe sua mensagem que responderemos assim que possível!`,
       customRules: step3.customRules ?? '',
-      llmProvider: step3.llmProvider ?? 'openai',
-      llmModel: step3.llmModel ?? 'gpt-4o',
+      llmProvider: step3.llmProvider ?? 'anthropic',
+      llmModel: step3.llmModel ?? 'claude-sonnet-4-6',
       llmApiKey: step3.llmApiKey ?? '',
     },
   })
@@ -152,8 +152,10 @@ export function StepAiAgentConfig() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="anthropic">Claude (Anthropic)</SelectItem>
               <SelectItem value="openai">ChatGPT (OpenAI)</SelectItem>
               <SelectItem value="gemini">Gemini (Google)</SelectItem>
+              <SelectItem value="openrouter">OpenRouter (multi-modelo)</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -163,21 +165,33 @@ export function StepAiAgentConfig() {
           <label className="text-sm font-medium">
             Modelo <span className="text-destructive">*</span>
           </label>
-          <Select
-            value={safeModel}
-            onValueChange={(v) => v && setValue('llmModel', v)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableModels.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {llmProvider === 'openrouter' ? (
+            <Input
+              placeholder="anthropic/claude-3.7-sonnet"
+              {...register('llmModel')}
+            />
+          ) : (
+            <Select
+              value={safeModel}
+              onValueChange={(v) => v && setValue('llmModel', v)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableModels.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {llmProvider === 'openrouter' && (
+            <p className="text-xs text-muted-foreground">
+              Digite o slug do modelo no formato provedor/modelo — veja a lista completa em openrouter.ai/models
+            </p>
+          )}
           {errors.llmModel && (
             <p className="text-xs text-destructive">{errors.llmModel.message}</p>
           )}
@@ -186,13 +200,22 @@ export function StepAiAgentConfig() {
         {/* API Key */}
         <div className="sm:col-span-2 space-y-1.5">
           <label className="text-sm font-medium">
-            API Key {llmProvider === 'openai' ? '(OpenAI)' : '(Google AI Studio)'}{' '}
-            <span className="text-destructive">*</span>
+            API Key ({
+              llmProvider === 'openai' ? 'OpenAI'
+              : llmProvider === 'gemini' ? 'Google AI Studio'
+              : llmProvider === 'openrouter' ? 'OpenRouter'
+              : 'Anthropic'
+            }) <span className="text-destructive">*</span>
           </label>
           <div className="relative">
             <Input
               type={showKey ? 'text' : 'password'}
-              placeholder={llmProvider === 'openai' ? 'sk-...' : 'AIza...'}
+              placeholder={
+                llmProvider === 'openai' ? 'sk-...'
+                : llmProvider === 'gemini' ? 'AIza...'
+                : llmProvider === 'openrouter' ? 'sk-or-...'
+                : 'sk-ant-...'
+              }
               className="pr-10"
               {...register('llmApiKey')}
             />
@@ -210,7 +233,14 @@ export function StepAiAgentConfig() {
           <p className="text-xs text-muted-foreground">
             {llmProvider === 'openai'
               ? 'Obtenha em platform.openai.com → API Keys'
-              : 'Obtenha em aistudio.google.com → Get API Key'}
+              : llmProvider === 'gemini'
+              ? 'Obtenha em aistudio.google.com → Get API Key'
+              : llmProvider === 'openrouter'
+              ? 'Obtenha em openrouter.ai → Keys'
+              : 'Obtenha em console.anthropic.com → API Keys'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Essa chave e o modelo ficam vinculados a este agente — cada agente do tenant pode usar um provedor diferente.
           </p>
         </div>
 

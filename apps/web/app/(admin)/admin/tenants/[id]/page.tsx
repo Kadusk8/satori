@@ -64,6 +64,7 @@ interface AdminAgentRow {
   greeting_message: string | null; out_of_hours_message: string | null
   personality: string | null; is_active: boolean; model: string | null
   voice_id: string | null; audio_response_enabled: boolean | null
+  llm_provider: string | null; llm_api_key: string | null
 }
 
 export default async function TenantDetailPage({ params }: TenantPageProps) {
@@ -73,7 +74,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
   const { tenant, agent } = await withAdmin(async (tx) => {
     const tRes = await tx.execute(sql`select * from tenants where id = ${id} limit 1`)
     const aRes = await tx.execute(
-      sql`select id, name, system_prompt, greeting_message, out_of_hours_message, personality, is_active, model, voice_id, audio_response_enabled
+      sql`select id, name, system_prompt, greeting_message, out_of_hours_message, personality, is_active, model, voice_id, audio_response_enabled, llm_provider, llm_api_key
           from ai_agents where tenant_id = ${id} and slug = 'sdr' limit 1`
     )
     return {
@@ -218,33 +219,23 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
                 <LlmEditor
                   agentId={agent.id}
                   tenantId={id}
-                  currentModel={agent.model ?? 'gpt-4o'}
-                  hasOpenaiKey={!!tenant.openai_api_key}
-                  hasGeminiKey={!!tenant.gemini_api_key}
-                  hasAnthropicKey={!!tenant.anthropic_api_key}
+                  currentModel={agent.model ?? 'claude-sonnet-4-6'}
+                  currentProvider={agent.llm_provider ?? 'anthropic'}
+                  hasKey={!!agent.llm_api_key}
                 />
               )}
             </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <DetailRow label="Modelo atual" value={agent?.model ?? '—'} />
+            <DetailRow label="Provedor" value={agent?.llm_provider ?? '—'} />
             <DetailRow
-              label="OpenAI key"
-              value={tenant.openai_api_key ? '✓ configurada' : 'não configurada'}
-              valueClass={tenant.openai_api_key ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
+              label="Chave deste agente"
+              value={agent?.llm_api_key ? '✓ configurada' : 'usa fallback do tenant/global'}
+              valueClass={agent?.llm_api_key ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
             />
             <DetailRow
-              label="Gemini key"
-              value={tenant.gemini_api_key ? '✓ configurada' : 'não configurada'}
-              valueClass={tenant.gemini_api_key ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
-            />
-            <DetailRow
-              label="Anthropic key"
-              value={tenant.anthropic_api_key ? '✓ configurada' : 'não configurada'}
-              valueClass={tenant.anthropic_api_key ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
-            />
-            <DetailRow
-              label="ElevenLabs key"
+              label="ElevenLabs key (tenant)"
               value={tenant.elevenlabs_api_key ? '✓ configurada' : 'não configurada'}
               valueClass={tenant.elevenlabs_api_key ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
             />

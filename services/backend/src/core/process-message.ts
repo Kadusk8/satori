@@ -7,11 +7,11 @@
 // mesmo processo Node, é uma chamada de função direta — ver routes/webhook.ts.
 
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { pool, getTenantLlmKeys } from '../db/index.js'
+import { pool, getTenantLlmKeys, getAgentLlmKey } from '../db/index.js'
 import { conversations, kanbanStages, messages } from '../db/schema.js'
 import { db } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
-import { callLLM, type LLMMessage, type LLMContentBlock, type LLMTool } from '../shared/llm-client.js'
+import { callLLM, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
 import { AI_TOOLS } from '../shared/claude-tools.js'
 import { transcribeAudio } from '../shared/whisper-client.js'
 import { textToSpeech, audioToBase64 } from '../shared/elevenlabs-client.js'
@@ -131,6 +131,7 @@ interface AgentRow {
   follow_up_max_attempts: number
   voice_id: string | null
   audio_response_enabled: boolean | null
+  llm_provider: LLMProvider
 }
 
 interface MessageRow {
@@ -165,7 +166,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
     `select id, model, system_prompt, max_tokens, temperature, is_default, is_active,
             out_of_hours_message, can_search_products, can_book_appointments, can_send_images,
             can_escalate, follow_up_enabled, follow_up_delay_hours, follow_up_max_attempts,
-            voice_id, audio_response_enabled
+            voice_id, audio_response_enabled, llm_provider
      from ai_agents where tenant_id = $1`,
     [conv.tenant_id]
   )
@@ -186,6 +187,16 @@ export async function processMessage(conversationId: string): Promise<{ success:
   const tenantAnthropicKey = llmKeys?.anthropic_api_key ?? conv.anthropic_api_key ?? null
   const tenantGeminiKey = llmKeys?.gemini_api_key ?? conv.gemini_api_key ?? null
   const tenantElevenlabsKey = llmKeys?.elevenlabs_api_key ?? conv.elevenlabs_api_key ?? null
+
+  // Chave individual do agente (BYOK por agente) tem prioridade; se não
+  // configurada, cai pra chave do tenant no mesmo provedor; se nenhuma das
+  // duas existir, callLLM ainda tenta a variável de ambiente global.
+  const agentLlmKey = await getAgentLlmKey(agent.id, ENCRYPTION_KEY)
+  const llmProvider = agent.llm_provider ?? 'anthropic'
+  const resolvedAnthropicKey = (llmProvider === 'anthropic' ? agentLlmKey : null) ?? tenantAnthropicKey
+  const resolvedOpenaiKey = (llmProvider === 'openai' ? agentLlmKey : null) ?? tenantOpenaiKey
+  const resolvedGeminiKey = (llmProvider === 'gemini' ? agentLlmKey : null) ?? tenantGeminiKey
+  const resolvedOpenrouterKey = llmProvider === 'openrouter' ? agentLlmKey : null
 
   // Move card para 'ia_atendendo'
   {
@@ -397,9 +408,11 @@ ${agent.system_prompt}
       tools: allowedTools as LLMTool[],
       maxTokens: agent.max_tokens ?? 1024,
       temperature: Number(agent.temperature ?? 0.7),
-      anthropicApiKey: tenantAnthropicKey ?? undefined,
-      openaiApiKey: tenantOpenaiKey ?? undefined,
-      geminiApiKey: tenantGeminiKey ?? undefined,
+      provider: llmProvider,
+      anthropicApiKey: resolvedAnthropicKey ?? undefined,
+      openaiApiKey: resolvedOpenaiKey ?? undefined,
+      geminiApiKey: resolvedGeminiKey ?? undefined,
+      openrouterApiKey: resolvedOpenrouterKey ?? undefined,
     })
 
     if (response.stopReason !== 'tool_use') {

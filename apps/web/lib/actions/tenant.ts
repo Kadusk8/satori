@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
 import { tenants, aiAgents } from '@/lib/db/schema'
+import { encryptedColumn } from '@/lib/db/encryption'
 
 export async function updateTenantStatus(tenantId: string, status: 'active' | 'suspended' | 'cancelled') {
   await withAdmin((tx) => tx.update(tenants).set({ status }).where(eq(tenants.id, tenantId)))
@@ -71,28 +72,24 @@ export async function updateAgent(agentId: string, data: {
 }
 
 export async function updateTenantLLM(tenantId: string, data: {
-  llmProvider: 'openai' | 'gemini' | 'anthropic'
+  llmProvider: 'openai' | 'gemini' | 'anthropic' | 'openrouter'
   llmModel: string
   llmApiKey: string
   agentId: string
 }) {
-  await withAdmin(async (tx) => {
-    // Salva a chave no campo do provedor e zera os outros.
-    await tx
-      .update(tenants)
+  // A chave e o provedor ficam no próprio agente (BYOK por agente) — cada
+  // agente do tenant pode usar um provedor/chave diferente.
+  await withAdmin((tx) =>
+    tx
+      .update(aiAgents)
       .set({
-        openaiApiKey: data.llmProvider === 'openai' ? data.llmApiKey : null,
-        geminiApiKey: data.llmProvider === 'gemini' ? data.llmApiKey : null,
-        anthropicApiKey: data.llmProvider === 'anthropic' ? data.llmApiKey : null,
+        model: data.llmModel,
+        llmProvider: data.llmProvider,
+        llmApiKey: encryptedColumn(data.llmApiKey, 'encrypt_llm_key'),
         updatedAt: new Date(),
       })
-      .where(eq(tenants.id, tenantId))
-
-    await tx
-      .update(aiAgents)
-      .set({ model: data.llmModel, updatedAt: new Date() })
       .where(eq(aiAgents.id, data.agentId))
-  })
+  )
   revalidatePath(`/admin/tenants/${tenantId}`)
 }
 

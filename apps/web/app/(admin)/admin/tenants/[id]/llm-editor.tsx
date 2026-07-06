@@ -23,6 +23,11 @@ import { updateTenantLLM } from '@/lib/actions/tenant'
 import { Pencil, Eye, EyeOff } from 'lucide-react'
 
 const LLM_MODELS: Record<string, Array<{ value: string; label: string }>> = {
+  anthropic: [
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (recomendado)' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (mais rápido)' },
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (mais capaz)' },
+  ],
   openai: [
     { value: 'gpt-4o', label: 'GPT-4o (recomendado)' },
     { value: 'gpt-4o-mini', label: 'GPT-4o Mini (mais barato)' },
@@ -34,48 +39,38 @@ const LLM_MODELS: Record<string, Array<{ value: string; label: string }>> = {
     { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
     { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
   ],
-  anthropic: [
-    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (recomendado)' },
-    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (mais rápido)' },
-    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 (mais capaz)' },
+  openrouter: [
+    { value: 'anthropic/claude-3.7-sonnet', label: 'Claude 3.7 Sonnet (via OpenRouter)' },
+    { value: 'openai/gpt-4o', label: 'GPT-4o (via OpenRouter)' },
+    { value: 'google/gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash (via OpenRouter)' },
   ],
-}
-
-function detectProvider(model: string): string {
-  if (model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-')) return 'openai'
-  if (model.startsWith('gemini-')) return 'gemini'
-  if (model.startsWith('claude-')) return 'anthropic'
-  return 'openai'
 }
 
 interface LlmEditorProps {
   agentId: string
   tenantId: string
   currentModel: string
-  hasOpenaiKey: boolean
-  hasGeminiKey: boolean
-  hasAnthropicKey: boolean
+  currentProvider: string
+  hasKey: boolean
 }
 
 export function LlmEditor({
   agentId,
   tenantId,
   currentModel,
-  hasOpenaiKey,
-  hasGeminiKey,
-  hasAnthropicKey,
+  currentProvider,
+  hasKey,
 }: LlmEditorProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [showKey, setShowKey] = useState(false)
 
-  const initialProvider = detectProvider(currentModel)
-  const [provider, setProvider] = useState(initialProvider)
+  const [provider, setProvider] = useState(currentProvider || 'anthropic')
   const [model, setModel] = useState(currentModel)
   const [apiKey, setApiKey] = useState('')
 
-  const availableModels = LLM_MODELS[provider] ?? LLM_MODELS.openai
+  const availableModels = LLM_MODELS[provider] ?? LLM_MODELS.anthropic
 
   function handleProviderChange(v: string | null) {
     if (!v) return
@@ -92,7 +87,7 @@ export function LlmEditor({
     setLoading(true)
     try {
       await updateTenantLLM(tenantId, {
-        llmProvider: provider as 'openai' | 'gemini' | 'anthropic',
+        llmProvider: provider as 'openai' | 'gemini' | 'anthropic' | 'openrouter',
         llmModel: model,
         llmApiKey: apiKey.trim(),
         agentId,
@@ -112,6 +107,8 @@ export function LlmEditor({
     ? 'sk-...'
     : provider === 'gemini'
     ? 'AIza...'
+    : provider === 'openrouter'
+    ? 'sk-or-...'
     : 'sk-ant-...'
 
   return (
@@ -134,27 +131,37 @@ export function LlmEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="anthropic">Claude (Anthropic)</SelectItem>
                   <SelectItem value="openai">ChatGPT (OpenAI)</SelectItem>
                   <SelectItem value="gemini">Gemini (Google)</SelectItem>
-                  <SelectItem value="anthropic">Claude (Anthropic)</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter (multi-modelo)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Modelo</label>
-              <Select value={model} onValueChange={(v) => v && setModel(v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableModels.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {provider === 'openrouter' ? (
+                <Input
+                  placeholder="anthropic/claude-3.7-sonnet"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="font-mono text-xs"
+                />
+              ) : (
+                <Select value={model} onValueChange={(v) => v && setModel(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableModels.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -176,15 +183,15 @@ export function LlmEditor({
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
-                A chave será salva e usada pelo agente deste tenant. Deixar em branco mantém a chave atual.
+                A chave e o modelo ficam vinculados só a este agente. Deixar em branco mantém a chave atual.
               </p>
             </div>
 
             <div className="rounded-md bg-muted p-3 text-xs space-y-1">
-              <p className="font-medium">Chaves configuradas atualmente:</p>
-              <p>OpenAI: {hasOpenaiKey ? '✓ configurada' : '— não configurada'}</p>
-              <p>Gemini: {hasGeminiKey ? '✓ configurada' : '— não configurada'}</p>
-              <p>Anthropic: {hasAnthropicKey ? '✓ configurada' : '— não configurada'}</p>
+              <p>
+                Chave deste agente:{' '}
+                {hasKey ? <span className="text-emerald-600 font-medium">✓ configurada</span> : '— não configurada (usa fallback do tenant/global)'}
+              </p>
             </div>
           </div>
           <DialogFooter>

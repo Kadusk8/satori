@@ -4,8 +4,8 @@
 // Antes delegava o envio pra send-whatsapp via fetch interno; aqui chama a
 // função diretamente (mesmo processo).
 
-import { getTenantLlmKeys, pool } from '../db/index.js'
-import { callLLM } from '../shared/llm-client.js'
+import { getTenantLlmKeys, getAgentLlmKey, pool } from '../db/index.js'
+import { callLLM, type LLMProvider } from '../shared/llm-client.js'
 import { sendWhatsAppMessage } from '../core/send-whatsapp.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
@@ -26,13 +26,14 @@ interface FollowUpRow {
   agent_follow_up_delay_hours: number
   agent_follow_up_max_attempts: number
   agent_follow_up_message_template: string | null
+  agent_llm_provider: LLMProvider
   tenant_name: string
   tenant_anthropic_key: string | null
   tenant_openai_key: string | null
   tenant_gemini_key: string | null
 }
 
-async function generateFollowUpMessage(row: FollowUpRow, llmKeys: { anthropic_api_key: string | null; openai_api_key: string | null; gemini_api_key: string | null }): Promise<string> {
+async function generateFollowUpMessage(row: FollowUpRow, llmKeys: { anthropic_api_key: string | null; openai_api_key: string | null; gemini_api_key: string | null; openrouter_api_key: string | null }): Promise<string> {
   const contactName = row.contact_custom_name ?? row.contact_whatsapp_name ?? 'cliente'
 
   if (row.agent_follow_up_message_template) {
@@ -68,9 +69,11 @@ Esta é a tentativa número ${row.attempt_number}. Ajuste o tom conforme necess�
       messages: [{ role: 'user', content: userMessage }],
       maxTokens: 200,
       temperature: 0.8,
+      provider: row.agent_llm_provider ?? 'anthropic',
       anthropicApiKey: llmKeys.anthropic_api_key ?? undefined,
       openaiApiKey: llmKeys.openai_api_key ?? undefined,
       geminiApiKey: llmKeys.gemini_api_key ?? undefined,
+      openrouterApiKey: llmKeys.openrouter_api_key ?? undefined,
     })
     return response.text || `Oi ${contactName}! Tudo bem? Precisou de algo? 😊`
   } catch (err) {
@@ -87,10 +90,13 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
   }
 
   const llmKeysRaw = await getTenantLlmKeys(row.tenant_id, ENCRYPTION_KEY)
+  const agentLlmKey = await getAgentLlmKey(row.ai_agent_id, ENCRYPTION_KEY)
+  const provider = row.agent_llm_provider ?? 'anthropic'
   const llmKeys = {
-    anthropic_api_key: llmKeysRaw?.anthropic_api_key ?? row.tenant_anthropic_key,
-    openai_api_key: llmKeysRaw?.openai_api_key ?? row.tenant_openai_key,
-    gemini_api_key: llmKeysRaw?.gemini_api_key ?? row.tenant_gemini_key,
+    anthropic_api_key: (provider === 'anthropic' ? agentLlmKey : null) ?? llmKeysRaw?.anthropic_api_key ?? row.tenant_anthropic_key,
+    openai_api_key: (provider === 'openai' ? agentLlmKey : null) ?? llmKeysRaw?.openai_api_key ?? row.tenant_openai_key,
+    gemini_api_key: (provider === 'gemini' ? agentLlmKey : null) ?? llmKeysRaw?.gemini_api_key ?? row.tenant_gemini_key,
+    openrouter_api_key: provider === 'openrouter' ? agentLlmKey : null,
   }
 
   const message = await generateFollowUpMessage(row, llmKeys)
@@ -134,6 +140,7 @@ export async function runProcessFollowUps(): Promise<{ processed: number; failed
             ag.model as agent_model, ag.system_prompt as agent_system_prompt,
             ag.follow_up_delay_hours as agent_follow_up_delay_hours, ag.follow_up_max_attempts as agent_follow_up_max_attempts,
             ag.follow_up_message_template as agent_follow_up_message_template,
+            ag.llm_provider as agent_llm_provider,
             t.name as tenant_name, t.anthropic_api_key as tenant_anthropic_key,
             t.openai_api_key as tenant_openai_key, t.gemini_api_key as tenant_gemini_key
      from follow_ups f

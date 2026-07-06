@@ -214,6 +214,11 @@ export const aiAgents = pgTable(
     voiceId: text('voice_id'),
     audioResponseEnabled: boolean('audio_response_enabled').default(false),
 
+    // BYOK por agente — cada agente escolhe seu próprio provedor + chave.
+    // Se llmApiKey for null, o backend cai pra chave do tenant e depois pro env global.
+    llmProvider: text('llm_provider').notNull().default('anthropic'),
+    llmApiKey: text('llm_api_key'),
+
     totalConversations: integer('total_conversations').notNull().default(0),
     totalEscalations: integer('total_escalations').notNull().default(0),
     avgResponseTimeSeconds: integer('avg_response_time_seconds'),

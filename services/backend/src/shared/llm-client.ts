@@ -33,6 +33,8 @@ export interface LLMResponse {
   stopReason: 'end_turn' | 'tool_use'
 }
 
+export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter'
+
 export interface LLMCallParams {
   model: string
   system: string
@@ -40,16 +42,14 @@ export interface LLMCallParams {
   tools?: LLMTool[]
   maxTokens?: number
   temperature?: number
+  // Provedor explícito (vem de ai_agents.llm_provider) — cada agente escolhe
+  // o seu, então não dá mais pra confiar em adivinhação pelo prefixo do nome
+  // do modelo (isso quebra pra modelos do OpenRouter, ex: "anthropic/claude-3.7-sonnet").
+  provider: LLMProvider
   anthropicApiKey?: string
   openaiApiKey?: string
   geminiApiKey?: string
-}
-
-function getProvider(model: string): 'anthropic' | 'openai' | 'gemini' {
-  if (model.startsWith('claude-')) return 'anthropic'
-  if (model.startsWith('gpt-') || model.startsWith('o1-') || model.startsWith('o3-')) return 'openai'
-  if (model.startsWith('gemini-')) return 'gemini'
-  return 'anthropic'
+  openrouterApiKey?: string
 }
 
 // ── Anthropic (Claude) ───────────────────────────────────────────────────────
@@ -155,9 +155,11 @@ async function callOpenAI(params: {
   maxTokens?: number
   temperature?: number
   apiKey: string
+  baseUrl?: string
+  envVarName?: string
 }): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>; finishReason: 'stop' | 'tool_calls' }> {
-  const apiKey = params.apiKey || process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+  const apiKey = params.apiKey || process.env[params.envVarName ?? 'OPENAI_API_KEY']
+  if (!apiKey) throw new Error(`${params.envVarName ?? 'OPENAI_API_KEY'} not configured`)
 
   const body = {
     model: params.model,
@@ -167,7 +169,7 @@ async function callOpenAI(params: {
     ...(params.tools?.length ? { tools: params.tools } : {}),
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(`${params.baseUrl ?? 'https://api.openai.com/v1'}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
@@ -175,7 +177,7 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`OpenAI API ${res.status}: ${err}`)
+    throw new Error(`${params.baseUrl ? 'OpenRouter' : 'OpenAI'} API ${res.status}: ${err}`)
   }
 
   const data = (await res.json()) as OpenAIResponse
@@ -278,7 +280,7 @@ async function callGemini(params: {
 // ── Public main function ─────────────────────────────────────────────────────
 
 export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
-  const provider = getProvider(params.model)
+  const provider = params.provider
 
   if (provider === 'anthropic') {
     const messages: AnthropicMessage[] = params.messages.map((m) => ({ role: m.role, content: m.content }))
@@ -313,7 +315,7 @@ export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
     }
   }
 
-  if (provider === 'openai') {
+  if (provider === 'openai' || provider === 'openrouter') {
     const messages: OpenAIMessage[] = params.messages.flatMap((m) => {
       if (typeof m.content === 'string') {
         return [{ role: m.role, content: m.content }]
@@ -363,7 +365,9 @@ export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
       tools,
       maxTokens: params.maxTokens,
       temperature: params.temperature,
-      apiKey: params.openaiApiKey || '',
+      apiKey: (provider === 'openrouter' ? params.openrouterApiKey : params.openaiApiKey) || '',
+      baseUrl: provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : undefined,
+      envVarName: provider === 'openrouter' ? 'OPENROUTER_API_KEY' : 'OPENAI_API_KEY',
     })
 
     const content: LLMContentBlock[] = []
