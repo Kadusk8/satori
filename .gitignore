@@ -16,3 +16,4 @@ scratch_*.js
 
 # node
 node_modules/
+.vercel
