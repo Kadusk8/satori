@@ -4,13 +4,19 @@
 //   DATABASE_URL='postgres://app_user:devpw@127.0.0.1:55432/zapdev' \
 //   node lib/db/seed.mjs
 //
-// Credenciais criadas:
+// Credenciais criadas (padrão, uso local):
 //   super admin  → admin@zap.dev   / admin123
 //   owner tenant → owner@demo.dev  / owner123
+//
+// Pra rodar contra um banco real/exposto publicamente, sobrescreva as senhas
+// fracas fixas acima via env var (mesmo comando, só adicionando):
+//   SUPER_ADMIN_PASSWORD='...' OWNER_PASSWORD='...' node lib/db/seed.mjs
 import pg from 'pg'
 import bcrypt from 'bcryptjs'
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? 'admin123'
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD ?? 'owner123'
 
 async function withAdmin(fn) {
   const c = await pool.connect()
@@ -24,8 +30,8 @@ async function withAdmin(fn) {
 }
 
 const run = async () => {
-  const adminHash = await bcrypt.hash('admin123', 10)
-  const ownerHash = await bcrypt.hash('owner123', 10)
+  const adminHash = await bcrypt.hash(SUPER_ADMIN_PASSWORD, 10)
+  const ownerHash = await bcrypt.hash(OWNER_PASSWORD, 10)
 
   await withAdmin(async (c) => {
     // Super admin
