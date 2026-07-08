@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, DragEvent } from 'react'
-import { Upload, X, Loader2, ImageIcon } from 'lucide-react'
+import { Upload, X, Loader2, ImageIcon, Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface UploadedImage {
@@ -91,6 +91,17 @@ export function ImageUploader({
     onChange(images.filter((_, i) => i !== index))
   }
 
+  // A "imagem em destaque" é sempre a de índice 0 — a IA sempre manda ela
+  // primeiro (resolveProductImageData) e só envia as demais se o cliente
+  // demonstrar mais interesse depois.
+  function setAsFeatured(index: number) {
+    if (index === 0) return
+    const reordered = [...images]
+    const [chosen] = reordered.splice(index, 1)
+    reordered.unshift(chosen)
+    onChange(reordered)
+  }
+
   return (
     <div className="space-y-3">
       {/* Zona de drop */}
@@ -138,6 +149,10 @@ export function ImageUploader({
 
       {/* Preview das imagens */}
       {images.length > 0 && (
+        <>
+        <p className="text-xs text-muted-foreground">
+          A imagem em destaque é a primeira que a IA envia ao cliente — passe o mouse e clique na estrela pra trocar.
+        </p>
         <div className="grid grid-cols-3 gap-2">
           {images.map((img, i) => (
             <div key={img.publicId} className="group relative rounded-lg overflow-hidden aspect-square bg-muted">
@@ -147,10 +162,19 @@ export function ImageUploader({
                 alt={img.alt}
                 className="h-full w-full object-cover"
               />
-              {i === 0 && (
-                <span className="absolute bottom-1 left-1 text-[9px] bg-black/60 text-white rounded px-1 py-0.5">
-                  Principal
+              {i === 0 ? (
+                <span className="absolute bottom-1 left-1 flex items-center gap-0.5 text-[9px] bg-black/60 text-white rounded px-1 py-0.5">
+                  <Star className="h-2.5 w-2.5 fill-current" /> Destaque
                 </span>
+              ) : (
+                <button
+                  onClick={() => setAsFeatured(i)}
+                  type="button"
+                  title="Definir como imagem em destaque"
+                  className="absolute bottom-1 left-1 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-amber-500"
+                >
+                  <Star className="h-3 w-3" />
+                </button>
               )}
               <button
                 onClick={() => removeImage(i)}
@@ -171,6 +195,7 @@ export function ImageUploader({
             </button>
           )}
         </div>
+        </>
       )}
     </div>
   )

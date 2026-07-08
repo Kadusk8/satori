@@ -80,7 +80,17 @@ export const AI_TOOLS: Tool[] = [
   },
   {
     name: 'send_product_image',
-    description: 'Envia a imagem de um produto específico para o cliente. Use após recomendar um produto que tem imagem.',
+    description: 'Envia a imagem em destaque (a principal/capa) de um produto específico para o cliente. Use após recomendar um produto que tem imagem — nunca envia as demais fotos, só a de destaque.',
+    input_schema: {
+      type: 'object',
+      properties: { product_id: { type: 'string', description: 'ID do produto' } },
+      required: ['product_id'],
+    },
+  },
+  {
+    name: 'send_more_product_images',
+    description:
+      'Envia as demais fotos de um produto (além da imagem em destaque já enviada). Use SOMENTE depois que o cliente já viu a imagem em destaque e demonstrou mais interesse (ex: "tem mais fotos?", "gostei, quero ver mais", "como é por dentro?"). Se o produto só tiver 1 foto, a ferramenta avisa e não envia nada.',
     input_schema: {
       type: 'object',
       properties: { product_id: { type: 'string', description: 'ID do produto' } },

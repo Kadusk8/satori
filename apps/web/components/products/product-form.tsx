@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ImageUploader, type UploadedImage } from './image-uploader'
 import type { Product } from './product-card'
+import { cn } from '@/lib/utils'
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
@@ -75,6 +76,7 @@ export function ProductForm({
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -161,15 +163,27 @@ export function ProductForm({
 
           {/* Descrição curta (pra WhatsApp) */}
           <div>
-            <label className="block text-sm font-medium mb-1.5">
-              Descrição curta{' '}
-              <span className="text-muted-foreground font-normal">(exibida no WhatsApp)</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium">
+                Descrição curta{' '}
+                <span className="text-muted-foreground font-normal">(exibida no WhatsApp)</span>
+              </label>
+              <span className={cn(
+                'text-xs tabular-nums',
+                (watch('shortDescription')?.length ?? 0) >= 120 ? 'text-destructive' : 'text-muted-foreground'
+              )}>
+                {watch('shortDescription')?.length ?? 0}/120
+              </span>
+            </div>
             <Input
               {...register('shortDescription')}
               placeholder="Ex: Algodão 100%, disponível em P/M/G"
               maxLength={120}
             />
+            <p className="text-xs text-muted-foreground mt-1">
+              Texto longo é cortado ao chegar em 120 caracteres — pra descrições completas, use o campo
+              &quot;Descrição completa&quot; abaixo.
+            </p>
             {errors.shortDescription && (
               <p className="text-xs text-destructive mt-1">{errors.shortDescription.message}</p>
             )}

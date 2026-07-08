@@ -331,10 +331,31 @@ export async function resolveProductImageData(tenantId: string, productId: strin
   const imageUrl = (images[0] as Record<string, unknown>)?.url ?? images[0]
   if (!imageUrl || typeof imageUrl !== 'string') return null
 
-  const desc = product.shortDescription || product.description || ''
-  const caption = [`📦 *${product.name}*`, desc ? desc : ''].filter(Boolean).join('\n')
+  const caption = [`📦 *${product.name}*`, buildImageCaptionText(product.description, product.shortDescription)]
+    .filter(Boolean)
+    .join('\n')
 
   return { productName: product.name, imageUrl, caption }
+}
+
+/**
+ * Monta o texto da legenda da imagem preferindo a descrição completa (mais
+ * provável de estar bem preenchida) sobre a curta — que tem limite de
+ * caracteres no formulário e pode ter sido cortada no meio de uma palavra.
+ * Usa só o primeiro parágrafo (até a primeira linha em branco) pra evitar
+ * jogar uma lista enorme de itens/condições na legenda da foto; se ainda
+ * assim ficar muito longo, corta num limite de palavra, nunca no meio dela.
+ */
+function buildImageCaptionText(description: string | null, shortDescription: string | null): string {
+  const source = description || shortDescription || ''
+  if (!source) return ''
+
+  const firstParagraph = source.split(/\n\s*\n/)[0]?.trim() ?? ''
+  const text = firstParagraph || source.trim()
+
+  const MAX_LENGTH = 500
+  if (text.length <= MAX_LENGTH) return text
+  return text.slice(0, MAX_LENGTH).replace(/\s+\S*$/, '') + '…'
 }
 
 export async function toolSendProductImage(
@@ -364,6 +385,55 @@ export async function toolSendProductImage(
   )
 
   return `Imagem de "${imageData.productName}" enviada.`
+}
+
+/**
+ * Envia as fotos além da imagem em destaque (índice 0, já enviada por
+ * send_product_image). Usada só quando o cliente demonstra mais interesse
+ * depois de ver a foto principal.
+ */
+export async function toolSendMoreProductImages(
+  tenantId: string,
+  conversationId: string,
+  contactId: string,
+  contactNumber: string,
+  encryptionKey: string | null,
+  input: Record<string, unknown>
+): Promise<string> {
+  const productId = String(input.product_id ?? '')
+  if (!productId) return 'ID do produto é obrigatório.'
+
+  const rows = await db
+    .select({ name: products.name, images: products.images })
+    .from(products)
+    .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
+    .limit(1)
+
+  const product = rows[0]
+  if (!product) return 'Produto não encontrado.'
+
+  const images = Array.isArray(product.images) ? product.images : []
+  const rest = images.slice(1)
+  if (rest.length === 0) return `"${product.name}" só tem a foto em destaque cadastrada — não há mais fotos pra enviar.`
+
+  try {
+    const evo = await getEvolutionClient(tenantId, encryptionKey)
+    for (const img of rest) {
+      const imageUrl = ((img as Record<string, unknown>)?.url as string | undefined) ?? (typeof img === 'string' ? img : undefined)
+      if (!imageUrl) continue
+      await evo.sendMedia(contactNumber, imageUrl, '')
+      await pool.query(
+        `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url)
+         values ($1, $2, $3, 'ai', null, 'image', $4)`,
+        [tenantId, conversationId, contactId, imageUrl]
+      )
+    }
+  } catch (err) {
+    console.error('[toolSendMoreProductImages] Erro ao enviar imagens:', err)
+    return `Erro ao enviar as demais fotos de "${product.name}".`
+  }
+
+  return `${rest.length} foto(s) adicionais de "${product.name}" enviadas.`
 }
 
 export async function toolScheduleFollowUp(
@@ -492,6 +562,9 @@ export async function executeTool(
     }
     case 'send_product_image':
       result = await toolSendProductImage(ctx.tenantId, ctx.conversationId, ctx.contactId, ctx.contactNumber, ctx.encryptionKey, input)
+      break
+    case 'send_more_product_images':
+      result = await toolSendMoreProductImages(ctx.tenantId, ctx.conversationId, ctx.contactId, ctx.contactNumber, ctx.encryptionKey, input)
       break
     case 'get_business_info':
       result = await toolGetBusinessInfo(ctx.tenantId)
