@@ -130,8 +130,12 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
         if (!res.ok) return { state: 'not_found', connected: false }
         const body = (await res.json()) as any
         const d = body?.data ?? {}
-        const connected = d.connected === true && d.loggedIn === true
-        const state = d.connected && d.loggedIn ? 'open' : d.connected ? 'connecting' : 'close'
+        // A Evolution Go devolve os campos em PascalCase (Connected/LoggedIn),
+        // não camelCase — checar os dois formatos por segurança.
+        const isConnected = d.connected === true || d.Connected === true
+        const isLoggedIn = d.loggedIn === true || d.LoggedIn === true
+        const connected = isConnected && isLoggedIn
+        const state = isConnected && isLoggedIn ? 'open' : isConnected ? 'connecting' : 'close'
         return { state, connected }
       } catch {
         return { state: 'error', connected: false }

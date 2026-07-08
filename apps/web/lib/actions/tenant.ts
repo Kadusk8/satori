@@ -1,10 +1,13 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
 import { tenants, aiAgents } from '@/lib/db/schema'
 import { encryptedColumn } from '@/lib/db/encryption'
+import { checkEvolutionConnection, setEvolutionWebhook } from '@/lib/evolution/client'
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
 export async function updateTenantStatus(tenantId: string, status: 'active' | 'suspended' | 'cancelled') {
   await withAdmin((tx) => tx.update(tenants).set({ status }).where(eq(tenants.id, tenantId)))
@@ -117,6 +120,92 @@ export async function updateTenantAudio(tenantId: string, data: {
     }
   })
   revalidatePath(`/admin/tenants/${tenantId}`)
+}
+
+// Registra/atualiza o webhook na instância Evolution Go do tenant e persiste
+// o status de conexão. Compartilhado por reconnectEvolution e
+// updateEvolutionConnection.
+async function syncEvolutionWebhook(tenantId: string, evolutionApiUrl: string, evolutionApiKey: string, webhookSecret: string): Promise<{ connected: boolean; webhookUrl: string }> {
+  const backendUrl = (process.env.BACKEND_PUBLIC_URL ?? '').replace(/\/$/, '')
+  if (!backendUrl) throw new Error('BACKEND_PUBLIC_URL não configurada no servidor.')
+  const webhookUrl = `${backendUrl}/webhook-evolution?ts=${webhookSecret}`
+
+  await setEvolutionWebhook({ url: evolutionApiUrl, apiKey: evolutionApiKey, webhookUrl })
+  const { connected } = await checkEvolutionConnection({ url: evolutionApiUrl, apiKey: evolutionApiKey })
+
+  await withAdmin((tx) =>
+    tx.update(tenants).set({ whatsappConnected: connected, updatedAt: new Date() }).where(eq(tenants.id, tenantId))
+  )
+  revalidatePath(`/admin/tenants/${tenantId}`)
+
+  return { connected, webhookUrl }
+}
+
+// Re-registra o webhook na instância Evolution Go do tenant (útil quando o
+// registro automático do onboarding falhou, ou a instância foi recriada) e
+// atualiza o status de conexão. Usado pelo botão "Reconectar" no admin.
+export async function reconnectEvolution(tenantId: string): Promise<{ connected: boolean; webhookUrl: string }> {
+  const row = await withAdmin(async (tx) => {
+    const res = await tx.execute(sql`
+      select evolution_api_url, webhook_secret,
+             get_decrypted_evolution_key(id, ${ENCRYPTION_KEY}) as evolution_api_key
+      from tenants where id = ${tenantId} limit 1
+    `)
+    return res.rows?.[0] as {
+      evolution_api_url: string | null
+      webhook_secret: string
+      evolution_api_key: string | null
+    } | undefined
+  })
+
+  if (!row?.evolution_api_url || !row.evolution_api_key) {
+    throw new Error('Evolution Go não configurada para este tenant (URL ou API key ausente/ilegível — tente reeditar a conexão).')
+  }
+
+  return syncEvolutionWebhook(tenantId, row.evolution_api_url, row.evolution_api_key, row.webhook_secret)
+}
+
+// Edita a URL/instância/API key da Evolution Go de um tenant já existente —
+// útil quando a chave salva ficou ilegível (ex: rotação de ENCRYPTION_KEY) ou
+// a instância mudou. Deixar a API key em branco mantém a atual.
+export async function updateEvolutionConnection(tenantId: string, data: {
+  evolutionApiUrl: string
+  evolutionInstanceName: string
+  evolutionApiKey?: string
+}): Promise<{ connected: boolean; webhookUrl: string }> {
+  const evolutionApiUrl = data.evolutionApiUrl.trim().replace(/\/$/, '')
+  const evolutionInstanceName = data.evolutionInstanceName.trim()
+  if (!evolutionApiUrl || !evolutionInstanceName) {
+    throw new Error('URL e instância da Evolution Go são obrigatórias.')
+  }
+
+  await withAdmin((tx) =>
+    tx
+      .update(tenants)
+      .set({
+        evolutionApiUrl,
+        evolutionInstanceName,
+        ...(data.evolutionApiKey?.trim()
+          ? { evolutionApiKey: encryptedColumn(data.evolutionApiKey.trim(), 'encrypt_evolution_key') }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(tenants.id, tenantId))
+  )
+
+  const row = await withAdmin(async (tx) => {
+    const res = await tx.execute(sql`
+      select webhook_secret, get_decrypted_evolution_key(id, ${ENCRYPTION_KEY}) as evolution_api_key
+      from tenants where id = ${tenantId} limit 1
+    `)
+    return res.rows?.[0] as { webhook_secret: string; evolution_api_key: string | null } | undefined
+  })
+
+  if (!row?.evolution_api_key) {
+    throw new Error('Não foi possível ler a API key salva — confira o valor digitado.')
+  }
+
+  return syncEvolutionWebhook(tenantId, evolutionApiUrl, row.evolution_api_key, row.webhook_secret)
 }
 
 export async function deleteTenant(tenantId: string) {

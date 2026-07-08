@@ -16,6 +16,7 @@ export async function webhookEvolutionRoutes(app: FastifyInstance) {
 
     const body = request.body as { event?: string; instance?: string; data?: unknown }
     const rawEventType = body?.event ?? ''
+    request.log.info({ event: rawEventType, instance: body?.instance, data: body?.data }, '[webhook-evolution] payload recebido')
     if (!rawEventType) {
       return reply.code(400).send({ error: 'event é obrigatório' })
     }

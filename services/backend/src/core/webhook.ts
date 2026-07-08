@@ -18,9 +18,19 @@ export interface TenantRow {
   webhook_secret: string
 }
 
+// Formato real da Evolution Go (baseada na lib Go `whatsmeow`, não no formato
+// Baileys clássico) — campos em PascalCase dentro de `Info`/`Message`.
 interface EvolutionMessageData {
-  key: { remoteJid: string; fromMe: boolean; id: string; remoteJidAlt?: string }
-  message?: {
+  Info?: {
+    Chat: string
+    Sender: string
+    SenderAlt?: string
+    IsFromMe: boolean
+    IsGroup: boolean
+    ID: string
+    PushName?: string
+  }
+  Message?: {
     conversation?: string
     extendedTextMessage?: { text: string }
     imageMessage?: { caption?: string; url?: string }
@@ -28,8 +38,6 @@ interface EvolutionMessageData {
     pttMessage?: { url?: string }
     documentMessage?: { title?: string; url?: string }
   }
-  messageType?: string
-  pushName?: string
 }
 
 interface EvolutionConnectionData {
@@ -57,13 +65,20 @@ function normalizeBrazilianNumber(phone: string): string {
   return phone
 }
 
-function readEnvelope(data: EvolutionMessageData): { remoteJid: string; remoteJidAlt?: string; fromMe: boolean; id: string; pushName?: string } | null {
-  if (!data.key) return null
-  return { remoteJid: data.key.remoteJid, remoteJidAlt: data.key.remoteJidAlt, fromMe: data.key.fromMe, id: data.key.id, pushName: data.pushName }
+function readEnvelope(data: EvolutionMessageData): { remoteJid: string; remoteJidAlt?: string; fromMe: boolean; isGroup: boolean; id: string; pushName?: string } | null {
+  if (!data.Info) return null
+  return {
+    remoteJid: data.Info.Chat,
+    remoteJidAlt: data.Info.SenderAlt,
+    fromMe: data.Info.IsFromMe,
+    isGroup: data.Info.IsGroup,
+    id: data.Info.ID,
+    pushName: data.Info.PushName,
+  }
 }
 
 function parseMessage(data: EvolutionMessageData): { text: string | null; contentType: 'text' | 'image' | 'audio' | 'document'; mediaUrl: string | null } {
-  const msg = data.message ?? {}
+  const msg = data.Message ?? {}
   if (msg.conversation) return { text: msg.conversation, contentType: 'text', mediaUrl: null }
   if (msg.extendedTextMessage?.text) return { text: msg.extendedTextMessage.text, contentType: 'text', mediaUrl: null }
   if (msg.imageMessage) return { text: msg.imageMessage.caption ?? null, contentType: 'image', mediaUrl: msg.imageMessage.url ?? null }
@@ -76,11 +91,11 @@ function parseMessage(data: EvolutionMessageData): { text: string | null; conten
 async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData): Promise<{ conversationId: string; whatsappMessageId: string } | null> {
   const envelope = readEnvelope(data)
   if (!envelope) {
-    console.error('[webhook] payload de mensagem sem key/info reconhecível')
+    console.error('[webhook] payload de mensagem sem Info reconhecível:', JSON.stringify(data))
     return null
   }
   if (envelope.fromMe) return null
-  if (envelope.remoteJid.includes('@g.us')) return null
+  if (envelope.isGroup || envelope.remoteJid.includes('@g.us')) return null
 
   const phoneNumber = extractNumber(envelope.remoteJid, envelope.remoteJidAlt)
   const { text, contentType, mediaUrl } = parseMessage(data)
@@ -173,7 +188,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
       const mediaRes = await fetch(`${evoUrl}/message/downloadimage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: tenant.evolution_api_key },
-        body: JSON.stringify({ message: data.message }),
+        body: JSON.stringify({ message: data.Message }),
       })
       if (mediaRes.ok) {
         const mediaBody = (await mediaRes.json()) as any

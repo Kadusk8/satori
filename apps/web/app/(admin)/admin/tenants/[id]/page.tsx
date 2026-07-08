@@ -10,6 +10,8 @@ import { TenantActions } from './tenant-actions'
 import { AgentEditor } from './agent-editor'
 import { LlmEditor } from './llm-editor'
 import { AudioEditor } from './audio-editor'
+import { EvolutionConnection } from './evolution-connection'
+import { EvolutionEditor } from './evolution-editor'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default',
@@ -52,6 +54,7 @@ interface AdminTenantRow {
   city: string | null; state: string | null; website: string | null
   whatsapp_number: string | null; whatsapp_connected: boolean | null
   evolution_api_url: string | null; evolution_instance_name: string | null
+  webhook_secret: string
   openai_api_key: string | null; gemini_api_key: string | null
   anthropic_api_key: string | null; elevenlabs_api_key: string | null
   max_messages_month: number; max_products: number; max_operators: number
@@ -84,6 +87,9 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
   })
 
   if (!tenant) notFound()
+
+  const backendUrl = (process.env.BACKEND_PUBLIC_URL ?? '').replace(/\/$/, '')
+  const webhookUrl = `${backendUrl}/webhook-evolution?ts=${tenant.webhook_secret}`
 
   const businessHours = tenant.business_hours as Record<string, { enabled?: boolean; start?: string; end?: string }> | null
 
@@ -160,10 +166,17 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
         {/* WhatsApp / Evolution */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              WhatsApp
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                WhatsApp
+              </CardTitle>
+              <EvolutionEditor
+                tenantId={id}
+                currentUrl={tenant.evolution_api_url ?? ''}
+                currentInstanceName={tenant.evolution_instance_name ?? ''}
+              />
+            </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <DetailRow label="Número" value={tenant.whatsapp_number ?? '—'} />
@@ -174,6 +187,11 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
             />
             <DetailRow label="Evolution Go URL" value={tenant.evolution_api_url ?? '—'} />
             <DetailRow label="Instância" value={tenant.evolution_instance_name ?? '—'} />
+            <EvolutionConnection
+              tenantId={id}
+              webhookUrl={webhookUrl}
+              hasEvolutionConfig={!!tenant.evolution_api_url}
+            />
           </CardContent>
         </Card>
 
