@@ -1,9 +1,10 @@
-'use client'
-
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { Bot, MessagesSquare, UserCog, ArrowRight } from 'lucide-react'
+import { Bot, MessagesSquare, UserCog, ArrowRight, ShieldAlert } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { getSessionClaims } from '@/lib/auth/session'
+import { isManager } from '@/lib/auth/permissions'
 
 const managedSections = [
   {
@@ -18,7 +19,24 @@ const managedSections = [
   },
 ]
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const claims = await getSessionClaims()
+
+  if (!isManager(claims.userRole)) {
+    return (
+      <div className="p-8 max-w-2xl">
+        <Card>
+          <CardContent className="flex items-center gap-3 py-8">
+            <ShieldAlert className="h-5 w-5 text-muted-foreground shrink-0" />
+            <p className="text-sm text-muted-foreground">
+              Apenas o owner ou administradores da empresa podem ver as configurações.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="p-8 space-y-6 max-w-2xl">
       <div>
@@ -55,7 +73,7 @@ export default function SettingsPage() {
         <div className="flex-1">
           <h2 className="font-semibold">Equipe</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Convide operadores e gerencie quem tem acesso ao painel — isso você já pode fazer direto por aqui.
+            Convide vendedores e gerencie quem tem acesso ao painel — isso você já pode fazer direto por aqui.
           </p>
         </div>
         <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-2 group-hover:translate-x-0.5 transition-transform" />

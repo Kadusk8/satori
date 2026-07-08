@@ -100,9 +100,17 @@ export function KanbanCard({ conversation, isDragging, onCardClick }: KanbanCard
         </span>
       </div>
 
-      {/* Telefone */}
-      <div className="mt-1">
+      {/* Telefone + vendedor responsável */}
+      <div className="mt-1 flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{conversation.contact.phone}</span>
+        {conversation.assignedTo && (
+          <span
+            title={conversation.assignedTo.name}
+            className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/10 text-primary text-[9px] font-bold shrink-0"
+          >
+            {conversation.assignedTo.name.slice(0, 2).toUpperCase()}
+          </span>
+        )}
       </div>
     </div>
   )

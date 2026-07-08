@@ -85,6 +85,12 @@ export const tenants = pgTable(
     maxOperators: integer('max_operators').notNull().default(3),
     messagesUsedMonth: integer('messages_used_month').notNull().default(0),
 
+    // Ponteiro de rotação do round-robin de leads entre vendedores online.
+    // Sem `.references()` aqui de propósito: `users` referencia `tenants`, e o
+    // outro sentido criaria ciclo de inferência de tipo no Drizzle. A FK real
+    // já é garantida no banco (neon/schema.sql, tenants_last_lead_assigned_to_fkey).
+    lastLeadAssignedTo: uuid('last_lead_assigned_to'),
+
     openaiApiKey: text('openai_api_key'),
     geminiApiKey: text('gemini_api_key'),
     anthropicApiKey: text('anthropic_api_key'),
@@ -269,6 +275,8 @@ export const conversations = pgTable(
     aiSummary: text('ai_summary'),
     priority: text('priority').notNull().default('normal'),
     channel: text('channel').notNull().default('whatsapp'),
+    // true quando a IA assumiu o fechamento sozinha por falta de vendedor online.
+    autonomousMode: boolean('autonomous_mode').notNull().default(false),
 
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),

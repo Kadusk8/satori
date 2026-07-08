@@ -5,6 +5,7 @@ import { and, asc, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { conversations, contacts, aiAgents, users, messages } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { isManager } from '@/lib/auth/permissions'
 import { triggerEvent, tenantChannel } from '@/lib/realtime/server'
 
 export interface ChatConversation {
@@ -49,6 +50,15 @@ export async function getChat(conversationId: string): Promise<{ conversation: C
 
     if (!convRows[0]) return null
     const r = convRows[0]
+
+    // Vendedor só abre conversa própria ou sem dono ainda escalada (fallback
+    // de time pequeno) — nunca a de outro vendedor nem uma que a IA atende.
+    if (!isManager(claims.user_role)) {
+      const isMine = r.assigned_id === claims.sub
+      const isUnownedEscalated = !r.assigned_id && (r.status === 'waiting_human' || r.status === 'human_handling')
+      if (!isMine && !isUnownedEscalated) return null
+    }
+
     const conversation: ChatConversation = {
       id: r.id,
       status: r.status,
@@ -82,20 +92,41 @@ export async function getChat(conversationId: string): Promise<{ conversation: C
   })
 }
 
+async function assertCanTouchConversation(
+  tx: Parameters<Parameters<typeof withClaims>[1]>[0],
+  claims: Awaited<ReturnType<typeof claimsOrThrow>>,
+  conversationId: string
+): Promise<void> {
+  if (isManager(claims.user_role)) return
+  const rows = await tx
+    .select({ assignedTo: conversations.assignedTo, tenantId: conversations.tenantId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1)
+  const conv = rows[0]
+  if (!conv || conv.tenantId !== claims.tenant_id) throw new Error('Conversa não encontrada.')
+  if (conv.assignedTo && conv.assignedTo !== claims.sub) throw new Error('Esta conversa está com outro vendedor.')
+}
+
 export async function assumeConversation(conversationId: string): Promise<void> {
   const claims = await claimsOrThrow()
-  await withClaims(claims, (tx) =>
-    tx.update(conversations).set({ status: 'human_handling' }).where(eq(conversations.id, conversationId))
-  )
+  await withClaims(claims, async (tx) => {
+    await assertCanTouchConversation(tx, claims, conversationId)
+    await tx
+      .update(conversations)
+      .set({ status: 'human_handling', assignedTo: claims.sub, autonomousMode: false })
+      .where(eq(conversations.id, conversationId))
+  })
   revalidatePath(`/chat/${conversationId}`)
   await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
 }
 
 export async function closeConversation(conversationId: string): Promise<void> {
   const claims = await claimsOrThrow()
-  await withClaims(claims, (tx) =>
-    tx.update(conversations).set({ status: 'closed', closedAt: new Date() }).where(eq(conversations.id, conversationId))
-  )
+  await withClaims(claims, async (tx) => {
+    await assertCanTouchConversation(tx, claims, conversationId)
+    await tx.update(conversations).set({ status: 'closed', closedAt: new Date() }).where(eq(conversations.id, conversationId))
+  })
   revalidatePath('/conversations')
   await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
 }

@@ -11,7 +11,7 @@ import { InviteOperatorDialog, OperatorRowActions } from './team-actions'
 const roleLabel: Record<string, string> = {
   owner: 'Owner',
   admin: 'Admin',
-  operator: 'Operador',
+  operator: 'Vendedor',
 }
 
 const roleVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
@@ -71,7 +71,7 @@ export default async function TeamPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Equipe</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Convide e gerencie os operadores que atendem pelo painel
+            Convide e gerencie os vendedores que atendem pelo painel
           </p>
         </div>
         <InviteOperatorDialog />

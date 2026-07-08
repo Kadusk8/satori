@@ -60,7 +60,7 @@ const statusConfig = {
 
 function mapMessage(row: DBMessage): ChatMessage {
   let senderName: string | undefined
-  if (row.sender_type === 'human') senderName = 'Operador'
+  if (row.sender_type === 'human') senderName = 'Vendedor'
   else if (row.sender_type === 'ai') senderName = 'Assistente IA'
   else if (row.sender_type === 'system') senderName = undefined
 

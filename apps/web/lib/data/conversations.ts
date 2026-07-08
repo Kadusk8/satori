@@ -1,10 +1,11 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { conversations, contacts, aiAgents, users, kanbanStages } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { isManager } from '@/lib/auth/permissions'
 import { triggerEvent, tenantChannel } from '@/lib/realtime/server'
 
 export interface DBStage {
@@ -24,10 +25,30 @@ async function claimsOrThrow() {
   return c
 }
 
-export async function listKanban(): Promise<{ stages: DBStage[]; conversations: DBConversation[]; tenantId: string }> {
+export interface KanbanViewer {
+  id: string
+  role: string
+  isAvailable: boolean
+}
+
+export async function listKanban(): Promise<{
+  stages: DBStage[]
+  conversations: DBConversation[]
+  tenantId: string
+  viewer: KanbanViewer
+}> {
   const claims = await claimsOrThrow()
 
   return withClaims(claims, async (tx) => {
+    const viewerRows = await tx
+      .select({ id: users.id, role: users.role, isAvailable: users.isAvailable })
+      .from(users)
+      .where(eq(users.id, claims.sub))
+      .limit(1)
+    const viewer: KanbanViewer = viewerRows[0]
+      ? viewerRows[0]
+      : { id: claims.sub, role: claims.user_role ?? 'operator', isAvailable: false }
+
     const stageRows = await tx
       .select({
         id: kanbanStages.id,
@@ -61,7 +82,21 @@ export async function listKanban(): Promise<{ stages: DBStage[]; conversations: 
       .leftJoin(aiAgents, eq(aiAgents.id, conversations.aiAgentId))
       .innerJoin(contacts, eq(contacts.id, conversations.contactId))
       .leftJoin(users, eq(users.id, conversations.assignedTo))
-      .where(and(eq(conversations.tenantId, claims.tenant_id!), ne(conversations.status, 'closed')))
+      .where(
+        and(
+          eq(conversations.tenantId, claims.tenant_id!),
+          ne(conversations.status, 'closed'),
+          // Vendedor só vê as suas + escaladas sem dono ainda (fallback de time
+          // pequeno) — nunca as que a IA ainda está atendendo sem dono nem as
+          // de outro vendedor. Owner/admin veem tudo.
+          isManager(viewer.role)
+            ? undefined
+            : or(
+                eq(conversations.assignedTo, claims.sub),
+                and(isNull(conversations.assignedTo), inArray(conversations.status, ['waiting_human', 'human_handling']))
+              )
+        )
+      )
       .orderBy(desc(conversations.lastMessageAt))
       .limit(200)
 
@@ -82,17 +117,61 @@ export async function listKanban(): Promise<{ stages: DBStage[]; conversations: 
       messages: r.last_message !== null ? [{ content: r.last_message }] : [],
     }))
 
-    return { stages: stageRows, conversations: convs, tenantId: claims.tenant_id! }
+    return { stages: stageRows, conversations: convs, tenantId: claims.tenant_id!, viewer }
   })
+}
+
+/** Vendedor só move card de conversa própria ou sem dono; manager move qualquer uma. */
+async function assertCanTouchConversation(
+  tx: Parameters<Parameters<typeof withClaims>[1]>[0],
+  claims: Awaited<ReturnType<typeof claimsOrThrow>>,
+  conversationId: string
+): Promise<void> {
+  if (isManager(claims.user_role)) return
+  const rows = await tx
+    .select({ assignedTo: conversations.assignedTo, tenantId: conversations.tenantId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1)
+  const conv = rows[0]
+  if (!conv || conv.tenantId !== claims.tenant_id) throw new Error('Conversa não encontrada.')
+  if (conv.assignedTo && conv.assignedTo !== claims.sub) throw new Error('Esta conversa está com outro vendedor.')
 }
 
 export async function moveConversation(conversationId: string, newStageId: string): Promise<void> {
   const claims = await claimsOrThrow()
+  await withClaims(claims, async (tx) => {
+    await assertCanTouchConversation(tx, claims, conversationId)
+    await tx.update(conversations).set({ kanbanStageId: newStageId }).where(eq(conversations.id, conversationId))
+  })
+  revalidatePath('/conversations')
+  await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
+}
+
+/** Reatribui manualmente uma conversa a um vendedor — só owner/admin. */
+export async function reassignConversation(conversationId: string, userId: string | null): Promise<void> {
+  const claims = await claimsOrThrow()
+  if (!isManager(claims.user_role)) throw new Error('Sem permissão para reatribuir conversas.')
   await withClaims(claims, (tx) =>
-    tx.update(conversations).set({ kanbanStageId: newStageId }).where(eq(conversations.id, conversationId))
+    tx
+      .update(conversations)
+      .set({ assignedTo: userId, autonomousMode: false })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, claims.tenant_id!)))
   )
   revalidatePath('/conversations')
   await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
+}
+
+/** Lista vendedores ativos do tenant, pra popular o seletor de reatribuição manual. */
+export async function listVendors(): Promise<Array<{ id: string; fullName: string; isAvailable: boolean }>> {
+  const claims = await claimsOrThrow()
+  return withClaims(claims, (tx) =>
+    tx
+      .select({ id: users.id, fullName: users.fullName, isAvailable: users.isAvailable })
+      .from(users)
+      .where(and(eq(users.tenantId, claims.tenant_id!), eq(users.role, 'operator'), eq(users.active, true)))
+      .orderBy(asc(users.fullName))
+  )
 }
 
 export async function getWaitingCount(): Promise<number> {

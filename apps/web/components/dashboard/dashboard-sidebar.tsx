@@ -25,10 +25,18 @@ function NotificationBadge({ count }: { count: number }) {
 
 interface DashboardSidebarProps {
   tenantId: string | null
+  userRole: string | null
 }
 
-export function DashboardSidebar({ tenantId }: DashboardSidebarProps) {
+const roleLabel: Record<string, string> = {
+  owner: 'Owner',
+  admin: 'Admin',
+  operator: 'Vendedor',
+}
+
+export function DashboardSidebar({ tenantId, userRole }: DashboardSidebarProps) {
   const pathname = usePathname()
+  const isManagerRole = userRole === 'owner' || userRole === 'admin'
 
   const [waitingCount, setWaitingCount] = useState(0)
   // TODO(Fase 5): status de conexão do WhatsApp virá do serviço backend
@@ -71,8 +79,12 @@ export function DashboardSidebar({ tenantId }: DashboardSidebarProps) {
     { label: 'Contatos',     href: '/contacts',      icon: Users,           badge: 0 },
     { label: 'Produtos',     href: '/products',      icon: Package,         badge: 0 },
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
-    { label: 'Equipe',       href: '/team',          icon: UserCog,         badge: 0 },
-    { label: 'Configurações',href: '/settings',      icon: Settings,        badge: 0 },
+    ...(isManagerRole
+      ? [
+          { label: 'Equipe',       href: '/team',     icon: UserCog,  badge: 0 },
+          { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },
+        ]
+      : []),
   ]
 
   return (
@@ -141,11 +153,14 @@ export function DashboardSidebar({ tenantId }: DashboardSidebarProps) {
       <div className="p-3">
         <div className="flex items-center gap-2.5 rounded-md px-3 py-2.5 hover:bg-accent transition-colors">
           <Avatar className="h-6 w-6 shrink-0">
-            <AvatarFallback className="text-[9px] font-bold bg-primary text-primary-foreground">OP</AvatarFallback>
+            <AvatarFallback className="text-[9px] font-bold bg-primary text-primary-foreground">
+              {(userRole ? roleLabel[userRole] ?? userRole : '??').slice(0, 2).toUpperCase()}
+            </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate leading-none text-foreground">Operador</p>
-            <p className="text-[10px] text-muted-foreground truncate mt-0.5">operador@empresa.com</p>
+            <p className="text-xs font-semibold truncate leading-none text-foreground">
+              {userRole ? roleLabel[userRole] ?? userRole : 'Usuário'}
+            </p>
           </div>
           <button
             onClick={handleLogout}

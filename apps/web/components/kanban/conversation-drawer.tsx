@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar } from 'lucide-react'
+import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar, UserCog } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { MessageBubble } from '@/components/chat/message-bubble'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { getConversationDrawer } from '@/lib/data/chat'
+import { listVendors, reassignConversation } from '@/lib/data/conversations'
 import { cn } from '@/lib/utils'
 import type { KanbanConversation } from './types'
+import { toast } from 'sonner'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
@@ -100,16 +103,19 @@ function extractProductMentions(messages: ChatMessage[]): string[] {
 interface ConversationDrawerProps {
   conversation: KanbanConversation | null
   onClose: () => void
+  isManager?: boolean
 }
 
 type Tab = 'chat' | 'lead'
 
-export function ConversationDrawer({ conversation, onClose }: ConversationDrawerProps) {
+export function ConversationDrawer({ conversation, onClose, isManager = false }: ConversationDrawerProps) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [vendors, setVendors] = useState<Array<{ id: string; fullName: string; isAvailable: boolean }>>([])
+  const [isReassigning, setIsReassigning] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Carrega mensagens e detalhes quando abre uma conversa
@@ -140,7 +146,7 @@ export function ConversationDrawer({ conversation, onClose }: ConversationDrawer
             createdAt: m.created_at,
             senderName:
               m.sender_type === 'ai' ? 'Assistente IA' :
-              m.sender_type === 'human' ? 'Operador' :
+              m.sender_type === 'human' ? 'Vendedor' :
               undefined,
           }))
         )
@@ -153,6 +159,27 @@ export function ConversationDrawer({ conversation, onClose }: ConversationDrawer
     load()
     return () => { cancelled = true }
   }, [conversation])
+
+  // Carrega a lista de vendedores pro seletor de reatribuição (só managers)
+  useEffect(() => {
+    if (!conversation || !isManager) return
+    let cancelled = false
+    listVendors().then((v) => { if (!cancelled) setVendors(v) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [conversation, isManager])
+
+  async function handleReassign(userId: string | null) {
+    if (!conversation) return
+    setIsReassigning(true)
+    try {
+      await reassignConversation(conversation.id, !userId || userId === 'unassigned' ? null : userId)
+      toast.success('Conversa reatribuída.')
+    } catch (err) {
+      toast.error('Erro ao reatribuir: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setIsReassigning(false)
+    }
+  }
 
   // Scroll para o final quando mensagens carregam
   useEffect(() => {
@@ -277,6 +304,33 @@ export function ConversationDrawer({ conversation, onClose }: ConversationDrawer
                     </div>
                   </section>
 
+                  {/* Vendedor responsável (só owner/admin) */}
+                  {isManager && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Vendedor responsável</h3>
+                      <div className="rounded-lg border bg-muted/30 p-3 flex items-center gap-2">
+                        <UserCog className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <Select
+                          value={conversation.assignedTo?.id ?? 'unassigned'}
+                          onValueChange={handleReassign}
+                          disabled={isReassigning}
+                        >
+                          <SelectTrigger className="h-8 text-sm flex-1">
+                            <SelectValue placeholder="Sem vendedor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned">Sem vendedor</SelectItem>
+                            {vendors.map((v) => (
+                              <SelectItem key={v.id} value={v.id}>
+                                {v.fullName} {v.isAvailable ? '🟢' : '⚪️'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </section>
+                  )}
+
                   {/* Linha do tempo */}
                   <section>
                     <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Linha do tempo</h3>
@@ -334,7 +388,7 @@ export function ConversationDrawer({ conversation, onClose }: ConversationDrawer
                         <p className="text-xs text-muted-foreground">
                           {messages.filter((m) => m.senderType === 'customer').length} do cliente ·{' '}
                           {messages.filter((m) => m.senderType === 'ai').length} da IA ·{' '}
-                          {messages.filter((m) => m.senderType === 'human').length} do operador
+                          {messages.filter((m) => m.senderType === 'human').length} do vendedor
                         </p>
                       </div>
                     </section>

@@ -40,6 +40,20 @@ export const tenants = pgTable('tenants', {
   geminiApiKey: text('gemini_api_key'),
   anthropicApiKey: text('anthropic_api_key'),
   elevenlabsApiKey: text('elevenlabs_api_key'),
+  lastLeadAssignedTo: uuid('last_lead_assigned_to'),
+})
+
+// Subconjunto de users usado pra elegibilidade do round-robin de leads
+// (services/backend/src/core/lead-routing.ts) — não existia neste arquivo
+// antes porque nada aqui precisava de dados de operador/vendedor.
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  fullName: text('full_name').notNull(),
+  role: text('role').notNull(),
+  isAvailable: boolean('is_available').notNull(),
+  active: boolean('active').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const contacts = pgTable('contacts', {
@@ -86,9 +100,11 @@ export const conversations = pgTable('conversations', {
   contactId: uuid('contact_id').notNull(),
   aiAgentId: uuid('ai_agent_id'),
   kanbanStageId: uuid('kanban_stage_id'),
+  assignedTo: uuid('assigned_to'),
   status: text('status').notNull(),
   aiSummary: text('ai_summary'),
   priority: text('priority').notNull(),
+  autonomousMode: boolean('autonomous_mode').notNull().default(false),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

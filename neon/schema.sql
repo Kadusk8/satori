@@ -234,6 +234,11 @@ CREATE TABLE IF NOT EXISTS tenants (
   max_operators       INTEGER NOT NULL DEFAULT 3,
   messages_used_month INTEGER NOT NULL DEFAULT 0,
 
+  -- Ponteiro de rotação do round-robin de leads (distribuição entre vendedores
+  -- online) — FK adicionada via ALTER depois da tabela users existir (users é
+  -- criada mais abaixo neste arquivo).
+  last_lead_assigned_to UUID,
+
   -- BYOK multi-LLM (criptografadas, migrations 018/023/024)
   openai_api_key     TEXT,
   gemini_api_key     TEXT,
@@ -317,6 +322,20 @@ CREATE POLICY "super_admin_full_access" ON users
 
 CREATE POLICY "service_role_full_access" ON users
   FOR ALL USING (auth.role() = 'service_role');
+
+-- FK de tenants.last_lead_assigned_to → users(id), adicionada aqui porque
+-- users só existe a partir deste ponto do arquivo (tenants vem antes).
+DO $$ BEGIN
+  ALTER TABLE tenants
+    ADD CONSTRAINT tenants_last_lead_assigned_to_fkey
+    FOREIGN KEY (last_lead_assigned_to) REFERENCES users(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Acelera a query de elegibilidade do round-robin (vendedores online) e a
+-- contagem de vendedores cadastrados por tenant.
+CREATE INDEX IF NOT EXISTS idx_users_tenant_role_available
+  ON users (tenant_id, role, is_available, active);
 
 
 -- ================================================================
@@ -536,6 +555,10 @@ CREATE TABLE IF NOT EXISTS conversations (
 
   priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
   channel  TEXT NOT NULL DEFAULT 'whatsapp',
+
+  -- true quando a IA assumiu o fechamento sozinha por falta de vendedor
+  -- online (ver toolEscalateToHuman) — gerenciado só por código de aplicação.
+  autonomous_mode BOOLEAN NOT NULL DEFAULT false,
 
   started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   closed_at       TIMESTAMPTZ,

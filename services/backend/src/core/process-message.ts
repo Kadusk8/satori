@@ -102,6 +102,7 @@ interface ConversationRow {
   tenant_id: string
   contact_id: string
   status: string
+  autonomous_mode: boolean
   whatsapp_number: string
   t_name: string
   business_hours: BusinessHours
@@ -145,7 +146,7 @@ interface MessageRow {
 
 export async function processMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
   const convRes = await pool.query<ConversationRow>(
-    `select c.id, c.tenant_id, c.contact_id, c.status,
+    `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode,
             ct.whatsapp_number,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key
@@ -359,6 +360,14 @@ Você é uma VENDEDORA digital. Seu trabalho é: entender o que o cliente quer �
 
 ## Contexto do negócio e personalidade
 ${agent.system_prompt}
+${conv.autonomous_mode ? `
+## Modo de fechamento autônomo (ativado — não há vendedor humano disponível agora)
+Você está conduzindo esta negociação sozinha até o fechamento, sem apoio de um vendedor humano no
+momento. Não prometa transferência ("vou chamar alguém", "já te transfiro") — isso quebra a confiança
+do cliente. Mantenha a mesma disciplina das regras acima: negocie só dentro do catálogo real (nunca
+invente preço, prazo ou desconto fora do cadastrado), quebre objeções com benefícios concretos e
+conduza ativamente para o fechamento (forma de pagamento, confirmação do pedido).
+` : ''}
 
 ## Contexto atual
 - Data/hora: ${now}

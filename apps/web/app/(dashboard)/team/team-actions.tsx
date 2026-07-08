@@ -48,20 +48,20 @@ export function InviteOperatorDialog() {
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
         <UserPlus className="h-4 w-4 mr-1" />
-        Convidar operador
+        Convidar vendedor
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Convidar operador</DialogTitle>
+            <DialogTitle>Convidar vendedor</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-3 py-2">
             <div className="space-y-1">
               <label className="text-sm font-medium">Nome completo</label>
               <Input
                 required
-                placeholder="Nome do operador"
+                placeholder="Nome do vendedor"
                 value={form.fullName}
                 onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
               />
@@ -81,7 +81,7 @@ export function InviteOperatorDialog() {
               <Select value={form.role} onValueChange={(v) => v && setForm((f) => ({ ...f, role: v as 'admin' | 'operator' }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="operator">Operador</SelectItem>
+                  <SelectItem value="operator">Vendedor</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
@@ -120,7 +120,7 @@ export function OperatorRowActions({ member }: { member: Member }) {
     setLoading(true)
     try {
       await updateOperator(member.id, { active: !member.active })
-      toast.success(member.active ? 'Operador desativado' : 'Operador reativado')
+      toast.success(member.active ? 'Vendedor desativado' : 'Vendedor reativado')
       router.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao atualizar')

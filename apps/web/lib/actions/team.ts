@@ -2,19 +2,31 @@
 
 import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
-import { withAdmin } from '@/lib/db'
+import { withAdmin, withClaims } from '@/lib/db'
 import { users, tenants } from '@/lib/db/schema'
-import { getSessionClaims } from '@/lib/auth/session'
+import { getSessionClaims, getDbClaims } from '@/lib/auth/session'
 import { upsertAuthUser } from '@/lib/auth/users'
 import { createToken } from '@/lib/auth/tokens'
 import { sendOperatorInviteEmail } from '@/lib/email/resend'
+import { isManager } from '@/lib/auth/permissions'
 
 async function requireOwnerOrAdmin() {
   const claims = await getSessionClaims()
-  if (!claims.tenantId || !claims.userRole || !['owner', 'admin'].includes(claims.userRole)) {
+  if (!claims.tenantId || !isManager(claims.userRole)) {
     throw new Error('Sem permissão para gerenciar a equipe.')
   }
   return { tenantId: claims.tenantId, userRole: claims.userRole }
+}
+
+/** Cada vendedor só altera a própria disponibilidade — nunca recebe userId como input. */
+export async function updateAvailability(isAvailable: boolean): Promise<void> {
+  const claims = await getSessionClaims()
+  if (!claims.userId) throw new Error('Sessão inválida.')
+  const dbClaims = (await getDbClaims())!
+  await withClaims(dbClaims, (tx) =>
+    tx.update(users).set({ isAvailable }).where(eq(users.id, claims.userId!))
+  )
+  revalidatePath('/conversations')
 }
 
 export async function inviteOperator(input: { email: string; fullName: string; role: 'admin' | 'operator' }) {
@@ -58,7 +70,7 @@ export async function updateOperator(
       .where(eq(users.id, userId))
       .limit(1)
 
-    if (!target[0]) throw new Error('Operador não encontrado.')
+    if (!target[0]) throw new Error('Vendedor não encontrado.')
     if (target[0].tenantId !== tenantId) throw new Error('Sem permissão para alterar esse usuário.')
     if (target[0].role === 'owner') throw new Error('Não é possível alterar o owner por aqui.')
 

@@ -8,7 +8,9 @@ import { ConversationDrawer } from '@/components/kanban/conversation-drawer'
 import type { KanbanStage, KanbanConversation } from '@/components/kanban/types'
 import { Filter, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { listKanban, moveConversation } from '@/lib/data/conversations'
+import { Switch } from '@/components/ui/switch'
+import { listKanban, moveConversation, type KanbanViewer } from '@/lib/data/conversations'
+import { updateAvailability } from '@/lib/actions/team'
 import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
@@ -85,20 +87,37 @@ export default function ConversationsPage() {
   const [filterSearch, setFilterSearch] = useState('')
   const [selectedConversation, setSelectedConversation] = useState<KanbanConversation | null>(null)
   const [tenantId, setTenantId] = useState<string | null>(null)
+  const [viewer, setViewer] = useState<KanbanViewer | null>(null)
+  const [isTogglingAvailability, setIsTogglingAvailability] = useState(false)
 
   // ── Carrega dados iniciais ────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
-      const { stages: stagesData, conversations: convsData, tenantId: tid } = await listKanban()
+      const { stages: stagesData, conversations: convsData, tenantId: tid, viewer: viewerData } = await listKanban()
       const mappedStages = stagesData.map(mapStage)
       setStages(mappedStages)
       setConversations(convsData.map((c) => mapConversation(c as unknown as DBConversation, mappedStages)))
       setTenantId(tid)
+      setViewer(viewerData)
     } catch (err) {
       toast.error('Erro ao carregar o kanban: ' + (err instanceof Error ? err.message : 'erro'))
     }
   }, [])
+
+  const handleToggleAvailability = useCallback(async (checked: boolean) => {
+    if (!viewer) return
+    setViewer((v) => (v ? { ...v, isAvailable: checked } : v))
+    setIsTogglingAvailability(true)
+    try {
+      await updateAvailability(checked)
+    } catch (err) {
+      setViewer((v) => (v ? { ...v, isAvailable: !checked } : v))
+      toast.error('Erro ao atualizar disponibilidade: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setIsTogglingAvailability(false)
+    }
+  }, [viewer])
 
   useEffect(() => {
     setIsLoading(true)
@@ -181,7 +200,19 @@ export default function ConversationsPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {viewer && (
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
+              <span className={viewer.isAvailable ? 'text-emerald-600' : 'text-muted-foreground'}>
+                {viewer.isAvailable ? 'Online' : 'Offline'}
+              </span>
+              <Switch
+                checked={viewer.isAvailable}
+                onCheckedChange={handleToggleAvailability}
+                disabled={isTogglingAvailability}
+              />
+            </label>
+          )}
           <Button
             variant={showFilters ? 'default' : 'outline'}
             size="sm"
@@ -305,6 +336,7 @@ export default function ConversationsPage() {
       <ConversationDrawer
         conversation={selectedConversation}
         onClose={() => setSelectedConversation(null)}
+        isManager={viewer ? viewer.role !== 'operator' : false}
       />
     </div>
   )
