@@ -419,6 +419,23 @@ export const followUps = pgTable(
   (t) => [index('idx_follow_ups_contact_pending').on(t.contactId)]
 )
 
+export const aiErrorLogs = pgTable(
+  'ai_error_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    aiAgentId: uuid('ai_agent_id').references(() => aiAgents.id, { onDelete: 'set null' }),
+    conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+    provider: text('provider').notNull(),
+    errorType: text('error_type').notNull().default('other'),
+    message: text('message').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => [index('idx_ai_error_logs_tenant_created').on(t.tenantId, t.createdAt)]
+)
+
 // Tipos inferidos — usar nos Server Components/Actions ao invés das interfaces
 // DB manuais espalhadas hoje pelas páginas.
 export type Tenant = typeof tenants.$inferSelect

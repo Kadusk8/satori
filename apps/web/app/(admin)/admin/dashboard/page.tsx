@@ -1,13 +1,20 @@
 import Link from 'next/link'
-import { desc } from 'drizzle-orm'
+import { desc, eq, gt } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
-import { tenants as tenantsTable } from '@/lib/db/schema'
+import { tenants as tenantsTable, aiErrorLogs } from '@/lib/db/schema'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Building2, MessageSquare, Wifi, Activity,
-  ArrowUpRight, Plus, WifiOff, TrendingUp,
+  ArrowUpRight, Plus, WifiOff, TrendingUp, AlertTriangle,
 } from 'lucide-react'
+
+const llmErrorTypeLabel: Record<string, string> = {
+  quota_exceeded: 'Créditos/tokens esgotados',
+  rate_limited: 'Rate limit',
+  auth_error: 'Chave de API inválida',
+  other: 'Erro do LLM',
+}
 
 const planVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   free: 'secondary', starter: 'outline', pro: 'default', enterprise: 'default',
@@ -49,8 +56,66 @@ export default async function AdminDashboardPage() {
   const porPlano: Record<string, number> = { free: 0, starter: 0, pro: 0, enterprise: 0 }
   for (const t of all) { if (t.plan in porPlano) porPlano[t.plan]++ }
 
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const llmErrors = await withAdmin((tx) =>
+    tx
+      .select({
+        id: aiErrorLogs.id,
+        tenantId: aiErrorLogs.tenantId,
+        tenantName: tenantsTable.name,
+        provider: aiErrorLogs.provider,
+        errorType: aiErrorLogs.errorType,
+        message: aiErrorLogs.message,
+        createdAt: aiErrorLogs.createdAt,
+      })
+      .from(aiErrorLogs)
+      .innerJoin(tenantsTable, eq(aiErrorLogs.tenantId, tenantsTable.id))
+      .where(gt(aiErrorLogs.createdAt, sevenDaysAgo))
+      .orderBy(desc(aiErrorLogs.createdAt))
+      .limit(20)
+  )
+  const quotaExceededTenants = new Set(
+    llmErrors.filter((e) => e.errorType === 'quota_exceeded').map((e) => e.tenantId)
+  )
+
   return (
     <div className="p-6 space-y-6">
+
+      {/* ── Alerta: IA parou de responder por erro de LLM ── */}
+      {llmErrors.length > 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            <span className="text-sm font-semibold text-destructive">
+              {quotaExceededTenants.size > 0
+                ? `${quotaExceededTenants.size} empresa${quotaExceededTenants.size > 1 ? 's' : ''} com créditos/tokens esgotados`
+                : 'IAs com erro ao responder'}
+            </span>
+            <span className="text-[11px] text-muted-foreground">· últimos 7 dias</span>
+          </div>
+          <div className="space-y-1.5 max-h-56 overflow-y-auto">
+            {llmErrors.map((e) => (
+              <Link
+                key={e.id}
+                href={`/admin/tenants/${e.tenantId}`}
+                className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-destructive/10 transition-colors"
+              >
+                <Badge
+                  variant={e.errorType === 'quota_exceeded' ? 'destructive' : 'outline'}
+                  className="text-[10px] px-1.5 py-0 h-4 shrink-0"
+                >
+                  {llmErrorTypeLabel[e.errorType] ?? e.errorType}
+                </Badge>
+                <span className="text-xs font-medium text-foreground truncate">{e.tenantName}</span>
+                <span className="text-[11px] text-muted-foreground shrink-0">{e.provider}</span>
+                <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+                  {new Date(e.createdAt!).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between">

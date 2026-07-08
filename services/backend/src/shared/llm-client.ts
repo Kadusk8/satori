@@ -277,6 +277,33 @@ async function callGemini(params: {
   return { content: textContent, toolCalls, finishReason: hasToolCall ? 'tool_calls' : 'stop' }
 }
 
+// ── Classificação de erros ───────────────────────────────────────────────────
+
+export type LLMErrorType = 'quota_exceeded' | 'rate_limited' | 'auth_error' | 'other'
+
+/** Classifica o erro de uma chamada de LLM a partir da mensagem lançada por
+ * callAnthropic/callOpenAI/callGemini (formato "<Provider> API <status>: <corpo>"). */
+export function classifyLLMError(err: unknown): { type: LLMErrorType; message: string } {
+  const message = err instanceof Error ? err.message : String(err)
+  const lower = message.toLowerCase()
+
+  if (
+    lower.includes('insufficient_quota') ||
+    lower.includes('credit balance') ||
+    lower.includes('exceeded your current quota') ||
+    lower.includes('billing')
+  ) {
+    return { type: 'quota_exceeded', message }
+  }
+  if (lower.includes('api 429') || lower.includes('rate_limit') || lower.includes('rate limit')) {
+    return { type: 'rate_limited', message }
+  }
+  if (lower.includes('api 401') || lower.includes('api 403') || lower.includes('invalid api key') || lower.includes('authentication')) {
+    return { type: 'auth_error', message }
+  }
+  return { type: 'other', message }
+}
+
 // ── Public main function ─────────────────────────────────────────────────────
 
 export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {

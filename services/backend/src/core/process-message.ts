@@ -11,7 +11,7 @@ import { pool, getTenantLlmKeys, getAgentLlmKey } from '../db/index.js'
 import { conversations, kanbanStages, messages } from '../db/schema.js'
 import { db } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
-import { callLLM, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
+import { callLLM, classifyLLMError, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
 import { AI_TOOLS } from '../shared/claude-tools.js'
 import { transcribeAudio } from '../shared/whisper-client.js'
 import { textToSpeech, audioToBase64 } from '../shared/elevenlabs-client.js'
@@ -212,20 +212,10 @@ export async function processMessage(conversationId: string): Promise<{ success:
     }
   }
 
-  // Verifica horário de atendimento
+  // A IA atende 24/7 — business_hours só é usado como informação de contexto
+  // no prompt (ex: pra agendamento), nunca pra bloquear a resposta.
   const businessHours = conv.business_hours
   const timezone = conv.timezone ?? 'America/Sao_Paulo'
-  const isOpen = isWithinBusinessHours(businessHours, timezone)
-
-  if (!isOpen && agent.out_of_hours_message) {
-    try {
-      const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
-      await evo.sendText(contactNumber, agent.out_of_hours_message)
-    } catch (err) {
-      console.error('[process-message] Erro ao enviar out_of_hours:', err)
-    }
-    return { success: true, outOfHours: true }
-  }
 
   // Histórico (últimas 40 mensagens)
   const historyRows = await db
@@ -424,19 +414,41 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
 
   for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
-    const response = await callLLM({
-      model: agent.model ?? 'claude-sonnet-4-20250514',
-      system: systemPrompt,
-      messages: loopMessages,
-      tools: allowedTools as LLMTool[],
-      maxTokens: agent.max_tokens ?? 1024,
-      temperature: Number(agent.temperature ?? 0.7),
-      provider: llmProvider,
-      anthropicApiKey: resolvedAnthropicKey ?? undefined,
-      openaiApiKey: resolvedOpenaiKey ?? undefined,
-      geminiApiKey: resolvedGeminiKey ?? undefined,
-      openrouterApiKey: resolvedOpenrouterKey ?? undefined,
-    })
+    let response: Awaited<ReturnType<typeof callLLM>>
+    try {
+      response = await callLLM({
+        model: agent.model ?? 'claude-sonnet-4-20250514',
+        system: systemPrompt,
+        messages: loopMessages,
+        tools: allowedTools as LLMTool[],
+        maxTokens: agent.max_tokens ?? 1024,
+        temperature: Number(agent.temperature ?? 0.7),
+        provider: llmProvider,
+        anthropicApiKey: resolvedAnthropicKey ?? undefined,
+        openaiApiKey: resolvedOpenaiKey ?? undefined,
+        geminiApiKey: resolvedGeminiKey ?? undefined,
+        openrouterApiKey: resolvedOpenrouterKey ?? undefined,
+      })
+    } catch (llmErr) {
+      const { type, message } = classifyLLMError(llmErr)
+      console.error(`[process-message] Erro no LLM (${llmProvider}, ${type}):`, message)
+      try {
+        await pool.query(
+          `insert into ai_error_logs (tenant_id, ai_agent_id, conversation_id, provider, error_type, message)
+           values ($1, $2, $3, $4, $5, $6)`,
+          [tenantId, agent.id, conversationId, llmProvider, type, message.slice(0, 2000)]
+        )
+      } catch (logErr) {
+        console.error('[process-message] Erro ao registrar ai_error_logs:', logErr)
+      }
+      try {
+        const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
+        await evo.sendText(contactNumber, 'Desculpa, estou com uma instabilidade técnica agora. Já vamos verificar e te responder em breve! 🙏')
+      } catch (sendErr) {
+        console.error('[process-message] Erro ao enviar fallback de erro de LLM:', sendErr)
+      }
+      return { success: false, skipped: `Erro de LLM (${type})` }
+    }
 
     if (response.stopReason !== 'tool_use') {
       const trimmed = response.text?.trim() ?? ''

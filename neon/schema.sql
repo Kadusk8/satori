@@ -837,6 +837,40 @@ CREATE TRIGGER trg_follow_ups_updated_at
 
 
 -- ================================================================
+-- TABELA: ai_error_logs
+-- ================================================================
+-- Registra falhas do LLM ao processar uma mensagem (ex: créditos/tokens
+-- esgotados, rate limit, chave inválida) — usado pelo dashboard do super
+-- admin pra alertar quando uma IA parou de responder.
+CREATE TABLE IF NOT EXISTS ai_error_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  ai_agent_id UUID REFERENCES ai_agents(id) ON DELETE SET NULL,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  error_type TEXT NOT NULL DEFAULT 'other' CHECK (error_type IN ('quota_exceeded', 'rate_limited', 'auth_error', 'other')),
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE ai_error_logs IS 'Falhas do LLM ao gerar resposta (créditos esgotados, rate limit, etc) — alimenta o alerta no dashboard do super admin.';
+
+CREATE INDEX IF NOT EXISTS idx_ai_error_logs_tenant_created ON ai_error_logs (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_error_logs_created ON ai_error_logs (created_at DESC);
+
+ALTER TABLE ai_error_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON ai_error_logs
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "service_role_full_access" ON ai_error_logs
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "super_admin_full_access" ON ai_error_logs
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN = true);
+
+
+-- ================================================================
 -- FUNÇÕES DE DOMÍNIO E TRIGGERS (migration 012 — 100% portáveis)
 -- ================================================================
 
