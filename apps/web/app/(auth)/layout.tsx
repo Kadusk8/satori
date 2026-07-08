@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Autenticação | ZapAgent',
-  description: 'Entre na sua conta ZapAgent',
+  title: 'Autenticação | Satori',
+  description: 'Entre na sua conta Satori',
 }
 
 export default function AuthLayout({

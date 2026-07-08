@@ -46,7 +46,7 @@ export async function inviteOperator(input: { email: string; fullName: string; r
       .values({ id: authUserId, tenantId, fullName, email, role })
       .onConflictDoNothing()
     const t = await tx.select({ name: tenants.name }).from(tenants).where(eq(tenants.id, tenantId)).limit(1)
-    return { userId: authUserId, companyName: t[0]?.name ?? 'ZapAgent' }
+    return { userId: authUserId, companyName: t[0]?.name ?? 'Satori' }
   })
   void userId
 

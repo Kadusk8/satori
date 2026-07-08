@@ -31,7 +31,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams): Promise
 }
 
 function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://app.zapagent.com'
+  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://app.satori.com'
 }
 
 /** Email de redefinição de senha (link com token). */
@@ -39,7 +39,7 @@ export async function sendPasswordResetEmail(to: string, token: string): Promise
   const link = `${appUrl()}/auth/reset-password?token=${encodeURIComponent(token)}`
   await sendEmail({
     to,
-    subject: 'Redefinição de senha — ZapAgent',
+    subject: 'Redefinição de senha — Satori',
     html: `
       <p>Você pediu para redefinir sua senha.</p>
       <p><a href="${link}">Clique aqui para escolher uma nova senha</a>. O link expira em 24 horas.</p>
@@ -55,7 +55,7 @@ export async function sendOperatorInviteEmail(to: string, token: string, company
     to,
     subject: `Convite para a equipe — ${companyName}`,
     html: `
-      <p>Você foi convidado para atender no painel da <strong>${companyName}</strong> no ZapAgent.</p>
+      <p>Você foi convidado para atender no painel da <strong>${companyName}</strong> no Satori.</p>
       <p><a href="${link}">Clique aqui para definir sua senha e acessar</a>. O link expira em 24 horas.</p>
     `,
   })

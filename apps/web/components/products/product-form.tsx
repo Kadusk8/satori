@@ -25,6 +25,28 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
+/**
+ * Converte texto de preço em BRL (com ou sem separador de milhar) pra number.
+ * Ex: "57.900,00" → 57900, "99,90" → 99.9, "57900" → 57900.
+ * Regra: só trata a última vírgula/ponto como separador decimal se tiver 1-2
+ * dígitos depois — senão, é separador de milhar (removido).
+ */
+function parseBRLPrice(raw: string): number | null {
+  const cleaned = raw.trim().replace(/[^\d.,]/g, '')
+  if (!cleaned) return null
+
+  const decimalIndex = Math.max(cleaned.lastIndexOf(','), cleaned.lastIndexOf('.'))
+  const afterDecimal = decimalIndex === -1 ? '' : cleaned.slice(decimalIndex + 1)
+  const isDecimalSeparator = afterDecimal.length > 0 && afterDecimal.length <= 2
+
+  const intPart = isDecimalSeparator ? cleaned.slice(0, decimalIndex) : cleaned
+  const intDigits = intPart.replace(/[.,]/g, '')
+  const normalized = isDecimalSeparator ? `${intDigits}.${afterDecimal}` : intDigits
+
+  const value = parseFloat(normalized)
+  return Number.isNaN(value) ? null : value
+}
+
 interface ProductFormProps {
   product?: Product | null
   cloudName: string
@@ -77,7 +99,7 @@ export function ProductForm({
         name: data.name,
         description: data.description ?? null,
         shortDescription: data.shortDescription ?? null,
-        price: data.price ? parseFloat(data.price.replace(',', '.')) : null,
+        price: data.price ? parseBRLPrice(data.price) : null,
         priceDisplay: data.priceDisplay ?? null,
         category: data.category ?? null,
         tags: data.tags
@@ -169,7 +191,7 @@ export function ProductForm({
               <label className="block text-sm font-medium mb-1.5">Preço (R$)</label>
               <Input
                 {...register('price')}
-                placeholder="99,90"
+                placeholder="57.900,00"
                 type="text"
                 inputMode="decimal"
               />

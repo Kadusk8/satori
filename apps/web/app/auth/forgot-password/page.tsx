@@ -301,7 +301,7 @@ export default function ForgotPasswordPage() {
       <div className="auth-container">
         <div className="auth-logo">
           <div className="auth-logo-icon">⚡</div>
-          <span className="auth-logo-text">ZapAgent</span>
+          <span className="auth-logo-text">Satori</span>
         </div>
 
         <div className="auth-card">

@@ -35,7 +35,7 @@ export default async function TeamPage() {
 
   if (!canManage) {
     return (
-      <div className="p-8 max-w-2xl">
+      <div className="p-8 max-w-2xl mx-auto">
         <Card>
           <CardContent className="flex items-center gap-3 py-8">
             <ShieldAlert className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -66,7 +66,7 @@ export default async function TeamPage() {
   )
 
   return (
-    <div className="p-8 space-y-6 max-w-4xl">
+    <div className="p-8 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Equipe</h1>

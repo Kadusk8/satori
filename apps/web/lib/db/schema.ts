@@ -1,4 +1,4 @@
-// Schema Drizzle espelhando neon/schema.sql (12 tabelas do domínio ZapAgent).
+// Schema Drizzle espelhando neon/schema.sql (12 tabelas do domínio Satori).
 // Escrito à mão porque o Neon ainda não foi provisionado (introspecção via
 // `drizzle-kit pull` fica pra quando o banco estiver de pé). Mantém os mesmos
 // nomes de coluna snake_case do SQL — o Drizzle expõe camelCase no TS.

@@ -82,7 +82,7 @@ export default async function AnalyticsPage() {
   const maxMes = Math.max(...meses.map(m => m.count), 1)
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl">
+    <div className="p-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
         <p className="text-muted-foreground text-sm mt-1">

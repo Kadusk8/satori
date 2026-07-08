@@ -41,8 +41,8 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
         !product.isAvailable && 'opacity-60'
       )}
     >
-      {/* Imagem */}
-      <div className="relative h-44 bg-muted overflow-hidden">
+      {/* Imagem (quadrada) */}
+      <div className="relative aspect-square bg-muted overflow-hidden">
         {thumbnail ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

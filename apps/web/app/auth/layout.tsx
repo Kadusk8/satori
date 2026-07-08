@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Recuperar senha | ZapAgent',
-  description: 'Recuperação de senha da conta ZapAgent',
+  title: 'Recuperar senha | Satori',
+  description: 'Recuperação de senha da conta Satori',
 }
 
 export default function AuthUtilityLayout({

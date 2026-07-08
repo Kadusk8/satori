@@ -24,7 +24,7 @@ export default async function SettingsPage() {
 
   if (!isManager(claims.userRole)) {
     return (
-      <div className="p-8 max-w-2xl">
+      <div className="p-8 max-w-2xl mx-auto">
         <Card>
           <CardContent className="flex items-center gap-3 py-8">
             <ShieldAlert className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -38,11 +38,11 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
+    <div className="p-8 space-y-6 max-w-2xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold">Configurações</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Configurações da sua empresa no ZapAgent
+          Configurações da sua empresa no Satori
         </p>
       </div>
 

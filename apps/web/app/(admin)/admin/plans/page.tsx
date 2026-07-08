@@ -45,7 +45,7 @@ export default async function PlansPage() {
   }
 
   return (
-    <div className="p-8 space-y-8 max-w-6xl">
+    <div className="p-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Planos e Limites</h1>
         <p className="text-muted-foreground text-sm mt-1">

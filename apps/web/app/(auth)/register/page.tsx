@@ -397,12 +397,12 @@ export default function RegisterPage() {
       <div className="auth-container">
         <div className="auth-logo">
           <div className="auth-logo-icon">⚡</div>
-          <span className="auth-logo-text">ZapAgent</span>
+          <span className="auth-logo-text">Satori</span>
         </div>
 
         <div className="auth-card">
           <h1 className="auth-card-title">Criar conta</h1>
-          <p className="auth-card-subtitle">Comece sua jornada com o ZapAgent</p>
+          <p className="auth-card-subtitle">Comece sua jornada com o Satori</p>
 
           {error && (
             <div className="auth-error-banner">
