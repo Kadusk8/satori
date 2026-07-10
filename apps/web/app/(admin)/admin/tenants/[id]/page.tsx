@@ -12,6 +12,7 @@ import { LlmEditor } from './llm-editor'
 import { AudioEditor } from './audio-editor'
 import { EvolutionConnection } from './evolution-connection'
 import { EvolutionEditor } from './evolution-editor'
+import { BusinessHoursEditor } from './business-hours-editor'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default',
@@ -313,10 +314,18 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
         {/* Horários */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              Horários
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Horários
+              </CardTitle>
+              <BusinessHoursEditor
+                tenantId={id}
+                currentBusinessHours={businessHours}
+                currentTimezone={tenant.timezone ?? 'America/Sao_Paulo'}
+                currentAppointmentDurationMinutes={tenant.appointment_duration_minutes ?? 30}
+              />
+            </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <DetailRow label="Dias ativos" value={activeDays} />

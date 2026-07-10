@@ -54,6 +54,25 @@ export async function updateTenant(tenantId: string, data: {
   revalidatePath('/admin/plans')
 }
 
+export async function updateTenantBusinessHours(tenantId: string, data: {
+  businessHours: Record<string, { enabled: boolean; start: string; end: string }>
+  timezone: string
+  appointmentDurationMinutes: number
+}) {
+  await withAdmin((tx) =>
+    tx
+      .update(tenants)
+      .set({
+        businessHours: data.businessHours,
+        timezone: data.timezone,
+        appointmentDurationMinutes: data.appointmentDurationMinutes,
+        updatedAt: new Date(),
+      })
+      .where(eq(tenants.id, tenantId))
+  )
+  revalidatePath(`/admin/tenants/${tenantId}`)
+}
+
 export async function updateAgent(agentId: string, data: {
   name?: string
   system_prompt?: string
