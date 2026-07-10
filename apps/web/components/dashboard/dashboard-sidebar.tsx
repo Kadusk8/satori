@@ -79,12 +79,8 @@ export function DashboardSidebar({ tenantId, userRole }: DashboardSidebarProps) 
     { label: 'Contatos',     href: '/contacts',      icon: Users,           badge: 0 },
     { label: 'Produtos',     href: '/products',      icon: Package,         badge: 0 },
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
-    ...(isManagerRole
-      ? [
-          { label: 'Equipe',       href: '/team',     icon: UserCog,  badge: 0 },
-          { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },
-        ]
-      : []),
+    ...(isManagerRole ? [{ label: 'Equipe', href: '/team', icon: UserCog, badge: 0 }] : []),
+    { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },
   ]
 
   return (
