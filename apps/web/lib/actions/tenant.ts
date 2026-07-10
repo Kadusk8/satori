@@ -1,9 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
-import { tenants, aiAgents } from '@/lib/db/schema'
+import { tenants, aiAgents, users, authUsers } from '@/lib/db/schema'
 import { encryptedColumn } from '@/lib/db/encryption'
 import { checkEvolutionConnection, setEvolutionWebhook } from '@/lib/evolution/client'
 
@@ -48,7 +48,37 @@ export async function updateTenant(tenantId: string, data: {
   }
   // Remove undefined pra não sobrescrever colunas não enviadas.
   const cleaned = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
-  await withAdmin((tx) => tx.update(tenants).set(cleaned).where(eq(tenants.id, tenantId)))
+
+  await withAdmin(async (tx) => {
+    await tx.update(tenants).set(cleaned).where(eq(tenants.id, tenantId))
+
+    // O email do owner também é a credencial de login (auth_users.email) —
+    // sem isso, mudar aqui só atualizava o metadado do tenant e o login
+    // continuava exigindo o email antigo.
+    const newEmail = data.owner_email?.trim().toLowerCase()
+    if (newEmail) {
+      const [owner] = await tx
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(and(eq(users.tenantId, tenantId), eq(users.role, 'owner')))
+        .limit(1)
+
+      if (owner && owner.email.toLowerCase() !== newEmail) {
+        const [conflict] = await tx
+          .select({ id: authUsers.id })
+          .from(authUsers)
+          .where(eq(authUsers.email, newEmail))
+          .limit(1)
+        if (conflict && conflict.id !== owner.id) {
+          throw new Error('Esse email já está em uso por outra conta — escolha outro.')
+        }
+
+        await tx.update(authUsers).set({ email: newEmail, updatedAt: new Date() }).where(eq(authUsers.id, owner.id))
+        await tx.update(users).set({ email: newEmail }).where(eq(users.id, owner.id))
+      }
+    }
+  })
+
   revalidatePath(`/admin/tenants/${tenantId}`)
   revalidatePath('/admin/tenants')
   revalidatePath('/admin/plans')
