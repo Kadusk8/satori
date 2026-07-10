@@ -19,8 +19,8 @@ import {
   setDefaultKanbanStage,
   reorderKanbanStages,
   deleteKanbanStage,
-  PROTECTED_STAGE_SLUGS,
 } from '@/lib/actions/kanban-stages'
+import { PROTECTED_STAGE_SLUGS } from '@/lib/kanban-stage-slugs'
 
 const PRESET_COLORS = ['#6366f1', '#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#6b7280', '#ec4899']
 const PROTECTED_SLUGS: readonly string[] = PROTECTED_STAGE_SLUGS

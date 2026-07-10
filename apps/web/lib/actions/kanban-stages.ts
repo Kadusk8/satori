@@ -6,6 +6,7 @@ import { withClaims } from '@/lib/db'
 import { kanbanStages, conversations } from '@/lib/db/schema'
 import { getSessionClaims, getDbClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
+import { PROTECTED_STAGE_SLUGS } from '@/lib/kanban-stage-slugs'
 
 async function requireManagerClaims() {
   const claims = await getSessionClaims()
@@ -32,19 +33,6 @@ function revalidateKanbanPaths() {
   revalidatePath('/conversations')
   revalidatePath('/settings/kanban')
 }
-
-// Slugs usados por código do backend (webhook, process-message, tools) e pelo
-// trigger sync_conversation_status_to_kanban pra mover cards automaticamente
-// (ver neon/schema.sql). Excluir uma dessas quebraria essa automação, então
-// ficam protegidas contra exclusão — só podem ser renomeadas/recoloridas.
-export const PROTECTED_STAGE_SLUGS = [
-  'novo_lead',
-  'ia_atendendo',
-  'aguardando_humano',
-  'em_atendimento',
-  'agendado',
-  'finalizado',
-] as const
 
 export async function createKanbanStage(input: { name: string; color: string }) {
   const { tenantId, dbClaims } = await requireManagerClaims()
