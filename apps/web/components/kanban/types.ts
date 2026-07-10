@@ -17,6 +17,7 @@ export interface KanbanConversation {
     id: string
     name: string
     phone: string
+    notes?: string | null
   }
   lastMessage?: string
   aiAgentName?: string

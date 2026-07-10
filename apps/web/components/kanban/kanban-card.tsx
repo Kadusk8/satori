@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Bot, User, AlertCircle, Clock } from 'lucide-react'
+import { Bot, User, AlertCircle, Clock, StickyNote } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { KanbanConversation } from './types'
 import { formatDistanceToNow } from './utils'
@@ -75,11 +75,18 @@ export function KanbanCard({ conversation, isDragging, onCardClick }: KanbanCard
         >
           {conversation.contact.name}
         </Link>
-        {conversation.priority !== 'normal' && (
-          <span className={cn('text-xs font-medium shrink-0', priorityInfo.class)}>
-            {priorityInfo.label}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {conversation.contact.notes && (
+            <span title="Tem observação">
+              <StickyNote className="h-3 w-3 text-amber-500" />
+            </span>
+          )}
+          {conversation.priority !== 'normal' && (
+            <span className={cn('text-xs font-medium', priorityInfo.class)}>
+              {priorityInfo.label}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Última mensagem */}

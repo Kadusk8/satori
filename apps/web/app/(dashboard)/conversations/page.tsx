@@ -23,7 +23,7 @@ interface DBConversation {
   last_message_at: string
   kanban_stage_id: string | null
   ai_agents: { name: string } | null
-  contacts: { id: string; whatsapp_name: string | null; custom_name: string | null; whatsapp_number: string }
+  contacts: { id: string; whatsapp_name: string | null; custom_name: string | null; whatsapp_number: string; notes: string | null }
   users: { id: string; full_name: string } | null
   messages: { content: string | null }[]
 }
@@ -51,6 +51,7 @@ function mapConversation(row: DBConversation, stages: KanbanStage[]): KanbanConv
       id: row.contacts.id,
       name: row.contacts.custom_name ?? row.contacts.whatsapp_name ?? row.contacts.whatsapp_number,
       phone: row.contacts.whatsapp_number,
+      notes: row.contacts.notes,
     },
     lastMessage: row.messages?.[0]?.content ?? undefined,
     aiAgentName: row.ai_agents?.name ?? undefined,

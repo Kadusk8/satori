@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar, UserCog } from 'lucide-react'
+import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar, UserCog, StickyNote } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { MessageBubble } from '@/components/chat/message-bubble'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { getConversationDrawer } from '@/lib/data/chat'
 import { listVendors, reassignConversation } from '@/lib/data/conversations'
+import { updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 import { cn } from '@/lib/utils'
 import type { KanbanConversation } from './types'
 import { toast } from 'sonner'
@@ -116,6 +119,10 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
   const [isLoading, setIsLoading] = useState(false)
   const [vendors, setVendors] = useState<Array<{ id: string; fullName: string; isAvailable: boolean }>>([])
   const [isReassigning, setIsReassigning] = useState(false)
+  const [notesDraft, setNotesDraft] = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+  const [tagInput, setTagInput] = useState('')
+  const [savingTag, setSavingTag] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Carrega mensagens e detalhes quando abre uma conversa
@@ -134,7 +141,11 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
         const res = await getConversationDrawer(conversation!.id)
         if (cancelled) return
 
-        if (res?.detail) setDetail(res.detail as unknown as ConversationDetail)
+        if (res?.detail) {
+          const d = res.detail as unknown as ConversationDetail
+          setDetail(d)
+          setNotesDraft(d.contacts.notes ?? '')
+        }
 
         setMessages(
           ((res?.messages ?? []) as unknown as DBMessage[]).map((m) => ({
@@ -178,6 +189,53 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
       toast.error('Erro ao reatribuir: ' + (err instanceof Error ? err.message : 'erro'))
     } finally {
       setIsReassigning(false)
+    }
+  }
+
+  async function handleSaveNotes() {
+    if (!detail) return
+    setSavingNotes(true)
+    try {
+      await updateContactNotes(detail.contacts.id, notesDraft)
+      setDetail({ ...detail, contacts: { ...detail.contacts, notes: notesDraft.trim() || null } })
+      toast.success('Observação salva.')
+    } catch (err) {
+      toast.error('Erro ao salvar: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setSavingNotes(false)
+    }
+  }
+
+  async function handleAddTag(e: React.FormEvent) {
+    e.preventDefault()
+    if (!detail) return
+    const tag = tagInput.trim().toLowerCase()
+    if (!tag) return
+    if (detail.contacts.tags?.includes(tag)) {
+      setTagInput('')
+      return
+    }
+    const nextTags = [...(detail.contacts.tags ?? []), tag]
+    setSavingTag(true)
+    try {
+      await updateContactTags(detail.contacts.id, nextTags)
+      setDetail({ ...detail, contacts: { ...detail.contacts, tags: nextTags } })
+      setTagInput('')
+    } catch (err) {
+      toast.error('Erro ao adicionar etiqueta: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setSavingTag(false)
+    }
+  }
+
+  async function handleRemoveTag(tag: string) {
+    if (!detail) return
+    const nextTags = (detail.contacts.tags ?? []).filter((t) => t !== tag)
+    try {
+      await updateContactTags(detail.contacts.id, nextTags)
+      setDetail({ ...detail, contacts: { ...detail.contacts, tags: nextTags } })
+    } catch (err) {
+      toast.error('Erro ao remover etiqueta: ' + (err instanceof Error ? err.message : 'erro'))
     }
   }
 
@@ -291,13 +349,40 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
                           <span>{detail.contacts.email}</span>
                         </div>
                       )}
-                      {detail?.contacts.tags && detail.contacts.tags.length > 0 && (
+                      {detail && (
                         <div className="flex items-start gap-2 text-sm">
                           <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                          <div className="flex flex-wrap gap-1">
-                            {detail.contacts.tags.map((tag) => (
-                              <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                            ))}
+                          <div className="flex-1 flex flex-col gap-1.5">
+                            {detail.contacts.tags && detail.contacts.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {detail.contacts.tags.map((tag) => (
+                                  <button
+                                    key={tag}
+                                    type="button"
+                                    onClick={() => handleRemoveTag(tag)}
+                                    title="Remover etiqueta"
+                                    className="group"
+                                  >
+                                    <Badge variant="secondary" className="text-xs gap-1 group-hover:bg-destructive/10 group-hover:text-destructive transition-colors">
+                                      {tag}
+                                      <X className="h-2.5 w-2.5" />
+                                    </Badge>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <form onSubmit={handleAddTag} className="flex gap-1.5">
+                              <Input
+                                value={tagInput}
+                                onChange={(e) => setTagInput(e.target.value)}
+                                placeholder="Nova etiqueta..."
+                                className="h-7 text-xs"
+                                disabled={savingTag}
+                              />
+                              <Button type="submit" size="sm" variant="outline" className="h-7 text-xs shrink-0" disabled={savingTag || !tagInput.trim()}>
+                                Adicionar
+                              </Button>
+                            </form>
                           </div>
                         </div>
                       )}
@@ -369,12 +454,36 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
                     )
                   })()}
 
-                  {/* Anotações */}
-                  {detail?.contacts.notes && (
+                  {/* Observação do lead */}
+                  {detail && (
                     <section>
-                      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Anotações</h3>
-                      <div className="rounded-lg border bg-muted/30 p-3">
-                        <p className="text-sm">{detail.contacts.notes}</p>
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <StickyNote className="h-3 w-3" />
+                        Observação do lead
+                      </h3>
+                      <div className="rounded-lg border bg-muted/30 p-3 flex flex-col gap-2">
+                        <Textarea
+                          value={notesDraft}
+                          onChange={(e) => setNotesDraft(e.target.value)}
+                          placeholder="Anote aqui detalhes sobre esse lead — interesse, objeções, combinados..."
+                          className="text-sm bg-background min-h-20"
+                        />
+                        {notesDraft !== (detail.contacts.notes ?? '') && (
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setNotesDraft(detail.contacts.notes ?? '')}
+                              disabled={savingNotes}
+                            >
+                              Cancelar
+                            </Button>
+                            <Button size="sm" className="h-7 text-xs" onClick={handleSaveNotes} disabled={savingNotes}>
+                              {savingNotes ? 'Salvando...' : 'Salvar'}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </section>
                   )}

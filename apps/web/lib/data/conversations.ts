@@ -14,7 +14,7 @@ export interface DBStage {
 export interface DBConversation {
   id: string; status: string; priority: string; last_message_at: string; kanban_stage_id: string | null
   ai_agents: { name: string } | null
-  contacts: { id: string; whatsapp_name: string | null; custom_name: string | null; whatsapp_number: string }
+  contacts: { id: string; whatsapp_name: string | null; custom_name: string | null; whatsapp_number: string; notes: string | null }
   users: { id: string; full_name: string } | null
   messages: { content: string | null }[]
 }
@@ -74,6 +74,7 @@ export async function listKanban(): Promise<{
         whatsapp_name: contacts.whatsappName,
         custom_name: contacts.customName,
         whatsapp_number: contacts.whatsappNumber,
+        notes: contacts.notes,
         assigned_id: users.id,
         assigned_name: users.fullName,
         last_message: sql<string | null>`(select content from messages m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`,
@@ -112,6 +113,7 @@ export async function listKanban(): Promise<{
         whatsapp_name: r.whatsapp_name,
         custom_name: r.custom_name,
         whatsapp_number: r.whatsapp_number,
+        notes: r.notes,
       },
       users: r.assigned_id ? { id: r.assigned_id, full_name: r.assigned_name! } : null,
       messages: r.last_message !== null ? [{ content: r.last_message }] : [],
