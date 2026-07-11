@@ -45,7 +45,10 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
     `select distinct category from products where tenant_id = $1 and is_available = true and category is not null`,
     [tenantId]
   )
-  const uniqueCategories = catRes.rows.map((r) => r.category)
+  // Categoria vazia ('' — diferente de NULL, que já é excluído pelo where acima) não é uma
+  // categoria de verdade: toda string a "contém", então sem esse filtro ela combinaria com
+  // QUALQUER busca e sequestraria o 1º tier, nunca deixando cair no full-text/ilike por nome.
+  const uniqueCategories = catRes.rows.map((r) => r.category).filter((cat) => cat.trim().length > 0)
   const queryLower = query.toLowerCase()
   const matchedCategory = categoryParam ?? uniqueCategories.find((cat) => queryLower.includes(cat.toLowerCase())) ?? null
 

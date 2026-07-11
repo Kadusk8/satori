@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { isWithinBusinessHours, normalizeMessageSequence, splitMessage } from './process-message.js'
+import {
+  extractCustomerKeywords,
+  extractFocusProductCandidate,
+  isMoreImagesIntent,
+  isWithinBusinessHours,
+  normalizeMessageSequence,
+  splitMessage,
+} from './process-message.js'
 import type { LLMMessage } from '../shared/llm-client.js'
 
 describe('isWithinBusinessHours', () => {
@@ -63,5 +70,111 @@ describe('normalizeMessageSequence', () => {
 
   it('lista vazia devolve lista vazia', () => {
     expect(normalizeMessageSequence([])).toEqual([])
+  })
+})
+
+describe('extractCustomerKeywords', () => {
+  it('remove stopwords e palavras curtas', () => {
+    expect(extractCustomerKeywords('quero ver o corolla por favor')).toEqual(['corolla'])
+  })
+
+  it('preserva acentos e ignora pontuação', () => {
+    expect(extractCustomerKeywords('tem colchão de casal?')).toEqual(['colchão', 'casal'])
+  })
+
+  it('conteúdo vazio ou nulo devolve lista vazia', () => {
+    expect(extractCustomerKeywords(null)).toEqual([])
+    expect(extractCustomerKeywords('')).toEqual([])
+  })
+})
+
+describe('isMoreImagesIntent', () => {
+  it('detecta pedidos comuns de mais fotos', () => {
+    for (const msg of [
+      'tem mais fotos do fox?',
+      'Me manda mais fotos do fox',
+      'manda todas as fotos',
+      'quero ver mais imagens',
+      'tem outros ângulos?',
+      'quero ver por dentro',
+      'me mostra o interior',
+    ]) {
+      expect(isMoreImagesIntent(msg), msg).toBe(true)
+    }
+  })
+
+  it('não dispara pra pedidos que não são de fotos', () => {
+    for (const msg of [
+      'quero ver mais opções',
+      'tem carro mais barato?',
+      'qual o preço?',
+      'gostei, quero comprar',
+      null,
+      '',
+    ]) {
+      expect(isMoreImagesIntent(msg), String(msg)).toBe(false)
+    }
+  })
+})
+
+describe('extractFocusProductCandidate', () => {
+  const baseMsg = {
+    id: '1',
+    sender_type: 'ai',
+    content: 'texto',
+    content_type: 'text',
+    media_url: null,
+    created_at: new Date(),
+  }
+
+  it('prioriza o último send_product_image bem-sucedido', () => {
+    const history = [
+      {
+        ...baseMsg,
+        id: '1',
+        ai_tool_calls: [
+          { name: 'search_products', input: {}, result: '📦 *Fox*\n...\nID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+        ],
+      },
+      {
+        ...baseMsg,
+        id: '2',
+        ai_tool_calls: [
+          { name: 'send_product_image', input: { product_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }, result: 'ok' },
+        ],
+      },
+    ]
+    expect(extractFocusProductCandidate(history)).toEqual({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' })
+  })
+
+  it('ignora tentativas de imagem que falharam ("Produto não encontrado")', () => {
+    const history = [
+      {
+        ...baseMsg,
+        id: '1',
+        ai_tool_calls: [
+          { name: 'send_more_product_images', input: { product_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' }, result: 'Produto não encontrado.' },
+        ],
+      },
+    ]
+    expect(extractFocusProductCandidate(history)).toBeNull()
+  })
+
+  it('cai pro fallback de search_products quando não há tool de imagem bem-sucedida', () => {
+    const history = [
+      {
+        ...baseMsg,
+        id: '1',
+        ai_tool_calls: [
+          { name: 'search_products', input: {}, result: '📦 *HB20*\n...\nID: cccccccc-cccc-cccc-cccc-cccccccccccc' },
+        ],
+      },
+    ]
+    expect(extractFocusProductCandidate(history)).toEqual({ name: 'HB20', id: 'cccccccc-cccc-cccc-cccc-cccccccccccc' })
+  })
+
+  it('histórico sem ai_tool_calls devolve null', () => {
+    const history = [{ ...baseMsg, ai_tool_calls: null }]
+    expect(extractFocusProductCandidate(history)).toBeNull()
   })
 })

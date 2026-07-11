@@ -8,7 +8,7 @@
 
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { pool, getTenantLlmKeys, getAgentLlmKey } from '../db/index.js'
-import { conversations, kanbanStages, messages } from '../db/schema.js'
+import { conversations, kanbanStages, messages, products } from '../db/schema.js'
 import { db } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { callLLM, classifyLLMError, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
@@ -142,7 +142,65 @@ interface MessageRow {
   content: string | null
   content_type: string
   media_url: string | null
+  ai_tool_calls: Array<{ name: string; input: Record<string, unknown>; result: string }> | null
   created_at: Date
+}
+
+const STOP_WORDS = new Set([
+  'quero', 'para', 'favor', 'você', 'como', 'tenho', 'esse', 'essa', 'aqui', 'mais', 'qual', 'quer', 'com', 'por',
+  'uma', 'que', 'tem', 'ver', 'gostaria', 'preciso', 'pode', 'mostrar', 'produto', 'coisa', 'algo', 'isso', 'isto',
+  'aquilo', 'este', 'esta',
+])
+
+export function extractCustomerKeywords(content: string | null | undefined): string[] {
+  if (!content) return []
+  return content
+    .toLowerCase()
+    .replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !STOP_WORDS.has(w))
+}
+
+// Detecta se a mensagem do cliente é um pedido claro de MAIS fotos/imagens do produto
+// que ele já está vendo (ex: "tem mais fotos?", "manda todas", "quero ver por dentro").
+// Usado pra forçar o envio determinístico das fotos adicionais, já que o LLM erra esse
+// fluxo com frequência. Não dispara pra "quero ver mais opções" (isso é outro produto).
+export function isMoreImagesIntent(content: string | null | undefined): boolean {
+  if (!content) return false
+  const msg = content.toLowerCase()
+  if (/por dentro/.test(msg)) return true
+  return (
+    /(fotos?|imagens?|[âa]ngulos?|interior)/.test(msg) &&
+    /(mais|outr[ao]s?|todas?|demais|manda|envi|quero|ver|tem|mostr)/.test(msg)
+  )
+}
+
+const FOCUS_LOOKBACK_MESSAGES = 15
+
+export function extractFocusProductCandidate(history: MessageRow[]): { id: string; name?: string } | null {
+  const window = history.slice(-FOCUS_LOOKBACK_MESSAGES)
+  let searchFallback: { id: string; name?: string } | null = null
+
+  for (let i = window.length - 1; i >= 0; i--) {
+    const calls = window[i].ai_tool_calls
+    if (!Array.isArray(calls)) continue
+    for (let j = calls.length - 1; j >= 0; j--) {
+      const call = calls[j]
+      if (
+        (call.name === 'send_product_image' || call.name === 'send_more_product_images') &&
+        call.result !== 'Produto não encontrado.' &&
+        call.result !== 'Produto não encontrado ou sem imagem cadastrada.'
+      ) {
+        const id = String(call.input?.product_id ?? '')
+        if (id) return { id }
+      }
+      if (!searchFallback && call.name === 'search_products') {
+        const match = /📦 \*([^*]+)\*[\s\S]*?ID: ([a-f0-9-]{36})/.exec(call.result)
+        if (match) searchFallback = { name: match[1].trim(), id: match[2].trim() }
+      }
+    }
+  }
+  return searchFallback
 }
 
 export async function processMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
@@ -225,6 +283,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
       content: messages.content,
       contentType: messages.contentType,
       mediaUrl: messages.mediaUrl,
+      aiToolCalls: messages.aiToolCalls,
       createdAt: messages.createdAt,
     })
     .from(messages)
@@ -237,6 +296,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
     content: m.content,
     content_type: m.contentType,
     media_url: m.mediaUrl,
+    ai_tool_calls: m.aiToolCalls as MessageRow['ai_tool_calls'],
     created_at: m.createdAt,
   }))
 
@@ -261,6 +321,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
         content: lastCustomerRows[0].content,
         content_type: lastCustomerRows[0].contentType,
         media_url: lastCustomerRows[0].mediaUrl,
+        ai_tool_calls: null,
         created_at: lastCustomerRows[0].createdAt,
       }
     : null
@@ -316,18 +377,31 @@ export async function processMessage(conversationId: string): Promise<{ success:
 
   const normalizedMessages = normalizeMessageSequence(llmMessages)
 
-  const stopWords = new Set([
-    'quero', 'para', 'favor', 'você', 'como', 'tenho', 'esse', 'essa', 'aqui', 'mais', 'qual', 'quer', 'com', 'por',
-    'uma', 'que', 'tem', 'ver', 'gostaria', 'preciso', 'pode', 'mostrar', 'produto', 'coisa', 'algo', 'isso', 'isto',
-    'aquilo', 'este', 'esta',
-  ])
-  const customerKeywords: string[] = lastCustomerMsg?.content
-    ? lastCustomerMsg.content
-        .toLowerCase()
-        .replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3 && !stopWords.has(w))
-    : []
+  // Janela multi-turno pro guard-rail de search_products: olhar só a última mensagem do
+  // cliente faz recall legítimo de um produto citado 2+ turnos atrás (ex: "tem mais fotos
+  // dele?") ser tratado como "palavra nova" e corrompido. Ampliando pras últimas N mensagens
+  // do cliente, a mensagem atual continua incluída — então a proteção original contra
+  // sinônimos ("colchão" → "cama") no MESMO turno continua funcionando.
+  const GUARD_RAIL_RECALL_WINDOW = 6
+  const recentCustomerMsgs = history.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
+  const recallWindowLower = recentCustomerMsgs.map((m) => (m.content ?? '').toLowerCase()).join(' ')
+  const recallWindowKeywords: string[] = []
+  for (let i = recentCustomerMsgs.length - 1; i >= 0; i--) {
+    for (const w of extractCustomerKeywords(recentCustomerMsgs[i].content)) {
+      if (!recallWindowKeywords.includes(w)) recallWindowKeywords.push(w)
+    }
+  }
+
+  const focusCandidate = extractFocusProductCandidate(history)
+  let focusProduct: { id: string; name: string } | null = null
+  if (focusCandidate) {
+    const focusRows = await db
+      .select({ name: products.name })
+      .from(products)
+      .where(and(eq(products.id, focusCandidate.id), eq(products.tenantId, tenantId), eq(products.isAvailable, true)))
+      .limit(1)
+    if (focusRows[0]) focusProduct = { id: focusCandidate.id, name: focusRows[0].name }
+  }
 
   const now = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short', timeZone: timezone }).format(new Date())
   const isFirstAiResponse = !history.some((m) => m.sender_type === 'ai')
@@ -343,12 +417,13 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 - APRESENTAÇÃO: quando o produto tiver "[tem imagem]", chame send_product_image — a foto sai SOMENTE com nome e descrição (sem preço). Seu texto deve destacar 1-2 BENEFÍCIOS ou diferenciais do produto (material, qualidade, design, conforto, exclusividade) em 1-2 frases curtas. NÃO mencione preço no texto de apresentação. Ex: "Olha essa opção — acabamento premium e design exclusivo 👇" ou "Esse aqui combina muito com o que você descreveu 👇". Se o produto NÃO tem imagem, inclua nome e benefícios no texto — ainda sem preço.
 - PREÇO — REGRA FUNDAMENTAL: NUNCA inicie a apresentação de um produto com o preço. Primeiro apresente o produto com seus benefícios e gere interesse. Mencione o preço APENAS quando: (1) o cliente perguntar diretamente ("quanto custa?", "qual o valor?", "tem algum desconto?") OU (2) o cliente demonstrar interesse claro de compra ("gostei", "quero esse", "como faço pra comprar?", "tem parcelamento?"). Se o cliente ainda não sinalizou interesse, foque em gerar desejo.
 - FOTOS — REGRA ABSOLUTA: se o produto tem "[tem imagem — use send_product_image com id: ...]" nos resultados da busca, você DEVE chamar a ferramenta send_product_image — nunca escreva sobre a imagem, CHAME A FERRAMENTA. Se o produto NÃO tem esse indicador, significa que não há foto disponível — NUNCA escreva "vou enviar a imagem", "vou te mandar a foto", "vou compartilhar" ou qualquer variação. Escrever isso sem chamar a ferramenta não envia NADA — é uma promessa falsa que frustra o cliente.
-- MAIS FOTOS — REGRA ABSOLUTA: send_product_image manda só a foto de destaque (a principal). Se DEPOIS disso o cliente pedir mais fotos de QUALQUER forma (ex: "tem mais fotos?", "manda mais", "manda todas", "quero ver mais", "quero ver o interior/por dentro", "tem outros ângulos?", "quero ver melhor"), você DEVE chamar send_more_product_images — ela já envia TODAS as fotos restantes cadastradas de uma vez, não é preciso (nem deve) chamar de novo pra cada foto. NUNCA chame send_product_image de novo pra atender esse pedido (ela só reenviaria a mesma foto de destaque) e NUNCA diga que só tem 1 foto sem antes checar chamando a ferramenta — o resultado dela informa se há mais fotos ou não. Nunca chame as duas na mesma resposta — primeiro a de destaque, send_more_product_images só depois, quando pedirem.
+- MAIS FOTOS — REGRA ABSOLUTA: send_product_image manda só a foto de destaque (a principal). Se DEPOIS disso o cliente pedir mais fotos de QUALQUER forma (ex: "tem mais fotos?", "manda mais", "manda todas", "quero ver mais", "quero ver o interior/por dentro", "tem outros ângulos?", "quero ver melhor"), você DEVE chamar send_more_product_images — ela já envia TODAS as fotos restantes cadastradas de uma vez, não é preciso (nem deve) chamar de novo pra cada foto. NUNCA chame send_product_image de novo pra atender esse pedido (ela só reenviaria a mesma foto de destaque) e NUNCA diga que só tem 1 foto sem antes checar chamando a ferramenta — o resultado dela informa se há mais fotos ou não. Normalmente chame as duas em respostas separadas — primeiro a de destaque, send_more_product_images só depois, quando pedirem. EXCEÇÃO: se a própria mensagem do cliente já pedir "mais fotos"/"todas as fotos"/"fotos dele" ANTES de você ter mostrado qualquer foto (ou seja, ele já quer várias de cara, não só a de destaque), chame send_product_image E send_more_product_images NA MESMA resposta — não faça ele pedir de novo pra receber o que já pediu.
+- ERRO EM FOTO: se send_product_image ou send_more_product_images retornar "Produto não encontrado" (ou "sem imagem cadastrada"), isso NÃO significa que o produto não existe — normalmente é um ID desatualizado. Antes de dizer qualquer coisa ao cliente, chame search_products com o nome do produto mencionado pra recuperar o ID correto e tente de novo. Só diga que não tem esse produto/foto depois de tentar essa busca e ela também não encontrar nada.
 - 1 PRODUTO SOMENTE — INVIOLÁVEL: mesmo que search_products retorne 2 ou 3 resultados, você deve apresentar APENAS 1 — o mais relevante. Nunca descreva ou mencione mais de 1 produto em uma mesma mensagem. Isso não é negociável.
 - NUNCA DIGA "não encontrei" / "não consigo encontrar" / "não temos esse produto": search_products SEMPRE retorna produtos do catálogo real. Se há um produto no resultado, ele EXISTE e está disponível — apresente-o diretamente. NUNCA explique que buscou por outra palavra ou que o produto não é exato.
 - NUNCA REPITA PERGUNTAS: se o cliente já disse o tamanho, preferência ou nome, use essa informação. Nunca peça de novo.
 - MENSAGENS CURTAS: máximo 2-3 frases por mensagem. WhatsApp não é e-mail.
-- LINKS: nunca escreva URLs. Use send_product_image.
+- LINKS E IMAGENS NO TEXTO — PROIBIDO: nunca escreva URLs, nunca escreva sintaxe markdown de imagem tipo "![nome](url)" ou qualquer variação disso, mesmo como placeholder ou exemplo. Isso NUNCA vira imagem de verdade pro cliente — aparece como texto quebrado. A ÚNICA forma de o cliente receber uma foto é você chamar send_product_image ou send_more_product_images.
 - ÁUDIO: se o histórico tiver "[Áudio enviado pelo cliente]" em mensagens ANTERIORES, é um áudio antigo sem transcrição — ignore e responda baseado no contexto geral da conversa.
 
 ## Humanização (conversar como pessoa, não como robô)
@@ -376,7 +451,14 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
 ## Contexto atual
 - Data/hora: ${now}
 - Horário de atendimento: ${formatBusinessHours(businessHours)}
-- Status: DENTRO do horário de atendimento`
+- Status: DENTRO do horário de atendimento
+${focusProduct ? `
+## Produto em foco
+O cliente estava vendo "${focusProduct.name}" (ID: ${focusProduct.id}) mais recentemente nesta conversa.
+Se ele disser "ele", "dele", "esse", "esse aí", "mais fotos", "tem mais?", "quanto custa?" etc. sem citar
+outro produto, ele está se referindo a ESTE produto — use o ID acima diretamente em send_product_image /
+send_more_product_images, NÃO chame search_products de novo só pra redescobrir esse ID. Se o cliente
+claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.` : ''}`
 
   const allowedTools = AI_TOOLS.filter((tool) => {
     if (tool.name === 'search_products' && !agent.can_search_products) return false
@@ -411,6 +493,7 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
   let wasEscalated = false
   let imageSent = false
   let deferredImage: DeferredImage | null = null
+  let deferredImageProductId: string | null = null
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
 
   for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
@@ -468,6 +551,7 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
         const imageData = await resolveProductImageData(tenantId, productId)
         if (imageData) {
           deferredImage = imageData
+          deferredImageProductId = productId
           imageSent = true
           result = 'ok'
           const responseText = response.text?.trim() ?? ''
@@ -481,13 +565,12 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
       } else if (tu.name === 'search_products') {
         let searchInput = tu.input
         let queryCorrected = false
-        const customerMsgLower = (lastCustomerMsg?.content ?? '').toLowerCase()
-        if (customerKeywords.length > 0 && customerMsgLower) {
+        if (recallWindowKeywords.length > 0 && recallWindowLower) {
           const aiQuery = String(tu.input.query ?? '').toLowerCase()
           const aiQueryWords = aiQuery.split(/\s+/).filter((w) => w.length > 2)
-          const aiIntroducedNewWords = aiQueryWords.some((w) => !customerMsgLower.includes(w))
+          const aiIntroducedNewWords = aiQueryWords.some((w) => !recallWindowLower.includes(w))
           if (aiIntroducedNewWords) {
-            const correctedQuery = customerKeywords.slice(0, 3).join(' ')
+            const correctedQuery = recallWindowKeywords.slice(0, 3).join(' ')
             searchInput = { ...tu.input, query: correctedQuery }
             queryCorrected = true
           }
@@ -531,6 +614,7 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
         const imageData = await resolveProductImageData(tenantId, id)
         if (imageData) {
           deferredImage = imageData
+          deferredImageProductId = id
           matched = true
           break
         }
@@ -540,8 +624,18 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
     if (!matched && lastSearchProductsWithImages.length === 1) {
       const { id } = lastSearchProductsWithImages[0]
       const imageData = await resolveProductImageData(tenantId, id)
-      if (imageData) deferredImage = imageData
+      if (imageData) {
+        deferredImage = imageData
+        deferredImageProductId = id
+      }
     }
+  }
+
+  // Rede de segurança: o LLM às vezes tenta "embutir" a imagem como texto markdown
+  // (ex: "![Nome](url)"), mesmo com a regra de prompt proibindo isso — nunca deixa de
+  // ser texto quebrado no WhatsApp, então removemos aqui antes de enviar.
+  if (finalText) {
+    finalText = finalText.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
   }
 
   if (deferredImage && finalText) {
@@ -612,6 +706,29 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
       )
     } catch (err) {
       console.error('[process-message] Erro ao enviar imagem diferida:', err)
+    }
+  }
+
+  // "Mais fotos" — garantia determinística (não confiar só no LLM).
+  // Cliente vindo de anúncio quase sempre pede "mais fotos do X" logo de cara, e o modelo
+  // erra com frequência: manda só a foto de destaque (send_product_image) e esquece de
+  // chamar send_more_product_images. Aqui, se a mensagem do cliente pede claramente mais
+  // fotos/imagens e sabemos qual é o produto em foco (o que teve a foto principal enviada
+  // agora, ou o último produto mostrado na conversa), forçamos o envio das demais fotos.
+  if (agent.can_send_images) {
+    const moreImagesIntent = isMoreImagesIntent(lastCustomerMsg?.content)
+    const alreadySentMore = allToolCalls.some((c) => c.name === 'send_more_product_images')
+    const moreImagesProductId = deferredImageProductId ?? focusProduct?.id ?? null
+
+    if (moreImagesIntent && !alreadySentMore && moreImagesProductId) {
+      try {
+        // Se a foto de destaque foi enviada agora, ela já saiu acima (delay de 4s) —
+        // um respiro curto pra as fotos adicionais não colidirem com ela.
+        if (deferredImage) await new Promise<void>((r) => setTimeout(r, 1500))
+        await executeTool(ctx, 'send_more_product_images', { product_id: moreImagesProductId })
+      } catch (err) {
+        console.error('[process-message] Erro no envio determinístico de mais fotos:', err)
+      }
     }
   }
 
