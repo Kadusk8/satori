@@ -417,7 +417,7 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 - APRESENTAÇÃO: quando o produto tiver "[tem imagem]", chame send_product_image — a foto sai SOMENTE com nome e descrição (sem preço). Seu texto deve destacar 1-2 BENEFÍCIOS ou diferenciais do produto (material, qualidade, design, conforto, exclusividade) em 1-2 frases curtas. NÃO mencione preço no texto de apresentação. Ex: "Olha essa opção — acabamento premium e design exclusivo 👇" ou "Esse aqui combina muito com o que você descreveu 👇". Se o produto NÃO tem imagem, inclua nome e benefícios no texto — ainda sem preço.
 - PREÇO — REGRA FUNDAMENTAL: NUNCA inicie a apresentação de um produto com o preço. Primeiro apresente o produto com seus benefícios e gere interesse. Mencione o preço APENAS quando: (1) o cliente perguntar diretamente ("quanto custa?", "qual o valor?", "tem algum desconto?") OU (2) o cliente demonstrar interesse claro de compra ("gostei", "quero esse", "como faço pra comprar?", "tem parcelamento?"). Se o cliente ainda não sinalizou interesse, foque em gerar desejo.
 - FOTOS — REGRA ABSOLUTA: se o produto tem "[tem imagem — use send_product_image com id: ...]" nos resultados da busca, você DEVE chamar a ferramenta send_product_image — nunca escreva sobre a imagem, CHAME A FERRAMENTA. Se o produto NÃO tem esse indicador, significa que não há foto disponível — NUNCA escreva "vou enviar a imagem", "vou te mandar a foto", "vou compartilhar" ou qualquer variação. Escrever isso sem chamar a ferramenta não envia NADA — é uma promessa falsa que frustra o cliente.
-- MAIS FOTOS — REGRA ABSOLUTA: send_product_image manda só a foto de destaque (a principal). Se DEPOIS disso o cliente pedir mais fotos de QUALQUER forma (ex: "tem mais fotos?", "manda mais", "manda todas", "quero ver mais", "quero ver o interior/por dentro", "tem outros ângulos?", "quero ver melhor"), você DEVE chamar send_more_product_images — ela já envia TODAS as fotos restantes cadastradas de uma vez, não é preciso (nem deve) chamar de novo pra cada foto. NUNCA chame send_product_image de novo pra atender esse pedido (ela só reenviaria a mesma foto de destaque) e NUNCA diga que só tem 1 foto sem antes checar chamando a ferramenta — o resultado dela informa se há mais fotos ou não. Normalmente chame as duas em respostas separadas — primeiro a de destaque, send_more_product_images só depois, quando pedirem. EXCEÇÃO: se a própria mensagem do cliente já pedir "mais fotos"/"todas as fotos"/"fotos dele" ANTES de você ter mostrado qualquer foto (ou seja, ele já quer várias de cara, não só a de destaque), chame send_product_image E send_more_product_images NA MESMA resposta — não faça ele pedir de novo pra receber o que já pediu.
+- MAIS FOTOS — REGRA ABSOLUTA: send_product_image manda só a foto de destaque (a principal). Se DEPOIS disso o cliente pedir mais fotos de QUALQUER forma (ex: "tem mais fotos?", "manda mais", "manda todas", "quero ver mais", "quero ver o interior/por dentro", "tem outros ângulos?", "quero ver melhor"), você DEVE chamar send_more_product_images — ela já envia TODAS as fotos restantes cadastradas de uma vez, não é preciso (nem deve) chamar de novo pra cada foto. NUNCA chame send_product_image de novo pra atender esse pedido (ela só reenviaria a mesma foto de destaque) e NUNCA diga que só tem 1 foto sem antes checar chamando a ferramenta — o resultado dela informa se há mais fotos ou não. Normalmente chame as duas em respostas separadas — primeiro a de destaque, send_more_product_images só depois, quando pedirem. EXCEÇÃO: se a própria mensagem do cliente já pedir "mais fotos"/"todas as fotos"/"fotos dele" ANTES de você ter mostrado qualquer foto (ou seja, ele já quer várias de cara, não só a de destaque), chame send_product_image E send_more_product_images NA MESMA resposta — não faça ele pedir de novo pra receber o que já pediu. TEXTO ENXUTO NAS FOTOS: quando o cliente só pede mais fotos, NÃO re-descreva o produto (ano, cor, câmbio, km, preço, etc — ele já viu isso). Responda com no MÁXIMO uma frase bem curta e natural ("Claro! 👇", "Olha só 👇") e deixe as fotos falarem. Repetir a ficha inteira do produto a cada pedido de foto denuncia que você é um robô — seja breve como um vendedor de verdade no WhatsApp.
 - ERRO EM FOTO: se send_product_image ou send_more_product_images retornar "Produto não encontrado" (ou "sem imagem cadastrada"), isso NÃO significa que o produto não existe — normalmente é um ID desatualizado. Antes de dizer qualquer coisa ao cliente, chame search_products com o nome do produto mencionado pra recuperar o ID correto e tente de novo. Só diga que não tem esse produto/foto depois de tentar essa busca e ela também não encontrar nada.
 - 1 PRODUTO SOMENTE — INVIOLÁVEL: mesmo que search_products retorne 2 ou 3 resultados, você deve apresentar APENAS 1 — o mais relevante. Nunca descreva ou mencione mais de 1 produto em uma mesma mensagem. Isso não é negociável.
 - NUNCA DIGA "não encontrei" / "não consigo encontrar" / "não temos esse produto": search_products SEMPRE retorna produtos do catálogo real. Se há um produto no resultado, ele EXISTE e está disponível — apresente-o diretamente. NUNCA explique que buscou por outra palavra ou que o produto não é exato.
@@ -638,6 +638,20 @@ claramente mudar de assunto pra outro produto, ignore esta seção e busque norm
     finalText = finalText.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
   }
 
+  // "Mais fotos" — resposta enxuta como humano. Quando o cliente só pede mais fotos de um
+  // produto que já está em foco/sendo mostrado, um vendedor real não re-descreve o carro
+  // inteiro: manda as fotos com uma linha curta. O texto verboso do LLM nesse caso denuncia
+  // que é um bot. Não encurtamos se o cliente também perguntou preço/algo a mais na mesma
+  // mensagem (aí a resposta completa é necessária).
+  const moreImagesIntent = agent.can_send_images && isMoreImagesIntent(lastCustomerMsg?.content)
+  const customerMsgLower = (lastCustomerMsg?.content ?? '').toLowerCase()
+  const askedSomethingElse = /(pre[çc]o|valor|quanto|custa|financ|parcel|entrada|troca|\bkm\b|\bano\b|\bcor\b|c[âa]mbio|agenda|visita|test)/.test(customerMsgLower)
+  const pureMoreImages = moreImagesIntent && !askedSomethingElse && (focusProduct !== null || deferredImage !== null)
+  if (pureMoreImages && finalText) {
+    const shortReplies = ['Claro! 👇', 'Olha só 👇', 'Tem sim, dá uma olhada 👇', 'Beleza, olha aí 👇', 'Manda ver 👇']
+    finalText = shortReplies[Math.floor(Math.random() * shortReplies.length)]
+  }
+
   if (deferredImage && finalText) {
     const cleaned = finalText
       .replace(/[^\n]*[Vv]ou (te )?(enviar|mandar|compartilhar)[^\n]*(imagem|foto)[^\n]*(\n|$)/gi, '')
@@ -716,7 +730,6 @@ claramente mudar de assunto pra outro produto, ignore esta seção e busque norm
   // fotos/imagens e sabemos qual é o produto em foco (o que teve a foto principal enviada
   // agora, ou o último produto mostrado na conversa), forçamos o envio das demais fotos.
   if (agent.can_send_images) {
-    const moreImagesIntent = isMoreImagesIntent(lastCustomerMsg?.content)
     const alreadySentMore = allToolCalls.some((c) => c.name === 'send_more_product_images')
     const moreImagesProductId = deferredImageProductId ?? focusProduct?.id ?? null
 
