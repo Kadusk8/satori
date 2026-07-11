@@ -103,6 +103,7 @@ interface ConversationRow {
   contact_id: string
   status: string
   autonomous_mode: boolean
+  metadata: { source?: string; ad_referral?: { title: string | null; body: string | null } } | null
   whatsapp_number: string
   t_name: string
   business_hours: BusinessHours
@@ -175,6 +176,31 @@ export function isMoreImagesIntent(content: string | null | undefined): boolean 
   )
 }
 
+// Tenta identificar QUAL produto em campanha o cliente viu, comparando o
+// título/corpo do anúncio (referral do Click-to-WhatsApp) contra os nomes dos
+// produtos marcados como "em anúncio". Match simples (substring), suficiente
+// pra nomes de produto curtos e específicos — se não achar nenhum, o chamador
+// cai no fallback de listar todos os produtos em campanha.
+export function matchAdReferralProduct(
+  referral: { title: string | null; body: string | null },
+  adProducts: Array<{ id: string; name: string }>
+): { id: string; name: string } | null {
+  const text = `${referral.title ?? ''} ${referral.body ?? ''}`.toLowerCase().trim()
+  if (!text) return null
+
+  for (const p of adProducts) {
+    const nameLower = p.name.toLowerCase()
+    if (nameLower.length > 2 && text.includes(nameLower)) return p
+  }
+  for (const p of adProducts) {
+    // Ignora tokens puramente numéricos (ex: ano "2020") — pouco distintivos e
+    // raramente citados junto com o modelo no texto curto de um anúncio.
+    const words = p.name.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && /[a-zà-ÿ]/.test(w))
+    if (words.length > 0 && words.every((w) => text.includes(w))) return p
+  }
+  return null
+}
+
 const FOCUS_LOOKBACK_MESSAGES = 15
 
 export function extractFocusProductCandidate(history: MessageRow[]): { id: string; name?: string } | null {
@@ -205,7 +231,7 @@ export function extractFocusProductCandidate(history: MessageRow[]): { id: strin
 
 export async function processMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
   const convRes = await pool.query<ConversationRow>(
-    `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode,
+    `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode, c.metadata,
             ct.whatsapp_number,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key
@@ -403,8 +429,27 @@ export async function processMessage(conversationId: string): Promise<{ success:
     if (focusRows[0]) focusProduct = { id: focusCandidate.id, name: focusRows[0].name }
   }
 
+  // Cliente veio de um anúncio Click-to-WhatsApp (referral gravado pelo webhook na criação
+  // da conversa) — busca os produtos em campanha e tenta identificar qual foi anunciado.
+  const adReferral = conv.metadata?.source === 'ctwa_ad' ? conv.metadata.ad_referral ?? null : null
+  let adProducts: Array<{ id: string; name: string; price_display: string | null; price: string | null }> = []
+  if (adReferral) {
+    const adRows = await db
+      .select({ id: products.id, name: products.name, priceDisplay: products.priceDisplay, price: products.price })
+      .from(products)
+      .where(and(eq(products.tenantId, tenantId), eq(products.isRunningAd, true), eq(products.isAvailable, true)))
+    adProducts = adRows.map((p) => ({ id: p.id, name: p.name, price_display: p.priceDisplay, price: p.price }))
+    if (!focusProduct && adProducts.length > 0) {
+      const matched = matchAdReferralProduct(adReferral, adProducts)
+      if (matched) focusProduct = matched
+    }
+  }
+
   const now = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short', timeZone: timezone }).format(new Date())
   const isFirstAiResponse = !history.some((m) => m.sender_type === 'ai')
+  const adProductsListText = adProducts
+    .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
+    .join(', ')
 
   const systemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
@@ -458,7 +503,16 @@ O cliente estava vendo "${focusProduct.name}" (ID: ${focusProduct.id}) mais rece
 Se ele disser "ele", "dele", "esse", "esse aí", "mais fotos", "tem mais?", "quanto custa?" etc. sem citar
 outro produto, ele está se referindo a ESTE produto — use o ID acima diretamente em send_product_image /
 send_more_product_images, NÃO chame search_products de novo só pra redescobrir esse ID. Se o cliente
-claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.` : ''}`
+claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.` : ''}
+${adReferral ? `
+## Cliente veio de anúncio
+Esta conversa começou porque o cliente clicou em um anúncio patrocinado (Facebook/Instagram Ads) e a
+mensagem inicial dele foi gerada automaticamente a partir desse clique — não é uma pergunta espontânea,
+é resposta direta ao que ele acabou de ver no anúncio. Assuma que o interesse já está nos produtos em
+campanha, sem forçá-lo a explicar o que já demonstrou interesse.
+${focusProduct ? `Pelo conteúdo do anúncio, tudo indica que ele viu "${focusProduct.name}" (já coberto na seção "Produto em foco" acima) — confirme com naturalidade e siga direto pra apresentar os diferenciais dele.` : adProducts.length > 0 ? `Produtos atualmente em campanha: ${adProductsListText}. Pergunte de forma natural e direta qual desses chamou a atenção no anúncio, sem soar como um menu.` : `Nenhum produto está marcado como "em anúncio" no momento — trate como um atendimento normal, buscando pelo que o cliente pedir.`}
+Conduza ativamente pra gerar interesse e avançar rumo a um agendamento ou fechamento — não trate isso
+como um atendimento genérico de primeiro contato.` : ''}`
 
   const allowedTools = AI_TOOLS.filter((tool) => {
     if (tool.name === 'search_products' && !agent.can_search_products) return false

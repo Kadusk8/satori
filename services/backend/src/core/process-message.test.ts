@@ -4,6 +4,7 @@ import {
   extractFocusProductCandidate,
   isMoreImagesIntent,
   isWithinBusinessHours,
+  matchAdReferralProduct,
   normalizeMessageSequence,
   splitMessage,
 } from './process-message.js'
@@ -176,5 +177,34 @@ describe('extractFocusProductCandidate', () => {
   it('histórico sem ai_tool_calls devolve null', () => {
     const history = [{ ...baseMsg, ai_tool_calls: null }]
     expect(extractFocusProductCandidate(history)).toBeNull()
+  })
+})
+
+describe('matchAdReferralProduct', () => {
+  const adProducts = [
+    { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'VW Fox Connect 1.6' },
+    { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Honda Civic 2020' },
+  ]
+
+  it('acha o produto quando o título do anúncio contém o nome exato', () => {
+    const result = matchAdReferralProduct({ title: 'VW Fox Connect 1.6', body: null }, adProducts)
+    expect(result?.id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  })
+
+  it('acha por match parcial de palavras significativas no corpo do anúncio', () => {
+    const result = matchAdReferralProduct(
+      { title: 'Promoção de carros', body: 'Confira o Honda Civic com condições especiais' },
+      adProducts
+    )
+    expect(result?.id).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
+  })
+
+  it('devolve null quando não há match com nenhum produto em anúncio', () => {
+    const result = matchAdReferralProduct({ title: 'Promoção geral', body: 'Confira nossos carros' }, adProducts)
+    expect(result).toBeNull()
+  })
+
+  it('devolve null quando o referral não tem título nem corpo', () => {
+    expect(matchAdReferralProduct({ title: null, body: null }, adProducts)).toBeNull()
   })
 })

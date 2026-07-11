@@ -653,8 +653,9 @@ CREATE TABLE IF NOT EXISTS products (
 
   images JSONB NOT NULL DEFAULT '[]',
 
-  is_available BOOLEAN NOT NULL DEFAULT true,
-  is_featured  BOOLEAN NOT NULL DEFAULT false,
+  is_available  BOOLEAN NOT NULL DEFAULT true,
+  is_featured   BOOLEAN NOT NULL DEFAULT false,
+  is_running_ad BOOLEAN NOT NULL DEFAULT false,
 
   metadata JSONB NOT NULL DEFAULT '{}',
   search_vector TSVECTOR,
@@ -664,11 +665,13 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 COMMENT ON TABLE products IS 'Catálogo de produtos/serviços por tenant. Usado pela IA via function calling.';
+COMMENT ON COLUMN products.is_running_ad IS 'Marca se o produto está em campanha de anúncio (Facebook/Instagram Ads) ativa — usado pra IA reconhecer leads vindos de Click-to-WhatsApp.';
 
 CREATE INDEX IF NOT EXISTS idx_products_tenant_id    ON products (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_products_category     ON products (tenant_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_available ON products (tenant_id, is_available);
 CREATE INDEX IF NOT EXISTS idx_products_is_featured  ON products (tenant_id, is_featured);
+CREATE INDEX IF NOT EXISTS idx_products_is_running_ad ON products (tenant_id, is_running_ad);
 CREATE INDEX IF NOT EXISTS idx_products_tags         ON products USING GIN (tags);
 CREATE INDEX IF NOT EXISTS idx_products_search       ON products USING GIN (search_vector);
 

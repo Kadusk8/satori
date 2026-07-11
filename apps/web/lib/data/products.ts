@@ -18,6 +18,7 @@ export interface DBProductRow {
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
+  is_running_ad: boolean
 }
 
 export interface ProductInput {
@@ -32,6 +33,7 @@ export interface ProductInput {
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
+  isRunningAd: boolean
 }
 
 async function claimsOrThrow() {
@@ -53,6 +55,7 @@ function toRow(p: typeof products.$inferSelect): DBProductRow {
     images: (p.images ?? []) as DBProductRow['images'],
     is_available: p.isAvailable,
     is_featured: p.isFeatured,
+    is_running_ad: p.isRunningAd,
   }
 }
 
@@ -77,6 +80,7 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     images: input.images,
     isAvailable: input.isAvailable,
     isFeatured: input.isFeatured,
+    isRunningAd: input.isRunningAd,
   }
 
   const id = await withClaims(claims, async (tx) => {

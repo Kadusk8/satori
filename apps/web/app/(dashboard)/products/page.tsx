@@ -30,6 +30,7 @@ interface DBProduct {
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
+  is_running_ad: boolean
 }
 
 function mapProduct(row: DBProduct): Product {
@@ -45,11 +46,12 @@ function mapProduct(row: DBProduct): Product {
     images: (row.images ?? []) as { url: string; thumbnailUrl: string; alt: string }[],
     isAvailable: row.is_available,
     isFeatured: row.is_featured,
+    isRunningAd: row.is_running_ad,
   }
 }
 
 type ViewMode = 'grid' | 'list'
-type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured'
+type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured' | 'running_ad'
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -95,7 +97,8 @@ export default function ProductsPage() {
         filterStatus === 'all' ||
         (filterStatus === 'available' && p.isAvailable) ||
         (filterStatus === 'unavailable' && !p.isAvailable) ||
-        (filterStatus === 'featured' && p.isFeatured)
+        (filterStatus === 'featured' && p.isFeatured) ||
+        (filterStatus === 'running_ad' && p.isRunningAd)
 
       const matchCategory =
         filterCategory === 'Todas' || p.category === filterCategory
@@ -120,6 +123,7 @@ export default function ProductsPage() {
         images: data.images,
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
+        isRunningAd: data.isRunningAd,
       })
 
       if (data.id) {
@@ -217,6 +221,7 @@ export default function ProductsPage() {
             { value: 'available', label: 'Disponíveis' },
             { value: 'unavailable', label: 'Indisponíveis' },
             { value: 'featured', label: 'Destaques' },
+            { value: 'running_ad', label: 'Em anúncio' },
           ] as const).map((opt) => (
             <button
               key={opt.value}

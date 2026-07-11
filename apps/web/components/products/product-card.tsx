@@ -16,6 +16,7 @@ export interface Product {
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
+  isRunningAd: boolean
 }
 
 interface ProductCardProps {
@@ -61,6 +62,11 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
           {product.isFeatured && (
             <Badge className="text-[10px] px-1.5 py-0 bg-amber-500 text-white border-0">
               Destaque
+            </Badge>
+          )}
+          {product.isRunningAd && (
+            <Badge className="text-[10px] px-1.5 py-0 bg-blue-600 text-white border-0">
+              Em anúncio
             </Badge>
           )}
           {!product.isAvailable && (

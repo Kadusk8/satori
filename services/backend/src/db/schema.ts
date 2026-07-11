@@ -105,6 +105,7 @@ export const conversations = pgTable('conversations', {
   aiSummary: text('ai_summary'),
   priority: text('priority').notNull(),
   autonomousMode: boolean('autonomous_mode').notNull().default(false),
+  metadata: jsonb('metadata').notNull().default({}),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -135,6 +136,7 @@ export const products = pgTable('products', {
   images: jsonb('images').notNull(),
   isAvailable: boolean('is_available').notNull(),
   isFeatured: boolean('is_featured').notNull(),
+  isRunningAd: boolean('is_running_ad').notNull().default(false),
 })
 
 export const appointments = pgTable('appointments', {

@@ -346,6 +346,7 @@ export const products = pgTable(
     images: jsonb('images').notNull().default([]),
     isAvailable: boolean('is_available').notNull().default(true),
     isFeatured: boolean('is_featured').notNull().default(false),
+    isRunningAd: boolean('is_running_ad').notNull().default(false),
     metadata: jsonb('metadata').notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

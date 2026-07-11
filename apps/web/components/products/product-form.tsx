@@ -22,6 +22,7 @@ const schema = z.object({
   tags: z.string().optional(), // CSV
   isAvailable: z.boolean(),
   isFeatured: z.boolean(),
+  isRunningAd: z.boolean(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -90,6 +91,7 @@ export function ProductForm({
       tags: product?.tags.join(', ') ?? '',
       isAvailable: product?.isAvailable ?? true,
       isFeatured: product?.isFeatured ?? false,
+      isRunningAd: product?.isRunningAd ?? false,
     },
   })
 
@@ -114,6 +116,7 @@ export function ProductForm({
         })),
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
+        isRunningAd: data.isRunningAd,
       })
       onClose()
     } finally {
@@ -254,6 +257,14 @@ export function ProductForm({
                 className="h-4 w-4 rounded accent-primary"
               />
               <span className="text-sm">Produto em destaque</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                {...register('isRunningAd')}
+                className="h-4 w-4 rounded accent-primary"
+              />
+              <span className="text-sm">Em anúncio (Facebook/Instagram Ads)</span>
             </label>
           </div>
 

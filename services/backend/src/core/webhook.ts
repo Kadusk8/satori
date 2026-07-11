@@ -18,6 +18,24 @@ export interface TenantRow {
   webhook_secret: string
 }
 
+// Referral de anúncio Click-to-WhatsApp — mesmo proto do WhatsApp usado pelo
+// Baileys/whatsmeow (contextInfo.externalAdReplyInfo), presente em qualquer
+// tipo de mensagem que o cliente mande como primeira mensagem ao clicar num
+// anúncio do Facebook/Instagram. Formato ainda não confirmado contra um
+// payload real da Evolution Go — ver log defensivo em parseMessage().
+interface ExternalAdReplyInfo {
+  title?: string
+  body?: string
+  sourceId?: string
+  sourceUrl?: string
+  thumbnailUrl?: string
+  mediaType?: number
+}
+
+interface ContextInfo {
+  externalAdReply?: ExternalAdReplyInfo
+}
+
 // Formato real da Evolution Go (baseada na lib Go `whatsmeow`, não no formato
 // Baileys clássico) — campos em PascalCase dentro de `Info`/`Message`.
 interface EvolutionMessageData {
@@ -32,11 +50,41 @@ interface EvolutionMessageData {
   }
   Message?: {
     conversation?: string
-    extendedTextMessage?: { text: string }
-    imageMessage?: { caption?: string; url?: string }
+    extendedTextMessage?: { text: string; contextInfo?: ContextInfo }
+    imageMessage?: { caption?: string; url?: string; contextInfo?: ContextInfo }
     audioMessage?: { url?: string }
     pttMessage?: { url?: string }
     documentMessage?: { title?: string; url?: string }
+  }
+}
+
+export interface AdReferral {
+  title: string | null
+  body: string | null
+  sourceId: string | null
+  sourceUrl: string | null
+}
+
+/**
+ * Extrai o referral de anúncio (Click-to-WhatsApp) do payload cru, se houver.
+ * Loga o contextInfo bruto sempre que presente — é o que permite confirmar/
+ * corrigir o mapeamento de campo real da Evolution Go assim que o primeiro
+ * lead de anúncio chegar em produção, sem precisar instrumentar depois.
+ */
+export function extractAdReferral(data: EvolutionMessageData): AdReferral | null {
+  const contextInfo = data.Message?.extendedTextMessage?.contextInfo ?? data.Message?.imageMessage?.contextInfo
+  if (!contextInfo) return null
+
+  console.log('[webhook] contextInfo bruto recebido (validação de referral de anúncio):', JSON.stringify(contextInfo))
+
+  const ad = contextInfo.externalAdReply
+  if (!ad) return null
+
+  return {
+    title: ad.title ?? null,
+    body: ad.body ?? null,
+    sourceId: ad.sourceId ?? null,
+    sourceUrl: ad.sourceUrl ?? null,
   }
 }
 
@@ -99,6 +147,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
 
   const phoneNumber = extractNumber(envelope.remoteJid, envelope.remoteJidAlt)
   const { text, contentType, mediaUrl } = parseMessage(data)
+  const adReferral = extractAdReferral(data)
 
   if (!text && contentType !== 'image' && contentType !== 'audio') return null
   if (tenant.status === 'suspended' || tenant.status === 'cancelled') return null
@@ -171,6 +220,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
         kanbanStageId: stageRes.rows[0]?.id ?? null,
         status: 'ai_handling',
         priority: 'normal',
+        metadata: adReferral ? { source: 'ctwa_ad', ad_referral: adReferral } : {},
         lastMessageAt: new Date(),
         createdAt: new Date(),
       })
