@@ -96,6 +96,14 @@ export const tenants = pgTable(
     anthropicApiKey: text('anthropic_api_key'),
     elevenlabsApiKey: text('elevenlabs_api_key'),
 
+    // Meta Conversions API — reporta de volta pro Meta quando um lead de
+    // anúncio (Click-to-WhatsApp) converte. Por tenant: cada empresa usa seu
+    // próprio dataset/pixel e token. metaCapiEnabled é o gate — sem ele,
+    // nenhum evento é enviado mesmo com credenciais configuradas.
+    metaDatasetId: text('meta_dataset_id'),
+    metaAccessToken: text('meta_access_token'),
+    metaCapiEnabled: boolean('meta_capi_enabled').notNull().default(false),
+
     createdBy: uuid('created_by').references(() => superAdmins.id),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

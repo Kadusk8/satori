@@ -421,13 +421,29 @@ export async function processMessage(conversationId: string): Promise<{ success:
 
   const normalizedMessages = normalizeMessageSequence(llmMessages)
 
+  // Corte de sessão: um gap grande desde a mensagem anterior não é continuação da conversa
+  // — é o cliente reabrindo dias/horas depois. Sem isso, "produto em foco" e a janela de
+  // recall (abaixo) carregavam contexto obsoleto pra sempre: um simples "Boa tarde" 3 dias
+  // depois de perguntar sobre um Fox fazia a IA responder sobre o Fox de novo, porque o
+  // prompt afirmava "o cliente estava vendo X mais recentemente" sem levar o tempo em conta.
+  const SESSION_GAP_MS = 3 * 60 * 60 * 1000 // 3h sem mensagem = nova sessão
+  const lastCustomerIdx = lastCustomerMsg ? history.findIndex((m) => m.id === lastCustomerMsg.id) : -1
+  const previousMsg = lastCustomerIdx > 0 ? history[lastCustomerIdx - 1] : null
+  const isNewSession = !!(
+    lastCustomerMsg &&
+    previousMsg &&
+    lastCustomerMsg.created_at.getTime() - previousMsg.created_at.getTime() > SESSION_GAP_MS
+  )
+
   // Janela multi-turno pro guard-rail de search_products: olhar só a última mensagem do
   // cliente faz recall legítimo de um produto citado 2+ turnos atrás (ex: "tem mais fotos
   // dele?") ser tratado como "palavra nova" e corrompido. Ampliando pras últimas N mensagens
   // do cliente, a mensagem atual continua incluída — então a proteção original contra
-  // sinônimos ("colchão" → "cama") no MESMO turno continua funcionando.
+  // sinônimos ("colchão" → "cama") no MESMO turno continua funcionando. Zerada em nova sessão
+  // (ver isNewSession acima) — senão um pedido genuinamente novo ("tem carro branco?") era
+  // forçado de volta pro produto da sessão anterior só por não repetir as mesmas palavras.
   const GUARD_RAIL_RECALL_WINDOW = 6
-  const recentCustomerMsgs = history.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
+  const recentCustomerMsgs = isNewSession ? [] : history.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
   const recallWindowLower = recentCustomerMsgs.map((m) => (m.content ?? '').toLowerCase()).join(' ')
   const recallWindowKeywords: string[] = []
   for (let i = recentCustomerMsgs.length - 1; i >= 0; i--) {
@@ -436,7 +452,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
     }
   }
 
-  const focusCandidate = extractFocusProductCandidate(history)
+  const focusCandidate = isNewSession ? null : extractFocusProductCandidate(history)
   let focusProduct: { id: string; name: string } | null = null
   if (focusCandidate) {
     const focusRows = await db
@@ -521,7 +537,12 @@ O cliente estava vendo "${focusProduct.name}" (ID: ${focusProduct.id}) mais rece
 Se ele disser "ele", "dele", "esse", "esse aí", "mais fotos", "tem mais?", "quanto custa?" etc. sem citar
 outro produto, ele está se referindo a ESTE produto — use o ID acima diretamente em send_product_image /
 send_more_product_images, NÃO chame search_products de novo só pra redescobrir esse ID. Se o cliente
-claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.` : ''}
+claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.
+SAUDAÇÃO PURA — NÃO reaja ao "produto em foco": se a mensagem do cliente for só uma saudação ("oi",
+"olá", "bom dia", "boa tarde", "boa noite", "tudo bem?" etc., sem pedir nada sobre o produto), essa
+seção NÃO se aplica — responda com um cumprimento natural e pergunte como pode ajudar, como faria com
+qualquer cliente novo. NÃO reenvie foto nem redescreva o produto sem ele ter pedido — isso soa como o
+bot travado num loop, não como um vendedor cumprimentando alguém.` : ''}
 ${adReferral ? `
 ## Cliente veio de anúncio
 Esta conversa começou porque o cliente clicou em um anúncio patrocinado (Facebook/Instagram Ads) e a
@@ -637,7 +658,15 @@ como um atendimento genérico de primeiro contato.` : ''}`
       } else if (tu.name === 'search_products') {
         let searchInput = tu.input
         let queryCorrected = false
-        if (recallWindowKeywords.length > 0 && recallWindowLower) {
+        // Só corrige a query de volta pro contexto anterior quando a mensagem ATUAL do
+        // cliente é puramente referencial (sem palavra-chave própria — ex: "tem mais?", "e
+        // esse aí?"). Se ela já tem conteúdo descritivo próprio (ex: "tem carro branco?",
+        // "quais outros modelos vocês têm?"), é um pedido novo de verdade — não sequestrar
+        // pra trás. Sem essa condição, qualquer pergunta nova cujas palavras não apareciam
+        // nas últimas mensagens era forçada de volta pro produto antigo (loop de "não temos
+        // Fox" repetido pra perguntas sem nenhuma relação com Fox).
+        const lastMsgHasOwnKeywords = extractCustomerKeywords(lastCustomerMsg?.content).length > 0
+        if (recallWindowKeywords.length > 0 && recallWindowLower && !lastMsgHasOwnKeywords) {
           const aiQuery = String(tu.input.query ?? '').toLowerCase()
           const aiQueryWords = aiQuery.split(/\s+/).filter((w) => w.length > 2)
           const aiIntroducedNewWords = aiQueryWords.some((w) => !recallWindowLower.includes(w))

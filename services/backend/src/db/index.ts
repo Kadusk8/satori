@@ -98,4 +98,15 @@ export async function getDecryptedEvolutionKey(
   return result.rows[0]?.key ?? null
 }
 
+export async function getDecryptedMetaToken(
+  tenantId: string,
+  encKey: string | null
+): Promise<string | null> {
+  const result = await pool.query(
+    'select get_decrypted_meta_token($1, $2) as key',
+    [tenantId, encKey]
+  )
+  return result.rows[0]?.key ?? null
+}
+
 export { sql }

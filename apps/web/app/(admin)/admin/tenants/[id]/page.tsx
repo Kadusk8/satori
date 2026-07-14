@@ -5,7 +5,7 @@ import { withAdmin } from '@/lib/db'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft, Building2, MessageSquare, Bot, Clock } from 'lucide-react'
+import { ArrowLeft, Building2, MessageSquare, Bot, Clock, Megaphone } from 'lucide-react'
 import { TenantActions } from './tenant-actions'
 import { AgentEditor } from './agent-editor'
 import { LlmEditor } from './llm-editor'
@@ -13,6 +13,7 @@ import { AudioEditor } from './audio-editor'
 import { EvolutionConnection } from './evolution-connection'
 import { EvolutionEditor } from './evolution-editor'
 import { BusinessHoursEditor } from './business-hours-editor'
+import { MetaCapiEditor } from './meta-capi-editor'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default',
@@ -58,6 +59,7 @@ interface AdminTenantRow {
   webhook_secret: string
   openai_api_key: string | null; gemini_api_key: string | null
   anthropic_api_key: string | null; elevenlabs_api_key: string | null
+  meta_dataset_id: string | null; meta_access_token: string | null; meta_capi_enabled: boolean
   max_messages_month: number; max_products: number; max_operators: number
   messages_used_month: number; appointment_duration_minutes: number
   timezone: string; business_hours: Record<string, { enabled?: boolean; start?: string; end?: string }> | null
@@ -192,6 +194,37 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
               tenantId={id}
               webhookUrl={webhookUrl}
               hasEvolutionConfig={!!tenant.evolution_api_url}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Meta Conversions API */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Megaphone className="h-4 w-4 text-muted-foreground" />
+                Meta Ads (Conversions API)
+              </CardTitle>
+              <MetaCapiEditor
+                tenantId={id}
+                currentDatasetId={tenant.meta_dataset_id}
+                currentEnabled={tenant.meta_capi_enabled}
+                hasAccessToken={!!tenant.meta_access_token}
+              />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <DetailRow label="Dataset / Pixel ID" value={tenant.meta_dataset_id ?? '—'} />
+            <DetailRow
+              label="Access token"
+              value={tenant.meta_access_token ? '✓ configurado' : 'não configurado'}
+              valueClass={tenant.meta_access_token ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
+            />
+            <DetailRow
+              label="Status"
+              value={tenant.meta_capi_enabled ? 'Ativo — envia conversões' : 'Desativado'}
+              valueClass={tenant.meta_capi_enabled ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}
             />
           </CardContent>
         </Card>

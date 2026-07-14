@@ -171,6 +171,35 @@ export async function updateTenantAudio(tenantId: string, data: {
   revalidatePath(`/admin/tenants/${tenantId}`)
 }
 
+// Edita a config da Meta Conversions API de um tenant — dataset/pixel ID,
+// access token (write-only, criptografado) e o toggle de ativação. Cada
+// tenant tem suas próprias credenciais; meta_capi_enabled é o gate: sem ele,
+// nenhum evento é enviado ao Meta mesmo com credenciais configuradas.
+// Deixar o token em branco mantém o atual.
+export async function updateTenantMetaCapi(tenantId: string, data: {
+  metaDatasetId: string
+  metaCapiEnabled: boolean
+  metaAccessToken?: string
+}) {
+  const metaDatasetId = data.metaDatasetId.trim()
+
+  await withAdmin((tx) =>
+    tx
+      .update(tenants)
+      .set({
+        metaDatasetId: metaDatasetId || null,
+        metaCapiEnabled: data.metaCapiEnabled,
+        ...(data.metaAccessToken?.trim()
+          ? { metaAccessToken: encryptedColumn(data.metaAccessToken.trim(), 'encrypt_meta_token') }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(tenants.id, tenantId))
+  )
+
+  revalidatePath(`/admin/tenants/${tenantId}`)
+}
+
 // Registra/atualiza o webhook na instância Evolution Go do tenant e persiste
 // o status de conexão. Compartilhado por reconnectEvolution e
 // updateEvolutionConnection.
