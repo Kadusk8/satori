@@ -3,54 +3,41 @@ import {
   extractCustomerKeywords,
   extractFocusProductCandidate,
   isMoreImagesIntent,
+  isReturningAfterGap,
   isWithinBusinessHours,
   matchAdReferralProduct,
   normalizeMessageSequence,
-  sliceToCurrentSession,
   splitMessage,
 } from './process-message.js'
 import type { LLMMessage } from '../shared/llm-client.js'
 
-describe('sliceToCurrentSession', () => {
+describe('isReturningAfterGap', () => {
   const GAP = 3 * 60 * 60 * 1000
   const msg = (id: string, iso: string) =>
-    ({ id, sender_type: 'customer', content: id, content_type: 'text', media_url: null, ai_tool_calls: null, created_at: new Date(iso) }) as Parameters<typeof sliceToCurrentSession>[0][number]
+    ({ id, sender_type: 'customer', content: id, content_type: 'text', media_url: null, ai_tool_calls: null, created_at: new Date(iso) }) as Parameters<typeof isReturningAfterGap>[0][number]
 
-  it('corta tudo antes de um gap maior que o limite', () => {
+  it('detecta retomada quando a última mensagem vem após um gap grande', () => {
     // conversa antiga (dia 11) + "boa tarde" 3 dias depois (dia 14)
     const history = [
       msg('a', '2026-07-11T20:00:00Z'),
       msg('b', '2026-07-11T20:05:00Z'),
       msg('boa-tarde', '2026-07-14T19:10:00Z'),
-      msg('quais-marcas', '2026-07-14T19:12:00Z'),
     ]
-    const session = sliceToCurrentSession(history, GAP)
-    expect(session.map((m) => m.id)).toEqual(['boa-tarde', 'quais-marcas'])
+    expect(isReturningAfterGap(history, GAP)).toBe(true)
   })
 
-  it('mantém o histórico inteiro quando não há gap grande', () => {
+  it('não sinaliza retomada em conversa contínua', () => {
     const history = [
       msg('a', '2026-07-14T19:00:00Z'),
       msg('b', '2026-07-14T19:10:00Z'),
       msg('c', '2026-07-14T19:20:00Z'),
     ]
-    expect(sliceToCurrentSession(history, GAP)).toHaveLength(3)
+    expect(isReturningAfterGap(history, GAP)).toBe(false)
   })
 
-  it('corta no gap mais recente quando há vários', () => {
-    const history = [
-      msg('s1a', '2026-07-10T10:00:00Z'),
-      msg('s2a', '2026-07-12T10:00:00Z'), // gap de 2 dias
-      msg('s3a', '2026-07-14T10:00:00Z'), // gap de 2 dias (mais recente)
-      msg('s3b', '2026-07-14T10:05:00Z'),
-    ]
-    expect(sliceToCurrentSession(history, GAP).map((m) => m.id)).toEqual(['s3a', 's3b'])
-  })
-
-  it('lista vazia ou de 1 item devolve como está', () => {
-    expect(sliceToCurrentSession([], GAP)).toEqual([])
-    const one = [msg('só', '2026-07-14T10:00:00Z')]
-    expect(sliceToCurrentSession(one, GAP)).toHaveLength(1)
+  it('histórico com menos de 2 mensagens não é retomada', () => {
+    expect(isReturningAfterGap([], GAP)).toBe(false)
+    expect(isReturningAfterGap([msg('só', '2026-07-14T10:00:00Z')], GAP)).toBe(false)
   })
 })
 

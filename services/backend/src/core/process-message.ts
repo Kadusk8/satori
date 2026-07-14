@@ -221,20 +221,16 @@ export function matchAdReferralProduct(
 
 const FOCUS_LOOKBACK_MESSAGES = 15
 
-// Corta o histórico pra conter só a "sessão atual". Se houver um intervalo maior que
-// gapMs entre duas mensagens consecutivas, tudo ANTES desse intervalo é de uma conversa
-// anterior — o cliente reabriu o chat horas/dias depois. Sem esse corte, o histórico
-// inteiro (ex: uma negociação de "Fox" de 3 dias atrás) vai pro LLM e ancora a resposta:
-// um simples "boa tarde" fresco fazia a IA continuar falando do Fox e do produto que
-// tinha oferecido antes, em vez de só cumprimentar. Retorna as MESMAS referências de
-// objeto (slice), então updates posteriores no history (ex: transcrição) se refletem aqui.
-export function sliceToCurrentSession(history: MessageRow[], gapMs: number): MessageRow[] {
-  for (let i = history.length - 1; i > 0; i--) {
-    if (history[i].created_at.getTime() - history[i - 1].created_at.getTime() > gapMs) {
-      return history.slice(i)
-    }
-  }
-  return history
+// Detecta se a última mensagem do cliente chegou após um intervalo grande desde a mensagem
+// anterior — sinal de que ele está RETOMANDO o contato depois de um tempo parado. Não corta
+// nem esconde nada do histórico (a IA continua vendo a conversa inteira); serve só pra avisar
+// o modelo no prompt que a conversa acima é memória e que ele deve responder ao que o cliente
+// diz AGORA, sem re-emplacar sozinho o último produto de dias atrás.
+export function isReturningAfterGap(history: MessageRow[], gapMs: number): boolean {
+  if (history.length < 2) return false
+  const last = history[history.length - 1]
+  const prev = history[history.length - 2]
+  return last.created_at.getTime() - prev.created_at.getTime() > gapMs
 }
 
 export function extractFocusProductCandidate(history: MessageRow[]): { id: string; name?: string } | null {
@@ -422,15 +418,13 @@ export async function processMessage(conversationId: string): Promise<{ success:
     return { success: true }
   }
 
-  // Corte de sessão: um gap grande sem mensagem não é continuação da conversa — é o cliente
-  // reabrindo o chat dias/horas depois. Cortamos o histórico na fronteira da sessão atual e
-  // usamos SÓ ela daqui pra frente (inclusive no que vai pro LLM). Sem isso, o histórico
-  // antigo inteiro (ex: uma negociação de "Fox") ancorava a resposta — um "boa tarde" fresco
-  // fazia a IA continuar no Fox/no produto oferecido antes, em vez de só cumprimentar.
-  const SESSION_GAP_MS = 3 * 60 * 60 * 1000 // 3h sem mensagem = nova sessão
-  const sessionHistory = sliceToCurrentSession(history, SESSION_GAP_MS)
+  // A IA vê o histórico INTEIRO (memória completa da relação com o cliente). Só detectamos
+  // se ele está retomando o contato após um tempo parado, pra avisar no prompt — o modelo
+  // responde ao que ele diz agora sem re-emplacar sozinho o produto de dias atrás.
+  const SESSION_GAP_MS = 3 * 60 * 60 * 1000 // 3h sem mensagem = retomada de contato
+  const isReturning = isReturningAfterGap(history, SESSION_GAP_MS)
 
-  const llmMessages: LLMMessage[] = sessionHistory
+  const llmMessages: LLMMessage[] = history
     .filter((m) => m.sender_type === 'customer' || m.sender_type === 'ai' || m.sender_type === 'human')
     .filter((m) => m.content || m.content_type === 'audio')
     .map((m) => ({
@@ -448,10 +442,10 @@ export async function processMessage(conversationId: string): Promise<{ success:
   // Janela multi-turno pro guard-rail de search_products: olhar só a última mensagem do
   // cliente faz recall legítimo de um produto citado 2+ turnos atrás (ex: "tem mais fotos
   // dele?") ser tratado como "palavra nova" e corrompido. Ampliando pras últimas N mensagens
-  // do cliente (da sessão atual), a mensagem atual continua incluída — então a proteção
-  // original contra sinônimos ("colchão" → "cama") no MESMO turno continua funcionando.
+  // do cliente, a mensagem atual continua incluída — então a proteção original contra
+  // sinônimos ("colchão" → "cama") no MESMO turno continua funcionando.
   const GUARD_RAIL_RECALL_WINDOW = 6
-  const recentCustomerMsgs = sessionHistory.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
+  const recentCustomerMsgs = history.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
   const recallWindowLower = recentCustomerMsgs.map((m) => (m.content ?? '').toLowerCase()).join(' ')
   const recallWindowKeywords: string[] = []
   for (let i = recentCustomerMsgs.length - 1; i >= 0; i--) {
@@ -460,7 +454,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
     }
   }
 
-  const focusCandidate = extractFocusProductCandidate(sessionHistory)
+  const focusCandidate = extractFocusProductCandidate(history)
   let focusProduct: { id: string; name: string } | null = null
   if (focusCandidate) {
     const focusRows = await db
@@ -488,9 +482,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
   }
 
   const now = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short', timeZone: timezone }).format(new Date())
-  // Baseado na sessão atual: um cliente que volta depois de dias é cumprimentado de novo,
-  // em vez de a IA emendar do meio de uma conversa antiga.
-  const isFirstAiResponse = !sessionHistory.some((m) => m.sender_type === 'ai')
+  const isFirstAiResponse = !history.some((m) => m.sender_type === 'ai')
   const adProductsListText = adProducts
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')
@@ -499,7 +491,9 @@ export async function processMessage(conversationId: string): Promise<{ success:
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
 
 ## Regras de comportamento (obrigatórias)
+- SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO: se a mensagem ATUAL do cliente é só um cumprimento ou abertura ("oi", "olá", "bom dia", "boa tarde", "boa noite", "tudo bem?", "e aí") SEM pedir nada, apenas cumprimente de forma calorosa e pergunte como pode ajudar. NÃO chame search_products, NÃO reenvie foto e NÃO re-ofereça nenhum produto que já foi mostrado antes — mesmo que a conversa anterior fosse sobre um carro específico. Reagir a um "boa tarde" reapresentando o último produto é a MARCA REGISTRADA de um robô travado; um vendedor de verdade só cumprimenta de volta e pergunta no que pode ajudar.
 - RESPONDA O QUE FOI PERGUNTADO: se o cliente pediu colchão → mostre colchão. Se pediu preço → dê o preço. NUNCA responda uma pergunta com outra pergunta quando o cliente já forneceu informação suficiente para buscar.
+- ATENÇÃO AO QUE ELE PEDE AGORA: o histórico acima é sua memória da conversa, mas responda sempre à ÚLTIMA mensagem do cliente. Se ele mudar de assunto ou pedir algo diferente do que estava sendo falado (ex: vinha vendo um modelo e agora pergunta "quais outras marcas vocês têm?"), acompanhe a mudança — busque o que ele pediu agora, não insista no produto anterior.
 - BUSCA IMEDIATA (padrão, salvo se "Contexto do negócio e personalidade" abaixo definir um fluxo de qualificação próprio — nesse caso siga o fluxo específico dele): quando o cliente mencionar qualquer produto, serviço ou categoria, chame search_products IMEDIATAMENTE. NUNCA pergunte orçamento, tamanho, modelo ou preferência ANTES de mostrar o catálogo. Primeiro mostre o que tem, depois afine se necessário.
 - QUERY EXATA: ao chamar search_products, use as PALAVRAS EXATAS que o cliente disse. Se o cliente disse "colchão", busque "colchão". Se disse "sofá", busque "sofá". NUNCA substitua por sinônimos ou categorias relacionadas — "colchão" e "cama" são produtos DIFERENTES. Use no máximo 1-3 palavras extraídas literalmente da fala do cliente.
 - RECOMENDE 1 produto: apresente o mais adequado ao que o cliente descreveu. Não liste todos — escolha um e recomende com convicção. Se o cliente quiser ver mais, ele pede.
@@ -541,18 +535,20 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
 - Data/hora: ${now}
 - Horário de atendimento: ${formatBusinessHours(businessHours)}
 - Status: DENTRO do horário de atendimento
+${isReturning ? `
+## Cliente retomando o contato
+O cliente ficou um tempo sem falar e está voltando agora. Todo o histórico acima é sua MEMÓRIA da relação
+com ele — não descarte, mas também não emende do meio da conversa antiga como se nada tivesse pausado.
+Responda à mensagem ATUAL dele. Se for só um "boa tarde", cumprimente de volta e pergunte no que pode
+ajudar hoje — NÃO reapresente por conta própria o produto que vocês discutiram da última vez.` : ''}
 ${focusProduct ? `
 ## Produto em foco
 O cliente estava vendo "${focusProduct.name}" (ID: ${focusProduct.id}) mais recentemente nesta conversa.
-Se ele disser "ele", "dele", "esse", "esse aí", "mais fotos", "tem mais?", "quanto custa?" etc. sem citar
-outro produto, ele está se referindo a ESTE produto — use o ID acima diretamente em send_product_image /
-send_more_product_images, NÃO chame search_products de novo só pra redescobrir esse ID. Se o cliente
-claramente mudar de assunto pra outro produto, ignore esta seção e busque normalmente.
-SAUDAÇÃO PURA — NÃO reaja ao "produto em foco": se a mensagem do cliente for só uma saudação ("oi",
-"olá", "bom dia", "boa tarde", "boa noite", "tudo bem?" etc., sem pedir nada sobre o produto), essa
-seção NÃO se aplica — responda com um cumprimento natural e pergunte como pode ajudar, como faria com
-qualquer cliente novo. NÃO reenvie foto nem redescreva o produto sem ele ter pedido — isso soa como o
-bot travado num loop, não como um vendedor cumprimentando alguém.` : ''}
+Se — E SOMENTE SE — a mensagem ATUAL dele se referir a esse produto ("ele", "dele", "esse", "esse aí",
+"mais fotos", "tem mais?", "quanto custa?" etc. sem citar outro produto), ele está falando DESTE produto —
+use o ID acima diretamente em send_product_image / send_more_product_images, NÃO chame search_products de
+novo só pra redescobrir esse ID. Se a mensagem atual for uma saudação, uma pergunta nova ou sobre outro
+produto, IGNORE esta seção completamente — cumprimente ou busque o que ele pediu agora, sem reofertar isto.` : ''}
 ${adReferral ? `
 ## Cliente veio de anúncio
 Esta conversa começou porque o cliente clicou em um anúncio patrocinado (Facebook/Instagram Ads) e a
