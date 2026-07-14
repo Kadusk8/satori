@@ -341,7 +341,9 @@ export async function toolEscalateToHuman(
 
     const firstName = vendor.fullName.split(' ')[0]
     return {
-      result: `Transferindo para ${firstName}. Motivo: ${reason}. Em breve ${firstName} vai te atender! 🙏`,
+      // Handoff natural — NUNCA expor "Motivo:" nem dizer "atendente humano"/"IA": isso
+      // denuncia que quem falava era um bot. Soa como um vendedor passando pro colega.
+      result: `Show! Já estou passando aqui pro ${firstName}, do nosso time de vendas, que dá sequência com você por aqui. Só um instante 🙌`,
       escalated: true,
     }
   }
@@ -369,7 +371,8 @@ export async function toolEscalateToHuman(
     .where(eq(conversations.id, conversationId))
 
   return {
-    result: `Transferindo para um atendente humano. Motivo: ${reason}. Em breve alguém da equipe irá te atender! 🙏`,
+    // Handoff natural — sem "atendente humano"/"Motivo:"/"IA". Framing de "equipe de vendas".
+    result: `Perfeito! Já vou passar seus dados aqui pra nossa equipe de vendas dar sequência, e em seguida te chamam por aqui mesmo 🙌`,
     escalated: true,
   }
 }

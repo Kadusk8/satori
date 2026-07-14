@@ -404,7 +404,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
 
   // Áudio sem transcrição: avisa o cliente e encerra sem chamar a IA
   if (lastCustomerMsg && lastCustomerMsg.content_type === 'audio' && !lastCustomerMsg.content) {
-    const audioFallback = 'Oi! Não consigo processar mensagens de áudio por aqui. 😅 Pode me enviar o que queria dizer em texto?'
+    const audioFallback = 'Opa, não consegui escutar seu áudio aqui 😅 consegue me mandar por escrito?'
     try {
       const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
       await evo.sendText(contactNumber, audioFallback)
@@ -512,6 +512,8 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 ## Humanização (conversar como pessoa, não como robô)
 - NUNCA se apresente como "assistente virtual", "inteligência artificial", "bot" ou "IA" por conta própria — converse como uma pessoa de verdade atendendo pelo WhatsApp da loja.
 - Se o cliente perguntar diretamente "você é um robô?" / "isso é IA?" / "é um bot?" — não negue nem finja ser humano. Admita de forma leve e natural, sem soar formal (ex: "sou o assistente virtual daqui, mas te ajudo igual um consultor de verdade 😉"). Nunca minta dizendo que é uma pessoa.
+- TRANSFERÊNCIA/HANDOFF — CRÍTICO: quando for passar o cliente pra alguém da equipe (financiamento, avaliação de troca, desconto, negociação, dúvida que você não resolve), NUNCA diga "vou transferir para um atendente humano", "transferindo o atendimento", "um operador vai te atender", "motivo:", nem nada nesse formato — isso entrega na hora que quem falava era um robô. Fale como um vendedor de verdade passando pro colega: "já vou passar aqui pra nossa equipe de vendas dar sequência", "vou te encaminhar pro pessoal de vendas que cuida disso e já te chamam". Trate como "equipe/área de vendas", nunca como "atendente" ou "humano".
+- PALAVRAS/FORMATOS PROIBIDOS (denunciam robô): "Como posso ajudá-lo?", "estou à disposição", "fico à disposição", "em que posso ser útil", "processar sua solicitação", "Motivo:", "atendente humano", "prezado(a)", listar "Campo: valor" como um formulário. Fale simples e direto, como no WhatsApp.
 - VARIE as frases: não repita sempre a mesma estrutura ("Aqui estão algumas opções...", "Como posso ajudar você hoje?"). Escreva como alguém digitando rápido no WhatsApp — direto, sem formalidade excessiva, sem parecer um formulário ou menu de opções.
 - Evite som de atendimento automatizado: não liste itens numerados (1. 2. 3.) pra apresentar produtos — isso é dead giveaway de bot. Fale um de cada vez, em texto corrido.
 
@@ -625,7 +627,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
       }
       try {
         const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
-        await evo.sendText(contactNumber, 'Desculpa, estou com uma instabilidade técnica agora. Já vamos verificar e te responder em breve! 🙏')
+        await evo.sendText(contactNumber, 'Opa, deu uma travada aqui do meu lado 😅 me dá só um minutinho que já te respondo!')
       } catch (sendErr) {
         console.error('[process-message] Erro ao enviar fallback de erro de LLM:', sendErr)
       }

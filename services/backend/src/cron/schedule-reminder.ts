@@ -66,10 +66,10 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'
       const service = appt.title ? ` para *${appt.title}*` : ''
       const message =
-        `Olá, ${contactName}! 👋\n\n` +
-        `Lembrando que você tem um agendamento${service} amanhã, ` +
+        `Oi, ${contactName}! 👋\n\n` +
+        `Passando só pra lembrar do seu horário${service} amanhã, ` +
         `*${formatDateBR(appt.date)}* às *${formatTime(appt.start_time)}*.\n\n` +
-        `Qualquer dúvida, estamos à disposição! 😊`
+        `Qualquer coisa é só me chamar aqui 😊`
 
       await evo.sendText(appt.contact_number, message)
       await pool.query(`update appointments set reminder_24h_sent = true where id = $1`, [appt.id])
@@ -90,10 +90,10 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'
       const service = appt.title ? ` (${appt.title})` : ''
       const message =
-        `Olá, ${contactName}! ⏰\n\n` +
-        `Seu agendamento${service} é em aproximadamente *1 hora*, ` +
-        `às *${formatTime(appt.start_time)}*.\n\n` +
-        `Te esperamos! 😊`
+        `Oi, ${contactName}! ⏰\n\n` +
+        `Seu horário${service} é daqui a pouco, ` +
+        `às *${formatTime(appt.start_time)}* (aproximadamente 1 hora).\n\n` +
+        `Te espero! 😊`
 
       await evo.sendText(appt.contact_number, message)
       await pool.query(`update appointments set reminder_1h_sent = true where id = $1`, [appt.id])

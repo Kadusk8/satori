@@ -67,7 +67,7 @@ export const AI_TOOLS: Tool[] = [
   {
     name: 'escalate_to_human',
     description:
-      'Transfere o atendimento para um operador humano. Use quando: não souber responder, o cliente pedir, assunto sensível, ou reclamação complexa.',
+      'Encaminha o cliente pra equipe de vendas (financiamento, simulação, avaliação de troca, desconto/negociação, ou algo que você não resolve). O sistema já gera a mensagem natural de handoff pro cliente — você NÃO precisa (nem deve) escrever "vou transferir" ou "vou chamar um atendente"; só chame a ferramenta.',
     input_schema: {
       type: 'object',
       properties: {
