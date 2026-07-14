@@ -53,6 +53,7 @@ interface ProductFormProps {
   product?: Product | null
   cloudName: string
   uploadPreset: string
+  categories: string[]
   onSave: (data: Omit<Product, 'id'> & { id?: string }) => Promise<void>
   onClose: () => void
 }
@@ -61,6 +62,7 @@ export function ProductForm({
   product,
   cloudName,
   uploadPreset,
+  categories,
   onSave,
   onClose,
 }: ProductFormProps) {
@@ -229,7 +231,12 @@ export function ProductForm({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1.5">Categoria</label>
-              <Input {...register('category')} placeholder="Ex: Roupas" />
+              <Input {...register('category')} placeholder="Ex: Roupas" list="product-categories-list" />
+              <datalist id="product-categories-list">
+                {categories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">

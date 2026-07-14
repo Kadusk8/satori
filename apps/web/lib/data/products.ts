@@ -1,9 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { desc, eq } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
-import { products } from '@/lib/db/schema'
+import { products, productCategories } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
 
 export interface DBProductRow {
@@ -57,6 +57,14 @@ function toRow(p: typeof products.$inferSelect): DBProductRow {
     is_featured: p.isFeatured,
     is_running_ad: p.isRunningAd,
   }
+}
+
+export async function listProductCategories(): Promise<string[]> {
+  const claims = await claimsOrThrow()
+  const rows = await withClaims(claims, (tx) =>
+    tx.select({ name: productCategories.name }).from(productCategories).orderBy(asc(productCategories.position))
+  )
+  return rows.map((r) => r.name)
 }
 
 export async function listProducts(): Promise<DBProductRow[]> {

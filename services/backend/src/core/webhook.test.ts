@@ -11,8 +11,9 @@ describe('extractAdReferral', () => {
             externalAdReply: {
               title: 'VW Fox Connect 1.6',
               body: 'A partir de R$ 61.900',
-              sourceId: 'ad-123',
-              sourceUrl: 'https://fb.me/ad-123',
+              sourceID: 'ad-123',
+              sourceURL: 'https://fb.me/ad-123',
+              ctwaClid: 'clid-abc',
             },
           },
         },
@@ -23,6 +24,7 @@ describe('extractAdReferral', () => {
       body: 'A partir de R$ 61.900',
       sourceId: 'ad-123',
       sourceUrl: 'https://fb.me/ad-123',
+      ctwaClid: 'clid-abc',
     })
   })
 
@@ -40,6 +42,7 @@ describe('extractAdReferral', () => {
       body: null,
       sourceId: null,
       sourceUrl: null,
+      ctwaClid: null,
     })
   })
 

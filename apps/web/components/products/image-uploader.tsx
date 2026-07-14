@@ -24,7 +24,7 @@ export function ImageUploader({
   onChange,
   cloudName,
   uploadPreset,
-  maxImages = 5,
+  maxImages = 10,
 }: ImageUploaderProps) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)

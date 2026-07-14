@@ -412,6 +412,35 @@ CREATE POLICY "service_role_full_access" ON kanban_stages
 
 
 -- ================================================================
+-- TABELA: product_categories
+-- ================================================================
+CREATE TABLE IF NOT EXISTS product_categories (
+  id        UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID    NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name      TEXT    NOT NULL,
+  position  INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, name)
+);
+
+COMMENT ON TABLE product_categories IS 'Categorias de produto cadastradas pelo tenant, usadas pra popular o seletor no formulário de produto.';
+
+CREATE INDEX IF NOT EXISTS idx_product_categories_tenant_id ON product_categories (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_product_categories_position  ON product_categories (tenant_id, position);
+
+ALTER TABLE product_categories ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON product_categories
+  FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "super_admin_full_access" ON product_categories
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+
+CREATE POLICY "service_role_full_access" ON product_categories
+  FOR ALL USING (auth.role() = 'service_role');
+
+
+-- ================================================================
 -- TABELA: ai_agents
 -- (já inclui campos de follow-up [014] e áudio/ElevenLabs [019])
 -- ================================================================

@@ -692,6 +692,14 @@ como um atendimento genérico de primeiro contato.` : ''}`
     finalText = finalText.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
   }
 
+  // Rede de segurança: o marcador interno "[tem imagem — use send_product_image com
+  // id: ...]" (injetado no resultado de search_products pra instruir o LLM a chamar a
+  // ferramenta) já vazou pro texto final em produção pelo menos uma vez — o LLM copiou
+  // o marcador em vez de só chamar a tool. Nunca deve chegar ao cliente.
+  if (finalText) {
+    finalText = finalText.replace(/🖼️?\s*\[tem imagem[^\]]*\]/gi, '').trim()
+  }
+
   // "Mais fotos" — resposta enxuta como humano. Quando o cliente só pede mais fotos de um
   // produto que já está em foco/sendo mostrado, um vendedor real não re-descreve o carro
   // inteiro: manda as fotos com uma linha curta. O texto verboso do LLM nesse caso denuncia

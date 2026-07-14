@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { Bot, MessagesSquare, UserCog, ArrowRight, Kanban, UserRound } from 'lucide-react'
+import { Bot, MessagesSquare, UserCog, ArrowRight, Kanban, UserRound, Tags } from 'lucide-react'
 import { getSessionClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
 import { ChangePasswordDialog } from './change-password-dialog'
@@ -92,6 +92,22 @@ export default async function SettingsPage() {
               <h2 className="font-semibold">Colunas do Kanban</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 Crie, renomeie, reordene e exclua as colunas do seu funil de atendimento.
+              </p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-2 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+
+          <Link
+            href="/settings/categories"
+            className="border rounded-lg p-6 flex gap-4 items-start hover:bg-accent/50 transition-colors group"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+              <Tags className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-semibold">Categorias de produto</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Crie, renomeie, reordene e exclua as categorias usadas no catálogo de produtos.
               </p>
             </div>
             <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-2 group-hover:translate-x-0.5 transition-transform" />

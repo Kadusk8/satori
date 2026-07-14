@@ -177,6 +177,23 @@ export const kanbanStages = pgTable(
   ]
 )
 
+export const productCategories = pgTable(
+  'product_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_product_categories_tenant_id').on(t.tenantId),
+    uniqueIndex('product_categories_tenant_name_unique').on(t.tenantId, t.name),
+  ]
+)
+
 export const aiAgents = pgTable(
   'ai_agents',
   {

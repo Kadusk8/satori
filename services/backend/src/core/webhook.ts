@@ -19,15 +19,18 @@ export interface TenantRow {
 }
 
 // Referral de anúncio Click-to-WhatsApp — mesmo proto do WhatsApp usado pelo
-// Baileys/whatsmeow (contextInfo.externalAdReplyInfo), presente em qualquer
-// tipo de mensagem que o cliente mande como primeira mensagem ao clicar num
-// anúncio do Facebook/Instagram. Formato ainda não confirmado contra um
-// payload real da Evolution Go — ver log defensivo em parseMessage().
+// Baileys/whatsmeow (contextInfo.externalAdReply), presente em qualquer tipo
+// de mensagem que o cliente mande como primeira mensagem ao clicar num
+// anúncio do Facebook/Instagram. Formato confirmado contra payload real da
+// Evolution Go em 2026-07-12: sourceID/sourceURL vêm com ID/URL maiúsculos
+// (não sourceId/sourceUrl como no proto Baileys "clássico"), e ctwaClid é o
+// click ID do Meta (mais útil que sourceID pra Conversions API).
 interface ExternalAdReplyInfo {
   title?: string
   body?: string
-  sourceId?: string
-  sourceUrl?: string
+  sourceID?: string
+  sourceURL?: string
+  ctwaClid?: string
   thumbnailUrl?: string
   mediaType?: number
 }
@@ -63,6 +66,7 @@ export interface AdReferral {
   body: string | null
   sourceId: string | null
   sourceUrl: string | null
+  ctwaClid: string | null
 }
 
 /**
@@ -83,8 +87,9 @@ export function extractAdReferral(data: EvolutionMessageData): AdReferral | null
   return {
     title: ad.title ?? null,
     body: ad.body ?? null,
-    sourceId: ad.sourceId ?? null,
-    sourceUrl: ad.sourceUrl ?? null,
+    sourceId: ad.sourceID ?? null,
+    sourceUrl: ad.sourceURL ?? null,
+    ctwaClid: ad.ctwaClid ?? null,
   }
 }
 

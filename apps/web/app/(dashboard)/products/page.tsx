@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { ProductCard, type Product } from '@/components/products/product-card'
 import { ProductForm } from '@/components/products/product-form'
 import { cn } from '@/lib/utils'
-import { listProducts, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
+import { listProducts, listProductCategories, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
 import { toast } from 'sonner'
 
 // Configuração Cloudinary — vem do tenant no banco (fallback para dev)
@@ -56,6 +56,7 @@ type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured' | 'running_
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
+  const [registeredCategories, setRegisteredCategories] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
@@ -82,6 +83,12 @@ export default function ProductsPage() {
     setIsLoading(true)
     loadProducts().finally(() => setIsLoading(false))
   }, [loadProducts])
+
+  useEffect(() => {
+    listProductCategories()
+      .then(setRegisteredCategories)
+      .catch(() => {})
+  }, [])
 
   // ── Filtros ─────────────────────────────────────────────────────────────────
 
@@ -379,6 +386,7 @@ export default function ProductsPage() {
           product={formProduct}
           cloudName={CLOUDINARY_CLOUD_NAME}
           uploadPreset={CLOUDINARY_UPLOAD_PRESET}
+          categories={registeredCategories}
           onSave={handleSave}
           onClose={() => setShowForm(false)}
         />
