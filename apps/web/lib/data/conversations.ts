@@ -148,6 +148,33 @@ export async function moveConversation(conversationId: string, newStageId: strin
   })
   revalidatePath('/conversations')
   await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
+
+  // Gatilho Meta Conversions API: Purchase (WORKSTREAM C)
+  // Buscar slug do novo stage pra saber se é "finalizado"
+  try {
+    await withClaims(claims, async (tx) => {
+      const stageRow = await tx
+        .select({ slug: kanbanStages.slug })
+        .from(kanbanStages)
+        .where(eq(kanbanStages.id, newStageId))
+        .limit(1)
+
+      const stageSlug = stageRow[0]?.slug
+      if (stageSlug) {
+        // Chamar backend pra disparar evento Meta se for stage "finalizado"
+        const backendUrl = process.env.BACKEND_URL
+        if (backendUrl) {
+          await fetch(`${backendUrl}/meta-capi/purchase`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.BACKEND_TOKEN}` },
+            body: JSON.stringify({ conversationId, stageSlug }),
+          }).catch((err) => console.warn('[moveConversation] Erro ao chamar Meta CAPI:', err))
+        }
+      }
+    })
+  } catch (err) {
+    console.warn('[moveConversation] Erro ao processar Meta CAPI:', err)
+  }
 }
 
 /** Reatribui manualmente uma conversa a um vendedor — só owner/admin. */

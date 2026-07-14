@@ -6,6 +6,7 @@ import { and, eq, lte, ne } from 'drizzle-orm'
 import { db, pool } from '../db/index.js'
 import { appointments, conversations, kanbanStages, products } from '../db/schema.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
+import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors } from './lead-routing.js'
 
 interface ProductRow {
@@ -30,7 +31,7 @@ async function queryProducts(whereSql: string, params: unknown[], orderLimitSql:
   return res.rows
 }
 
-export async function toolSearchProducts(tenantId: string, input: Record<string, unknown>): Promise<string> {
+export async function toolSearchProducts(tenantId: string, input: Record<string, unknown>, conversationId?: string): Promise<string> {
   const query = input.query ? String(input.query).trim() : ''
   const categoryParam = input.category ? String(input.category) : null
   const maxResults = Number(input.max_results ?? 8)
@@ -113,6 +114,18 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
   if (data.length === 0) {
     const params: unknown[] = priceMax ? [tenantId, priceMax] : [tenantId]
     data = await queryProducts(priceSql, params, `order by is_featured desc, name asc limit ${maxResults}`)
+    // Registrar flag de qualidade se usou fallback com query não-vazia (WORKSTREAM B)
+    if (query && data.length > 0 && conversationId) {
+      try {
+        await pool.query(
+          `insert into ai_quality_flags (tenant_id, conversation_id, flag_type, detail)
+           values ($1, $2, $3, $4)`,
+          [tenantId, conversationId, 'search_fallback_listall', `Query: "${query}"`]
+        )
+      } catch (err) {
+        console.error('[toolSearchProducts] Erro ao registrar quality flag:', err)
+      }
+    }
   }
 
   if (data.length === 0) return 'Nenhum produto cadastrado no momento.'
@@ -258,6 +271,27 @@ export async function toolBookAppointment(
       .limit(1)
     if (agStage[0]) {
       await db.update(conversations).set({ kanbanStageId: agStage[0].id }).where(eq(conversations.id, conversationId))
+    }
+
+    // Gatilho Meta Conversions API: Schedule (WORKSTREAM C)
+    // O ctwaClid é gravado pelo webhook em metadata.ad_referral.ctwaClid (aninhado),
+    // não na raiz de metadata — ver extractAdReferral() em core/webhook.ts.
+    try {
+      const convRes = await pool.query<{ metadata: { source?: string; ad_referral?: { ctwaClid?: string | null } } | null }>(
+        `select metadata from conversations where id = $1`,
+        [conversationId]
+      )
+      const conv = convRes.rows[0]
+      const ctwaClid = conv?.metadata?.ad_referral?.ctwaClid
+      if (conv?.metadata?.source === 'ctwa_ad' && ctwaClid) {
+        await sendConversionEvent({
+          tenantId,
+          ctwaClid,
+          eventName: 'Schedule',
+        })
+      }
+    } catch (metaErr) {
+      console.error('[toolBookAppointment] Erro ao processar Meta CAPI:', metaErr)
     }
 
     return `✅ Agendamento confirmado!\n📅 Data: ${date}\n🕐 Horário: ${startTime}–${endTime}\nID: ${created[0].id}`

@@ -3,9 +3,11 @@ import rateLimit from '@fastify/rate-limit'
 import cron from 'node-cron'
 import { webhookEvolutionRoutes } from './routes/webhook-evolution.js'
 import { sendWhatsappRoutes } from './routes/send-whatsapp.js'
+import { metaCapiRoutes } from './routes/meta-capi.js'
 import { runScheduleReminder } from './cron/schedule-reminder.js'
 import { runProcessFollowUps } from './cron/process-follow-ups.js'
 import { runResetMonthlyMessageCounts } from './cron/reset-monthly-counts.js'
+import { runMonitorAiQuality } from './cron/monitor-ai-quality.js'
 
 if (!process.env.BACKEND_TOKEN) {
   console.warn(
@@ -26,6 +28,7 @@ app.get('/health', async () => ({ ok: true }))
 
 await app.register(webhookEvolutionRoutes)
 await app.register(sendWhatsappRoutes)
+await app.register(metaCapiRoutes)
 
 // Lembretes de agendamento: a cada 15 minutos (equivalente ao pg_cron antigo)
 cron.schedule('*/15 * * * *', () => {
@@ -42,6 +45,11 @@ cron.schedule('0 * * * *', () => {
 // neon/schema.sql por depender de pg_net/pg_cron indisponíveis no Neon).
 cron.schedule('0 0 1 * *', () => {
   runResetMonthlyMessageCounts().catch((err) => app.log.error({ err }, '[cron] reset-monthly-counts falhou'))
+})
+
+// Monitor de qualidade da IA: 1x/dia às 9:00 AM (WORKSTREAM B)
+cron.schedule('0 9 * * *', () => {
+  runMonitorAiQuality().catch((err) => app.log.error({ err }, '[cron] monitor-ai-quality falhou'))
 })
 
 const port = Number(process.env.PORT ?? 3001)

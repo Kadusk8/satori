@@ -167,3 +167,23 @@ export const followUps = pgTable('follow_ups', {
   messageContent: text('message_content'),
   context: text('context'),
 })
+
+export const aiErrorLogs = pgTable('ai_error_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  aiAgentId: uuid('ai_agent_id'),
+  conversationId: uuid('conversation_id'),
+  provider: text('provider').notNull(),
+  errorType: text('error_type').notNull().default('other'),
+  message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const aiQualityFlags = pgTable('ai_quality_flags', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id'),
+  flagType: text('flag_type').notNull(),
+  detail: text('detail'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})

@@ -3,21 +3,7 @@ import {
   MessageSquare, Users, Bot, Clock,
   ArrowUpRight, CheckCircle2, AlertCircle, TrendingUp,
 } from 'lucide-react'
-
-const stats = [
-  { title: 'Conversas hoje',   value: '24',    change: '+12%', icon: MessageSquare, colorClass: 'text-blue-400',   bgClass: 'bg-blue-400/10 border-blue-400/20' },
-  { title: 'Novos leads',      value: '9',     change: '+5%',  icon: Users,         colorClass: 'text-emerald-400',bgClass: 'bg-emerald-400/10 border-emerald-400/20' },
-  { title: 'Atendidas pela IA',value: '18',    change: '75%',  icon: Bot,           colorClass: 'text-indigo-400', bgClass: 'bg-indigo-400/10 border-indigo-400/20' },
-  { title: 'Tempo médio',      value: '4m 32s',change: '-8%',  icon: Clock,         colorClass: 'text-amber-400',  bgClass: 'bg-amber-400/10 border-amber-400/20' },
-]
-
-const recentConversations = [
-  { id: '1', name: 'João Silva',     phone: '+55 62 9 9999-0001', lastMessage: 'Qual o preço do produto X?',        status: 'ai_handling',    time: '2 min' },
-  { id: '2', name: 'Maria Santos',   phone: '+55 62 9 9999-0002', lastMessage: 'Quero agendar uma consulta',        status: 'waiting_human',  time: '5 min' },
-  { id: '3', name: 'Carlos Oliveira',phone: '+55 62 9 9999-0003', lastMessage: 'Obrigado pelo atendimento!',        status: 'human_handling', time: '12 min' },
-  { id: '4', name: 'Ana Costa',      phone: '+55 62 9 9999-0004', lastMessage: 'Tem disponibilidade amanhã?',       status: 'ai_handling',    time: '18 min' },
-  { id: '5', name: 'Pedro Ferreira', phone: '+55 62 9 9999-0005', lastMessage: 'Preciso de mais informações',       status: 'closed',         time: '1h' },
-]
+import { getTenantDashboardMetrics } from '@/lib/data/dashboard'
 
 const statusConfig: Record<string, { label: string; dot: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   ai_handling:   { label: 'IA atendendo', dot: 'bg-blue-400',    variant: 'default' },
@@ -26,13 +12,24 @@ const statusConfig: Record<string, { label: string; dot: string; variant: 'defau
   closed:        { label: 'Encerrado',    dot: 'bg-muted-foreground', variant: 'outline' },
 }
 
-const usageItems = [
-  { label: 'Mensagens este mês', used: 342, max: 1000 },
-  { label: 'Produtos cadastrados', used: 18, max: 50 },
-  { label: 'Operadores', used: 2, max: 3 },
-]
+export const dynamic = 'force-dynamic'
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const metrics = await getTenantDashboardMetrics()
+
+  // Montar array de stats a partir dos dados reais
+  const stats = [
+    { title: 'Conversas hoje',   value: String(metrics.conversasHoje),    icon: MessageSquare, colorClass: 'text-blue-400',   bgClass: 'bg-blue-400/10 border-blue-400/20' },
+    { title: 'Novos leads',      value: String(metrics.novosLeads),       icon: Users,         colorClass: 'text-emerald-400',bgClass: 'bg-emerald-400/10 border-emerald-400/20' },
+    { title: 'Atendidas pela IA',value: `${metrics.atendidasIaPct}%`,     icon: Bot,           colorClass: 'text-indigo-400', bgClass: 'bg-indigo-400/10 border-indigo-400/20' },
+    { title: 'Tempo médio',      value: metrics.tempoMedioResposta,       icon: Clock,         colorClass: 'text-amber-400',  bgClass: 'bg-amber-400/10 border-amber-400/20' },
+  ]
+
+  const usageItems = [
+    { label: 'Mensagens este mês', used: metrics.uso.mensagens.used, max: metrics.uso.mensagens.max },
+    { label: 'Produtos cadastrados', used: metrics.uso.produtos.used, max: metrics.uso.produtos.max },
+    { label: 'Operadores', used: metrics.uso.operadores.used, max: metrics.uso.operadores.max },
+  ]
   return (
     <div className="p-6 space-y-6">
 
@@ -53,10 +50,6 @@ export default function DashboardPage() {
             </div>
             <p className="text-2xl font-black tabular-nums text-foreground leading-none">{stat.value}</p>
             <p className="text-[11px] text-muted-foreground mt-1">{stat.title}</p>
-            <div className="flex items-center gap-1 mt-1.5">
-              <TrendingUp className="h-3 w-3 text-emerald-400" />
-              <span className="text-[10px] text-emerald-400 font-medium">{stat.change}</span>
-            </div>
           </div>
         ))}
       </div>
@@ -74,31 +67,37 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="divide-y divide-border/40">
-            {recentConversations.map((conv) => {
-              const s = statusConfig[conv.status]
-              return (
-                <Link key={conv.id} href={`/chat/${conv.id}`}
-                  className="flex items-center gap-3 px-5 py-3 hover:bg-accent/50 transition-colors">
-                  <div className="h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-primary">{conv.name.charAt(0)}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground leading-none">{conv.name}</span>
-                      <span className="text-[10px] text-muted-foreground">{conv.phone}</span>
+            {metrics.conversasRecentes.length > 0 ? (
+              metrics.conversasRecentes.map((conv) => {
+                const s = statusConfig[conv.status] || { label: 'Desconhecido', dot: 'bg-gray-400', variant: 'outline' as const }
+                return (
+                  <Link key={conv.id} href={`/chat/${conv.id}`}
+                    className="flex items-center gap-3 px-5 py-3 hover:bg-accent/50 transition-colors">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                      <span className="text-xs font-bold text-primary">{conv.name.charAt(0)}</span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                      <span className="text-[10px] text-muted-foreground font-medium">{s.label}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground leading-none">{conv.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{conv.phone}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
                     </div>
-                    <span className="text-[10px] text-muted-foreground/60">{conv.time} atrás</span>
-                  </div>
-                </Link>
-              )
-            })}
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+                        <span className="text-[10px] text-muted-foreground font-medium">{s.label}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground/60">{conv.time} atrás</span>
+                    </div>
+                  </Link>
+                )
+              })
+            ) : (
+              <div className="px-5 py-6 text-center text-[11px] text-muted-foreground">
+                Nenhuma conversa ainda hoje.
+              </div>
+            )}
           </div>
         </div>
 
@@ -128,6 +127,15 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
+
+          {/* Leads de anúncio */}
+          {metrics.leadsAnuncio > 0 && (
+            <div className="rounded-lg border border-border/60 bg-card p-4">
+              <span className="text-sm font-semibold text-foreground block mb-3">Leads de Anúncio</span>
+              <p className="text-2xl font-black tabular-nums text-foreground">{metrics.leadsAnuncio}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Leads de CTWA hoje</p>
+            </div>
+          )}
 
           {/* Uso do plano */}
           <div className="rounded-lg border border-border/60 bg-card p-4">

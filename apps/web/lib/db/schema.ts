@@ -454,6 +454,24 @@ export const aiErrorLogs = pgTable(
   (t) => [index('idx_ai_error_logs_tenant_created').on(t.tenantId, t.createdAt)]
 )
 
+export const aiQualityFlags = pgTable(
+  'ai_quality_flags',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+    flagType: text('flag_type').notNull(),
+    detail: text('detail'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => [
+    index('idx_ai_quality_flags_tenant_created').on(t.tenantId, t.createdAt),
+    index('idx_ai_quality_flags_flag_type_created').on(t.flagType, t.createdAt),
+  ]
+)
+
 // Tipos inferidos — usar nos Server Components/Actions ao invés das interfaces
 // DB manuais espalhadas hoje pelas páginas.
 export type Tenant = typeof tenants.$inferSelect
@@ -468,3 +486,5 @@ export type Appointment = typeof appointments.$inferSelect
 export type FollowUp = typeof followUps.$inferSelect
 export type SuperAdmin = typeof superAdmins.$inferSelect
 export type AuthUser = typeof authUsers.$inferSelect
+export type AiErrorLog = typeof aiErrorLogs.$inferSelect
+export type AiQualityFlag = typeof aiQualityFlags.$inferSelect

@@ -27,6 +27,24 @@ import {
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
 
+// Helper para registrar sinais de qualidade da IA (WORKSTREAM B)
+async function recordQualityFlag(
+  tenantId: string,
+  conversationId: string,
+  flagType: 'leaked_marker' | 'search_fallback_listall' | 'promised_image_no_tool' | 'escalation_stale',
+  detail?: string | null
+): Promise<void> {
+  try {
+    await pool.query(
+      `insert into ai_quality_flags (tenant_id, conversation_id, flag_type, detail)
+       values ($1, $2, $3, $4)`,
+      [tenantId, conversationId, flagType, detail ?? null]
+    )
+  } catch (err) {
+    console.error(`[process-message] Erro ao registrar quality flag (${flagType}):`, err)
+  }
+}
+
 interface BusinessHours {
   [day: string]: { enabled: boolean; start: string; end: string } | undefined
 }
@@ -629,7 +647,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
             queryCorrected = true
           }
         }
-        result = await toolSearchProducts(tenantId, searchInput)
+        result = await toolSearchProducts(tenantId, searchInput, conversationId)
         if (queryCorrected) {
           result = `[SISTEMA: Apresente os produtos abaixo normalmente como resultados disponíveis. NÃO mencione que houve troca de palavras. NÃO escreva "não encontrei" — há produtos no catálogo.]\n\n` + result
         }
@@ -697,7 +715,12 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // ferramenta) já vazou pro texto final em produção pelo menos uma vez — o LLM copiou
   // o marcador em vez de só chamar a tool. Nunca deve chegar ao cliente.
   if (finalText) {
+    const beforeCleanup = finalText
     finalText = finalText.replace(/🖼️?\s*\[tem imagem[^\]]*\]/gi, '').trim()
+    if (beforeCleanup !== finalText) {
+      // Marcador vazou — registrar flag de qualidade (WORKSTREAM B)
+      await recordQualityFlag(tenantId, conversationId, 'leaked_marker')
+    }
   }
 
   // "Mais fotos" — resposta enxuta como humano. Quando o cliente só pede mais fotos de um
@@ -719,6 +742,15 @@ como um atendimento genérico de primeiro contato.` : ''}`
       .replace(/[^\n]*[Vv]ou (te )?(enviar|mandar|compartilhar)[^\n]*(imagem|foto)[^\n]*(\n|$)/gi, '')
       .trim()
     if (cleaned.length > 10) finalText = cleaned
+  }
+
+  // Detecção: IA prometeu enviar foto mas não chamou send_product_image (WORKSTREAM B)
+  if (!deferredImage && finalText && agent.can_send_images) {
+    const hasImagePromise = /[Vv]ou (te )?(enviar|mandar|compartilhar|envio|mando|compartilho)[^\n]*(imagem|foto)[^\n]*\n*$/i.test(finalText)
+    if (hasImagePromise) {
+      // A IA prometeu enviar foto mas não há deferredImage (não chamou tool)
+      await recordQualityFlag(tenantId, conversationId, 'promised_image_no_tool', finalText.slice(-150))
+    }
   }
 
   // Salva e envia resposta da IA

@@ -266,6 +266,17 @@ CREATE TRIGGER trg_tenants_updated_at
   BEFORE UPDATE ON tenants
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ================================================================
+-- Campos Meta Conversions API (WORKSTREAM C) — adicionados via ALTER
+-- ================================================================
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_dataset_id TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_access_token TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS meta_capi_enabled BOOLEAN DEFAULT false;
+
+COMMENT ON COLUMN tenants.meta_dataset_id IS 'Meta Conversions API dataset ID — criptografado com pgp_sym_encrypt.';
+COMMENT ON COLUMN tenants.meta_access_token IS 'Meta Conversions API access token — criptografado com pgp_sym_encrypt. Ler via get_decrypted_meta_token().';
+COMMENT ON COLUMN tenants.meta_capi_enabled IS 'Flag para ativar/desativar envio de eventos ao Meta (default: false).';
+
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "tenant_isolation_select" ON tenants
@@ -901,6 +912,36 @@ CREATE POLICY "service_role_full_access" ON ai_error_logs
 CREATE POLICY "super_admin_full_access" ON ai_error_logs
   FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN = true);
 
+-- ================================================================
+-- TABELA: ai_quality_flags (WORKSTREAM B)
+-- ================================================================
+-- Registra sinais de qualidade da IA: vazamento de marcador interno,
+-- fallback de busca, promessa de imagem sem tool, etc.
+CREATE TABLE IF NOT EXISTS ai_quality_flags (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  flag_type TEXT NOT NULL CHECK (flag_type IN ('leaked_marker', 'search_fallback_listall', 'promised_image_no_tool', 'escalation_stale')),
+  detail TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE ai_quality_flags IS 'Sinais de qualidade da IA — vazamento de marcador interno, fallback de busca, promessa de imagem sem tool.';
+
+CREATE INDEX IF NOT EXISTS idx_ai_quality_flags_tenant_created ON ai_quality_flags (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_quality_flags_flag_type_created ON ai_quality_flags (flag_type, created_at DESC);
+
+ALTER TABLE ai_quality_flags ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON ai_quality_flags
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "service_role_full_access" ON ai_quality_flags
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "super_admin_full_access" ON ai_quality_flags
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN = true);
+
 
 -- ================================================================
 -- FUNÇÕES DE DOMÍNIO E TRIGGERS (migration 012 — 100% portáveis)
@@ -1210,6 +1251,45 @@ REVOKE EXECUTE ON FUNCTION public.encrypt_evolution_key(TEXT, TEXT)      FROM au
 REVOKE EXECUTE ON FUNCTION public.get_tenant_llm_keys(UUID, TEXT)        FROM authenticated, anon, PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.encrypt_llm_key(TEXT, TEXT)            FROM authenticated, anon, PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.get_agent_llm_key(UUID, TEXT)          FROM authenticated, anon, PUBLIC;
+
+-- ================================================================
+-- CRIPTOGRAFIA META CONVERSIONS API (WORKSTREAM C)
+-- Funções espelhando evolution_api_key (mesma abordagem)
+-- ================================================================
+
+CREATE OR REPLACE FUNCTION public.get_decrypted_meta_token(p_tenant_id UUID, p_enc_key TEXT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+DECLARE
+  v_key TEXT;
+  v_encrypted TEXT;
+BEGIN
+  v_key := COALESCE(p_enc_key, current_setting('app.encryption_key', true));
+  SELECT meta_access_token INTO v_encrypted FROM public.tenants WHERE id = p_tenant_id AND meta_access_token IS NOT NULL;
+  IF v_encrypted IS NULL THEN RETURN NULL; END IF;
+  IF v_key IS NULL OR v_key = '' THEN RETURN v_encrypted; END IF;
+  BEGIN
+    RETURN pgp_sym_decrypt(decode(v_encrypted, 'base64'), v_key)::TEXT;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN v_encrypted;
+  END;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.encrypt_meta_token(p_raw_token TEXT, p_enc_key TEXT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+DECLARE
+  v_key TEXT;
+BEGIN
+  v_key := COALESCE(p_enc_key, current_setting('app.encryption_key', true));
+  IF v_key IS NULL OR v_key = '' THEN RETURN p_raw_token; END IF;
+  RETURN encode(pgp_sym_encrypt(p_raw_token, v_key), 'base64');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_decrypted_meta_token(UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.encrypt_meta_token(TEXT, TEXT) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.get_decrypted_meta_token(UUID, TEXT) FROM authenticated, anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.encrypt_meta_token(TEXT, TEXT) FROM authenticated, anon, PUBLIC;
 
 
 -- ================================================================
