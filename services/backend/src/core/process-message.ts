@@ -221,6 +221,22 @@ export function matchAdReferralProduct(
 
 const FOCUS_LOOKBACK_MESSAGES = 15
 
+// Corta o histórico pra conter só a "sessão atual". Se houver um intervalo maior que
+// gapMs entre duas mensagens consecutivas, tudo ANTES desse intervalo é de uma conversa
+// anterior — o cliente reabriu o chat horas/dias depois. Sem esse corte, o histórico
+// inteiro (ex: uma negociação de "Fox" de 3 dias atrás) vai pro LLM e ancora a resposta:
+// um simples "boa tarde" fresco fazia a IA continuar falando do Fox e do produto que
+// tinha oferecido antes, em vez de só cumprimentar. Retorna as MESMAS referências de
+// objeto (slice), então updates posteriores no history (ex: transcrição) se refletem aqui.
+export function sliceToCurrentSession(history: MessageRow[], gapMs: number): MessageRow[] {
+  for (let i = history.length - 1; i > 0; i--) {
+    if (history[i].created_at.getTime() - history[i - 1].created_at.getTime() > gapMs) {
+      return history.slice(i)
+    }
+  }
+  return history
+}
+
 export function extractFocusProductCandidate(history: MessageRow[]): { id: string; name?: string } | null {
   const window = history.slice(-FOCUS_LOOKBACK_MESSAGES)
   let searchFallback: { id: string; name?: string } | null = null
@@ -406,7 +422,15 @@ export async function processMessage(conversationId: string): Promise<{ success:
     return { success: true }
   }
 
-  const llmMessages: LLMMessage[] = history
+  // Corte de sessão: um gap grande sem mensagem não é continuação da conversa — é o cliente
+  // reabrindo o chat dias/horas depois. Cortamos o histórico na fronteira da sessão atual e
+  // usamos SÓ ela daqui pra frente (inclusive no que vai pro LLM). Sem isso, o histórico
+  // antigo inteiro (ex: uma negociação de "Fox") ancorava a resposta — um "boa tarde" fresco
+  // fazia a IA continuar no Fox/no produto oferecido antes, em vez de só cumprimentar.
+  const SESSION_GAP_MS = 3 * 60 * 60 * 1000 // 3h sem mensagem = nova sessão
+  const sessionHistory = sliceToCurrentSession(history, SESSION_GAP_MS)
+
+  const llmMessages: LLMMessage[] = sessionHistory
     .filter((m) => m.sender_type === 'customer' || m.sender_type === 'ai' || m.sender_type === 'human')
     .filter((m) => m.content || m.content_type === 'audio')
     .map((m) => ({
@@ -421,29 +445,13 @@ export async function processMessage(conversationId: string): Promise<{ success:
 
   const normalizedMessages = normalizeMessageSequence(llmMessages)
 
-  // Corte de sessão: um gap grande desde a mensagem anterior não é continuação da conversa
-  // — é o cliente reabrindo dias/horas depois. Sem isso, "produto em foco" e a janela de
-  // recall (abaixo) carregavam contexto obsoleto pra sempre: um simples "Boa tarde" 3 dias
-  // depois de perguntar sobre um Fox fazia a IA responder sobre o Fox de novo, porque o
-  // prompt afirmava "o cliente estava vendo X mais recentemente" sem levar o tempo em conta.
-  const SESSION_GAP_MS = 3 * 60 * 60 * 1000 // 3h sem mensagem = nova sessão
-  const lastCustomerIdx = lastCustomerMsg ? history.findIndex((m) => m.id === lastCustomerMsg.id) : -1
-  const previousMsg = lastCustomerIdx > 0 ? history[lastCustomerIdx - 1] : null
-  const isNewSession = !!(
-    lastCustomerMsg &&
-    previousMsg &&
-    lastCustomerMsg.created_at.getTime() - previousMsg.created_at.getTime() > SESSION_GAP_MS
-  )
-
   // Janela multi-turno pro guard-rail de search_products: olhar só a última mensagem do
   // cliente faz recall legítimo de um produto citado 2+ turnos atrás (ex: "tem mais fotos
   // dele?") ser tratado como "palavra nova" e corrompido. Ampliando pras últimas N mensagens
-  // do cliente, a mensagem atual continua incluída — então a proteção original contra
-  // sinônimos ("colchão" → "cama") no MESMO turno continua funcionando. Zerada em nova sessão
-  // (ver isNewSession acima) — senão um pedido genuinamente novo ("tem carro branco?") era
-  // forçado de volta pro produto da sessão anterior só por não repetir as mesmas palavras.
+  // do cliente (da sessão atual), a mensagem atual continua incluída — então a proteção
+  // original contra sinônimos ("colchão" → "cama") no MESMO turno continua funcionando.
   const GUARD_RAIL_RECALL_WINDOW = 6
-  const recentCustomerMsgs = isNewSession ? [] : history.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
+  const recentCustomerMsgs = sessionHistory.filter((m) => m.sender_type === 'customer').slice(-GUARD_RAIL_RECALL_WINDOW)
   const recallWindowLower = recentCustomerMsgs.map((m) => (m.content ?? '').toLowerCase()).join(' ')
   const recallWindowKeywords: string[] = []
   for (let i = recentCustomerMsgs.length - 1; i >= 0; i--) {
@@ -452,7 +460,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
     }
   }
 
-  const focusCandidate = isNewSession ? null : extractFocusProductCandidate(history)
+  const focusCandidate = extractFocusProductCandidate(sessionHistory)
   let focusProduct: { id: string; name: string } | null = null
   if (focusCandidate) {
     const focusRows = await db
@@ -480,7 +488,9 @@ export async function processMessage(conversationId: string): Promise<{ success:
   }
 
   const now = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short', timeZone: timezone }).format(new Date())
-  const isFirstAiResponse = !history.some((m) => m.sender_type === 'ai')
+  // Baseado na sessão atual: um cliente que volta depois de dias é cumprimentado de novo,
+  // em vez de a IA emendar do meio de uma conversa antiga.
+  const isFirstAiResponse = !sessionHistory.some((m) => m.sender_type === 'ai')
   const adProductsListText = adProducts
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')

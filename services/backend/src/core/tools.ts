@@ -110,10 +110,14 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
     }
   }
 
-  // 4ª tentativa: lista tudo que está disponível
+  // 4ª tentativa: lista tudo que está disponível. Ordena por destaque e depois ALEATÓRIO —
+  // com "name asc" o mesmo produto vinha sempre em 1º (o de nome alfabeticamente menor, ex:
+  // um nome com espaço no início ordena antes de tudo), então a IA "recomendava" sempre o
+  // mesmo carro como alternativa quando o pedido não existia no estoque. Não há critério de
+  // relevância possível aqui (a busca não casou com nada), então variar é melhor que repetir.
   if (data.length === 0) {
     const params: unknown[] = priceMax ? [tenantId, priceMax] : [tenantId]
-    data = await queryProducts(priceSql, params, `order by is_featured desc, name asc limit ${maxResults}`)
+    data = await queryProducts(priceSql, params, `order by is_featured desc, random() limit ${maxResults}`)
     // Registrar flag de qualidade se usou fallback com query não-vazia (WORKSTREAM B)
     if (query && data.length > 0 && conversationId) {
       try {
