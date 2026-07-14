@@ -15,7 +15,12 @@ if (!process.env.BACKEND_TOKEN) {
   )
 }
 
-const app = Fastify({ logger: true })
+// bodyLimit acima do default (1MB) — a Evolution às vezes envia mídia (áudio/imagem)
+// embutida em base64 direto no payload do webhook, e o default rejeitava com 413 antes
+// mesmo de chegar na nossa lógica. Sem isso, a Evolution ficava em loop de retry
+// infinito tentando entregar o mesmo evento pra sempre (visto em produção: mesmo
+// tenant, mesmo evento, repetindo a cada ~15-30s por horas).
+const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 })
 
 // Proteção básica contra brute-force do webhook_secret (?ts=) e abuso geral —
 // ambas as rotas são públicas (a Evolution Go não autentica webhooks de saída).
