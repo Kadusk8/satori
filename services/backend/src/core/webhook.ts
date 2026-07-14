@@ -4,10 +4,12 @@
 // chamada de função direta (mesmo processo Node).
 
 import { and, desc, eq, ne } from 'drizzle-orm'
-import { db, pool } from '../db/index.js'
+import { db, pool, getDecryptedEvolutionKey } from '../db/index.js'
 import { contacts, conversations, messages } from '../db/schema.js'
 import { uploadAudio } from '../shared/cloudinary.js'
 import { processMessage } from './process-message.js'
+
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
 export interface TenantRow {
   id: string
@@ -240,9 +242,22 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   if (contentType === 'audio' && tenant.evolution_api_url && tenant.evolution_api_key) {
     try {
       const evoUrl = tenant.evolution_api_url.replace(/\/$/, '')
+      // tenant.evolution_api_key vem cru da query em findTenantByWebhookSecret — na prática é
+      // sempre o texto CIFRADO (pgp_sym_encrypt), não a chave real. Sem descriptografar aqui,
+      // o header `apikey` ia com o ciphertext e o fetch quebrava (ou a Evolution rejeitava),
+      // então TODO áudio recebido por qualquer tenant com chave criptografada falhava ao baixar
+      // a mídia — media_url ficava sempre null e a IA nunca conseguia transcrever nada. Mesma
+      // descriptografia (com fallback pro valor cru) já usada em evolution-client.ts.
+      let evoApiKey = tenant.evolution_api_key
+      try {
+        const decrypted = await getDecryptedEvolutionKey(tenantId, ENCRYPTION_KEY)
+        if (decrypted) evoApiKey = decrypted
+      } catch {
+        // chave em texto plano ou sem criptografia — usa valor cru
+      }
       const mediaRes = await fetch(`${evoUrl}/message/downloadimage`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: tenant.evolution_api_key },
+        headers: { 'Content-Type': 'application/json', apikey: evoApiKey },
         body: JSON.stringify({ message: data.Message }),
       })
       if (mediaRes.ok) {
