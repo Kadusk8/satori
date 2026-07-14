@@ -494,6 +494,7 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 - SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO: se a mensagem ATUAL do cliente é só um cumprimento ou abertura ("oi", "olá", "bom dia", "boa tarde", "boa noite", "tudo bem?", "e aí") SEM pedir nada, apenas cumprimente de forma calorosa e pergunte como pode ajudar. NÃO chame search_products, NÃO reenvie foto e NÃO re-ofereça nenhum produto que já foi mostrado antes — mesmo que a conversa anterior fosse sobre um carro específico. Reagir a um "boa tarde" reapresentando o último produto é a MARCA REGISTRADA de um robô travado; um vendedor de verdade só cumprimenta de volta e pergunta no que pode ajudar.
 - RESPONDA O QUE FOI PERGUNTADO: se o cliente pediu colchão → mostre colchão. Se pediu preço → dê o preço. NUNCA responda uma pergunta com outra pergunta quando o cliente já forneceu informação suficiente para buscar.
 - ATENÇÃO AO QUE ELE PEDE AGORA: o histórico acima é sua memória da conversa, mas responda sempre à ÚLTIMA mensagem do cliente. Se ele mudar de assunto ou pedir algo diferente do que estava sendo falado (ex: vinha vendo um modelo e agora pergunta "quais outras marcas vocês têm?"), acompanhe a mudança — busque o que ele pediu agora, não insista no produto anterior.
+- NÃO REPITA INDISPONIBILIDADE JÁ INFORMADA: se você já disse antes que um produto específico não está disponível (ex: "não temos o Fox"), NÃO repita essa mesma informação de novo em respostas seguintes — o cliente já sabe disso. Trate a pergunta ATUAL dele (outras marcas, outros modelos, outra cor, etc.) como um pedido novo: responda com base nos produtos que a busca retornou agora, sem reabrir o assunto do item indisponível.
 - BUSCA IMEDIATA (padrão, salvo se "Contexto do negócio e personalidade" abaixo definir um fluxo de qualificação próprio — nesse caso siga o fluxo específico dele): quando o cliente mencionar qualquer produto, serviço ou categoria, chame search_products IMEDIATAMENTE. NUNCA pergunte orçamento, tamanho, modelo ou preferência ANTES de mostrar o catálogo. Primeiro mostre o que tem, depois afine se necessário.
 - QUERY EXATA: ao chamar search_products, use as PALAVRAS EXATAS que o cliente disse. Se o cliente disse "colchão", busque "colchão". Se disse "sofá", busque "sofá". NUNCA substitua por sinônimos ou categorias relacionadas — "colchão" e "cama" são produtos DIFERENTES. Use no máximo 1-3 palavras extraídas literalmente da fala do cliente.
 - RECOMENDE 1 produto: apresente o mais adequado ao que o cliente descreveu. Não liste todos — escolha um e recomende com convicção. Se o cliente quiser ver mais, ele pede.
@@ -673,13 +674,31 @@ como um atendimento genérico de primeiro contato.` : ''}`
         // pra trás. Sem essa condição, qualquer pergunta nova cujas palavras não apareciam
         // nas últimas mensagens era forçada de volta pro produto antigo (loop de "não temos
         // Fox" repetido pra perguntas sem nenhuma relação com Fox).
-        const lastMsgHasOwnKeywords = extractCustomerKeywords(lastCustomerMsg?.content).length > 0
+        const lastMsgKeywords = extractCustomerKeywords(lastCustomerMsg?.content)
+        const lastMsgHasOwnKeywords = lastMsgKeywords.length > 0
         if (recallWindowKeywords.length > 0 && recallWindowLower && !lastMsgHasOwnKeywords) {
           const aiQuery = String(tu.input.query ?? '').toLowerCase()
           const aiQueryWords = aiQuery.split(/\s+/).filter((w) => w.length > 2)
           const aiIntroducedNewWords = aiQueryWords.some((w) => !recallWindowLower.includes(w))
           if (aiIntroducedNewWords) {
             const correctedQuery = recallWindowKeywords.slice(0, 3).join(' ')
+            searchInput = { ...tu.input, query: correctedQuery }
+            queryCorrected = true
+          }
+        } else if (lastMsgHasOwnKeywords) {
+          // Guarda pra FRENTE: o cliente já deu palavra-chave própria na mensagem atual, mas a
+          // IA às vezes fica presa repetindo a busca de um produto antigo (ex: um cliente pediu
+          // "Fox" dias atrás, o carro saiu do estoque, e a IA passa a reabrir "Fox" em toda
+          // resposta seguinte — mesmo quando o cliente já mudou de assunto pra "quais outras
+          // marcas vocês têm?"). Se a query que a IA escolheu não aparece em lugar nenhum da
+          // mensagem ATUAL do cliente (nem por substring), ela não veio do que ele disse agora —
+          // veio de inércia da conversa. Substitui pelas palavras da mensagem atual.
+          const lastMsgLower = (lastCustomerMsg?.content ?? '').toLowerCase()
+          const aiQuery = String(tu.input.query ?? '').toLowerCase()
+          const aiQueryWords = aiQuery.split(/\s+/).filter((w) => w.length >= 2)
+          const aiQueryMatchesCurrentMsg = aiQueryWords.length > 0 && aiQueryWords.some((w) => lastMsgLower.includes(w))
+          if (!aiQueryMatchesCurrentMsg) {
+            const correctedQuery = lastMsgKeywords.slice(0, 3).join(' ')
             searchInput = { ...tu.input, query: correctedQuery }
             queryCorrected = true
           }
