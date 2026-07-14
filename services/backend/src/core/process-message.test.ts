@@ -3,6 +3,7 @@ import {
   extractCustomerKeywords,
   extractFocusProductCandidate,
   isMoreImagesIntent,
+  isPureGreeting,
   isReturningAfterGap,
   isWithinBusinessHours,
   matchAdReferralProduct,
@@ -145,6 +146,27 @@ describe('isMoreImagesIntent', () => {
       '',
     ]) {
       expect(isMoreImagesIntent(msg), String(msg)).toBe(false)
+    }
+  })
+})
+
+describe('isPureGreeting', () => {
+  it('detecta saudações puras, sem mais nada na mensagem', () => {
+    for (const msg of ['boa noite', 'Boa noite!', 'oi', 'Oi!', 'olá', 'ola', 'e aí', 'eae', 'bom dia', 'boa tarde', 'tudo bem?', 'blz', 'beleza', 'opa']) {
+      expect(isPureGreeting(msg), msg).toBe(true)
+    }
+  })
+
+  it('não dispara quando a mensagem tem pedido junto com a saudação', () => {
+    for (const msg of [
+      'boa tarde, tem fox?',
+      'oi, quero ver um carro',
+      'bom dia, qual o preço?',
+      'boa noite, vocês têm SUV?',
+      null,
+      '',
+    ]) {
+      expect(isPureGreeting(msg), String(msg)).toBe(false)
     }
   })
 })

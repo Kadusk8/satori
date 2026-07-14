@@ -194,6 +194,20 @@ export function isMoreImagesIntent(content: string | null | undefined): boolean 
   )
 }
 
+// Detecta saudação PURA — a mensagem inteira é só um cumprimento, sem nenhum outro pedido
+// junto (ex: "boa noite", "oi", "e aí"). Não casa "boa tarde, tem fox?" nem "oi, quero ver
+// um carro" — ali o cliente já pediu algo, então a resposta deve tratar o pedido normalmente.
+// Usado pra forçar uma resposta determinística nesses casos: o LLM, mesmo com a regra de
+// prompt "SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO", às vezes reabre um produto antigo (indisponível
+// ou não) só porque ele domina o histórico da conversa — aqui não confiamos nisso.
+const PURE_GREETING_RE = /^(oi+|ol[áa]|opa|e\s*a[íi]|eae|bom\s*dia|boa\s*tarde|boa\s*noite|tudo\s*bem|blz|beleza)$/i
+
+export function isPureGreeting(content: string | null | undefined): boolean {
+  if (!content) return false
+  const cleaned = content.trim().replace(/[!?.,]+$/g, '').trim()
+  return PURE_GREETING_RE.test(cleaned)
+}
+
 // Tenta identificar QUAL produto em campanha o cliente viu, comparando o
 // título/corpo do anúncio (referral do Click-to-WhatsApp) contra os nomes dos
 // produtos marcados como "em anúncio". Match simples (substring), suficiente
@@ -382,8 +396,12 @@ export async function processMessage(conversationId: string): Promise<{ success:
       }
     : null
 
-  // Transcreve áudio do cliente (STT) se necessário
-  if (lastCustomerMsg && lastCustomerMsg.content_type === 'audio' && lastCustomerMsg.media_url && !lastCustomerMsg.content && tenantOpenaiKey) {
+  // Transcreve áudio do cliente (STT) se necessário. Usa a mesma chave OpenAI resolvida do
+  // LLM (chave própria do agente quando o provedor é openai → chave do tenant → env global) —
+  // não só a do tenant: um agente com chave OpenAI própria (BYOK, usada com sucesso pro chat)
+  // mas sem chave no nível do tenant ficava sempre caindo no fallback "não consegui escutar".
+  const whisperKey = resolvedOpenaiKey ?? process.env.OPENAI_API_KEY ?? null
+  if (lastCustomerMsg && lastCustomerMsg.content_type === 'audio' && lastCustomerMsg.media_url && !lastCustomerMsg.content && whisperKey) {
     // URL própria (Cloudinary, já baixada por nós) vs. URL direta da Evolution (precisa apikey)
     const isOwnUpload = lastCustomerMsg.media_url.includes('res.cloudinary.com')
     let audioDownloadHeaders: Record<string, string> | undefined
@@ -393,7 +411,7 @@ export async function processMessage(conversationId: string): Promise<{ success:
       if (evoKey) audioDownloadHeaders = { apikey: evoKey }
     }
 
-    const transcript = await transcribeAudio(lastCustomerMsg.media_url, tenantOpenaiKey, audioDownloadHeaders)
+    const transcript = await transcribeAudio(lastCustomerMsg.media_url, whisperKey, audioDownloadHeaders)
     if (transcript) {
       await db.update(messages).set({ content: transcript }).where(eq(messages.id, lastCustomerMsg.id))
       lastCustomerMsg.content = transcript
@@ -777,6 +795,18 @@ como um atendimento genérico de primeiro contato.` : ''}`
       // Marcador vazou — registrar flag de qualidade (WORKSTREAM B)
       await recordQualityFlag(tenantId, conversationId, 'leaked_marker')
     }
+  }
+
+  // SAUDAÇÃO — garantia determinística (não confiar só no LLM/prompt): mesmo com a regra
+  // "SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO" no prompt, o modelo às vezes reabre um produto antigo
+  // (às vezes até indisponível) numa resposta a um simples "boa noite", quando o histórico da
+  // conversa está muito carregado desse produto — visto em produção mais de uma vez mesmo após
+  // reforçar o prompt. Quando a mensagem do cliente é saudação pura, ignoramos o texto do LLM
+  // e respondemos com uma saudação curta e variada — nunca há motivo pra mencionar produto.
+  if (isPureGreeting(lastCustomerMsg?.content) && !isFirstAiResponse && finalText && !wasEscalated) {
+    const greetingReplies = ['Oi! Me conta o que você tá procurando 🙂', 'Opa, tudo certo? Fala aí o que você precisa', 'Olá! Manda ver, o que você tá buscando?', 'Oi, tudo bem? Conta pra mim o que rolou', 'Opa! Pode falar, no que posso dar uma força?']
+    finalText = greetingReplies[Math.floor(Math.random() * greetingReplies.length)]
+    deferredImage = null
   }
 
   // "Mais fotos" — resposta enxuta como humano. Quando o cliente só pede mais fotos de um
