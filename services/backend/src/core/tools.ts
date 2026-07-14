@@ -59,23 +59,54 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
     data = await queryProducts(`${priceSql} and category ilike $${catIdx}`, params, `limit ${maxResults}`)
   }
 
-  // 2ª tentativa: full-text search (stemming português)
+  // 2ª tentativa: full-text search (stemming português), termos combinados com OR — uma
+  // palavra que não bate (ex: ano do anúncio ligeiramente diferente do cadastrado) não
+  // pode derrubar o match inteiro. Com AND (websearch_to_tsquery) uma busca como "Peugeot
+  // 208 Active 2014" não achava NADA quando o produto tinha o token composto "2014/2014"
+  // em vez de "2014" isolado, mesmo com peugeot/208/active batendo — o lead caía pro
+  // fallback de "lista tudo" (4ª tentativa) e a IA oferecia carro de qualquer marca como
+  // se fosse opção relevante. Ordena por relevância (ts_rank) pra melhor match vir primeiro.
   if (data.length === 0 && query) {
-    const params: unknown[] = priceMax ? [tenantId, priceMax, query] : [tenantId, query]
-    const qIdx = priceMax ? 3 : 2
-    data = await queryProducts(
-      `${priceSql} and search_vector @@ websearch_to_tsquery('portuguese', $${qIdx})`,
-      params,
-      `limit ${maxResults}`
-    )
+    const orQuery = query
+      .replace(/[&|!():'<>*]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2)
+      .join(' | ')
+    if (orQuery) {
+      const params: unknown[] = priceMax ? [tenantId, priceMax, orQuery] : [tenantId, orQuery]
+      const qIdx = priceMax ? 3 : 2
+      try {
+        data = await queryProducts(
+          `${priceSql} and search_vector @@ to_tsquery('portuguese', $${qIdx})`,
+          params,
+          `order by ts_rank(search_vector, to_tsquery('portuguese', $${qIdx})) desc limit ${maxResults}`
+        )
+      } catch {
+        // to_tsquery pode rejeitar entrada malformada em casos raros — cai pra próxima tentativa.
+      }
+    }
   }
 
-  // 3ª tentativa: ilike no nome/descrição
+  // 3ª tentativa: ilike por palavra (OR) no nome/descrição — rede de segurança pra termos
+  // que o dicionário 'portuguese' não stemma bem (nomes próprios, códigos de modelo).
   if (data.length === 0 && query) {
-    const safeQuery = query.replace(/[,()]/g, ' ').trim()
-    const params: unknown[] = priceMax ? [tenantId, priceMax, `%${safeQuery}%`] : [tenantId, `%${safeQuery}%`]
-    const qIdx = priceMax ? 3 : 2
-    data = await queryProducts(`${priceSql} and (name ilike $${qIdx} or description ilike $${qIdx})`, params, `limit ${maxResults}`)
+    const words = query
+      .replace(/[,()%]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2)
+    if (words.length > 0) {
+      const params: unknown[] = priceMax ? [tenantId, priceMax] : [tenantId]
+      const clauses = words
+        .map((w) => {
+          params.push(`%${w}%`)
+          const idx = params.length
+          return `name ilike $${idx} or description ilike $${idx}`
+        })
+        .join(' or ')
+      data = await queryProducts(`${priceSql} and (${clauses})`, params, `limit ${maxResults}`)
+    }
   }
 
   // 4ª tentativa: lista tudo que está disponível
