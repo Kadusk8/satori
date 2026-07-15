@@ -24,6 +24,7 @@ import {
   type ToolContext,
 } from './tools.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
+import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -125,6 +126,7 @@ interface ConversationRow {
   metadata: { source?: string; ad_referral?: { title: string | null; body: string | null } } | null
   whatsapp_number: string
   contact_tags: string[]
+  whatsapp_label_names: string[] | null
   t_name: string
   business_hours: BusinessHours
   timezone: string
@@ -279,6 +281,8 @@ export async function processMessage(conversationId: string): Promise<{ success:
   const convRes = await pool.query<ConversationRow>(
     `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode, c.metadata,
             ct.whatsapp_number, ct.tags as contact_tags,
+            (select array_agg(lower(wl.name)) from whatsapp_labels wl
+             where wl.tenant_id = ct.tenant_id and wl.label_id = any(ct.whatsapp_label_ids) and wl.deleted = false) as whatsapp_label_names,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key
      from conversations c
@@ -294,9 +298,9 @@ export async function processMessage(conversationId: string): Promise<{ success:
     return { success: true, skipped: 'Conversa sob atendimento humano' }
   }
 
-  // Trava manual: contato com as etiquetas "jonathan" + "loja" — a IA nunca
-  // responde, nem move o card de kanban.
-  if (isContactBlockedByTags(conv.contact_tags)) {
+  // Trava manual: contato com as etiquetas "jonathan" + "loja" (no CRM ou
+  // nativas do WhatsApp) — a IA nunca responde, nem move o card de kanban.
+  if (isContactBlockedByTags(conv.contact_tags, conv.whatsapp_label_names)) {
     return { success: true, skipped: 'Contato bloqueado por tags (jonathan+loja)' }
   }
 
@@ -444,10 +448,22 @@ export async function processMessage(conversationId: string): Promise<{ success:
     try {
       const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
       await evo.sendText(contactNumber, audioFallback)
-      await pool.query(
-        `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type) values ($1,$2,$3,'ai',$4,'text')`,
+      const savedFallback = await pool.query<{ id: string; created_at: Date }>(
+        `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type) values ($1,$2,$3,'ai',$4,'text') returning id, created_at`,
         [tenantId, conversationId, contactId, audioFallback]
       )
+      const fallbackRow = savedFallback.rows[0]
+      if (fallbackRow) {
+        await triggerEvent(conversationChannel(conversationId), 'message:new', {
+          id: fallbackRow.id,
+          sender_type: 'ai',
+          content: audioFallback,
+          content_type: 'text',
+          media_url: null,
+          created_at: fallbackRow.created_at.toISOString(),
+          contact_id: contactId,
+        })
+      }
     } catch (err) {
       console.error('[process-message] Erro ao enviar fallback de áudio:', err)
     }
@@ -948,11 +964,23 @@ como um atendimento genérico de primeiro contato.` : ''}`
       }
     }
 
-    await pool.query(
+    const savedAiMsg = await pool.query<{ id: string; created_at: Date }>(
       `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, ai_tool_calls)
-       values ($1, $2, $3, 'ai', $4, $5, $6)`,
+       values ($1, $2, $3, 'ai', $4, $5, $6) returning id, created_at`,
       [tenantId, conversationId, contactId, finalText, sentContentType, allToolCalls.length > 0 ? JSON.stringify(allToolCalls) : null]
     )
+    const aiMsgRow = savedAiMsg.rows[0]
+    if (aiMsgRow) {
+      await triggerEvent(conversationChannel(conversationId), 'message:new', {
+        id: aiMsgRow.id,
+        sender_type: 'ai',
+        content: finalText,
+        content_type: sentContentType,
+        media_url: null,
+        created_at: aiMsgRow.created_at.toISOString(),
+        contact_id: contactId,
+      })
+    }
   }
 
   // Envia imagem diferida após a resposta principal
@@ -961,11 +989,23 @@ como um atendimento genérico de primeiro contato.` : ''}`
       await new Promise<void>((r) => setTimeout(r, 4000))
       const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
       await evo.sendMedia(contactNumber, deferredImage.imageUrl, deferredImage.caption)
-      await pool.query(
+      const savedImgMsg = await pool.query<{ id: string; created_at: Date }>(
         `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url)
-         values ($1, $2, $3, 'ai', $4, 'image', $5)`,
+         values ($1, $2, $3, 'ai', $4, 'image', $5) returning id, created_at`,
         [tenantId, conversationId, contactId, deferredImage.caption, deferredImage.imageUrl]
       )
+      const imgMsgRow = savedImgMsg.rows[0]
+      if (imgMsgRow) {
+        await triggerEvent(conversationChannel(conversationId), 'message:new', {
+          id: imgMsgRow.id,
+          sender_type: 'ai',
+          content: deferredImage.caption,
+          content_type: 'image',
+          media_url: deferredImage.imageUrl,
+          created_at: imgMsgRow.created_at.toISOString(),
+          contact_id: contactId,
+        })
+      }
     } catch (err) {
       console.error('[process-message] Erro ao enviar imagem diferida:', err)
     }

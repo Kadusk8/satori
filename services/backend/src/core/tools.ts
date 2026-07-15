@@ -8,6 +8,7 @@ import { appointments, conversations, kanbanStages, products } from '../db/schem
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors } from './lead-routing.js'
+import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 
 interface ProductRow {
   id: string
@@ -453,11 +454,23 @@ export async function toolSendProductImage(
     return `Erro ao enviar imagem de "${imageData.productName}".`
   }
 
-  await pool.query(
+  const savedRes = await pool.query<{ id: string; created_at: Date }>(
     `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url)
-     values ($1, $2, $3, 'ai', $4, 'image', $5)`,
+     values ($1, $2, $3, 'ai', $4, 'image', $5) returning id, created_at`,
     [tenantId, conversationId, contactId, imageData.caption, imageData.imageUrl]
   )
+  const savedRow = savedRes.rows[0]
+  if (savedRow) {
+    await triggerEvent(conversationChannel(conversationId), 'message:new', {
+      id: savedRow.id,
+      sender_type: 'ai',
+      content: imageData.caption,
+      content_type: 'image',
+      media_url: imageData.imageUrl,
+      created_at: savedRow.created_at.toISOString(),
+      contact_id: contactId,
+    })
+  }
 
   return `Imagem de "${imageData.productName}" enviada.`
 }
@@ -497,11 +510,23 @@ export async function toolSendMoreProductImages(
       const imageUrl = ((img as Record<string, unknown>)?.url as string | undefined) ?? (typeof img === 'string' ? img : undefined)
       if (!imageUrl) continue
       await evo.sendMedia(contactNumber, imageUrl, '')
-      await pool.query(
+      const savedMoreRes = await pool.query<{ id: string; created_at: Date }>(
         `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url)
-         values ($1, $2, $3, 'ai', null, 'image', $4)`,
+         values ($1, $2, $3, 'ai', null, 'image', $4) returning id, created_at`,
         [tenantId, conversationId, contactId, imageUrl]
       )
+      const savedMoreRow = savedMoreRes.rows[0]
+      if (savedMoreRow) {
+        await triggerEvent(conversationChannel(conversationId), 'message:new', {
+          id: savedMoreRow.id,
+          sender_type: 'ai',
+          content: null,
+          content_type: 'image',
+          media_url: imageUrl,
+          created_at: savedMoreRow.created_at.toISOString(),
+          contact_id: contactId,
+        })
+      }
     }
   } catch (err) {
     console.error('[toolSendMoreProductImages] Erro ao enviar imagens:', err)

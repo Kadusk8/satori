@@ -28,12 +28,16 @@ if (pusherAppId && pusherKey && pusherSecret && pusherCluster) {
   console.warn('[realtime] Pusher não configurado (faltam variáveis de ambiente). Eventos realtime desabilitados.')
 }
 
+// Prefixo `private-` é obrigatório: o frontend assina esses mesmos nomes
+// como canais privados autenticados (ver apps/web/lib/realtime/channels.ts
+// e app/api/pusher/auth/route.ts) — sem o prefixo, backend e frontend
+// publicam/assinam canais diferentes e o evento nunca chega no browser.
 export function tenantChannel(tenantId: string): string {
-  return `tenant-${tenantId}`
+  return `private-tenant-${tenantId}`
 }
 
 export function conversationChannel(conversationId: string): string {
-  return `conversation-${conversationId}`
+  return `private-conversation-${conversationId}`
 }
 
 export async function triggerEvent(channel: string, event: string, data: any): Promise<void> {

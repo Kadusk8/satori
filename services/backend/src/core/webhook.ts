@@ -101,13 +101,16 @@ interface EvolutionConnectionData {
   connected?: boolean
 }
 
-function normalizeEventType(rawEventType: string): 'MESSAGE' | 'CONNECTION' | 'UNKNOWN' {
+function normalizeEventType(rawEventType: string): 'MESSAGE' | 'CONNECTION' | 'LABEL_EDIT' | 'LABEL_ASSOCIATION_CHAT' | 'UNKNOWN' {
   const t = (rawEventType ?? '').toLowerCase()
   if (t === 'message' || t === 'messages_upsert' || t === 'messages.upsert') return 'MESSAGE'
   if (
     t === 'connected' || t === 'disconnected' || t === 'loggedout' || t === 'logged_out' ||
     t === 'connection_update' || t === 'connection.update' || t === 'pairsuccess' || t === 'pair_success'
   ) return 'CONNECTION'
+  // Etiquetas nativas do WhatsApp (whatsmeow events.LabelEdit / events.LabelAssociationChat).
+  if (t === 'labeledit' || t === 'label_edit' || t === 'label.edit') return 'LABEL_EDIT'
+  if (t === 'labelassociationchat' || t === 'label_association_chat' || t === 'label.association.chat' || t === 'labels_association') return 'LABEL_ASSOCIATION_CHAT'
   return 'UNKNOWN'
 }
 
@@ -343,6 +346,98 @@ async function handleConnectionEvent(tenant: TenantRow, rawEventType: string, da
   await pool.query(`update tenants set whatsapp_connected = $1 where id = $2`, [disconnected ? false : connected, tenant.id])
 }
 
+// Etiquetas nativas do WhatsApp (whatsmeow events.LabelEdit / events.LabelAssociationChat,
+// repassados pela Evolution Go). Campos de topo em PascalCase confirmados contra a doc
+// oficial (mesmo padrão de Info.Chat/Info.Sender já usado em EvolutionMessageData); o campo
+// aninhado `Action` é gerado a partir de protobuf (waSyncAction.LabelEditAction /
+// LabelAssociationAction) e serializa em camelCase minúsculo — por isso o parsing abaixo
+// checa as duas casings. Loga sempre o payload cru: há issues abertas no próprio Evolution
+// API relatando que esses webhooks às vezes não disparam ou mudam de formato, então esse log
+// é o que permite corrigir rápido em produção sem re-investigar do zero.
+
+interface LabelEditActionData {
+  name?: string
+  Name?: string
+  color?: number
+  Color?: number
+  deleted?: boolean
+  Deleted?: boolean
+}
+
+interface LabelEditEventData {
+  LabelID?: string
+  labelId?: string
+  Action?: LabelEditActionData
+}
+
+interface LabelAssociationActionData {
+  labeled?: boolean
+  Labeled?: boolean
+}
+
+interface LabelAssociationChatEventData {
+  JID?: string
+  Jid?: string
+  jid?: string
+  LabelID?: string
+  labelId?: string
+  Action?: LabelAssociationActionData
+}
+
+async function handleLabelEditEvent(tenant: TenantRow, data: LabelEditEventData): Promise<void> {
+  console.log('[webhook] payload de LabelEdit recebido:', JSON.stringify(data))
+
+  const labelId = data.LabelID ?? data.labelId
+  const action = data.Action
+  const name = action?.name ?? action?.Name
+  if (!labelId || !name) return
+
+  const deleted = action?.deleted ?? action?.Deleted ?? false
+  const color = action?.color ?? action?.Color ?? null
+
+  await pool.query(
+    `insert into whatsapp_labels (tenant_id, label_id, name, color, deleted, updated_at)
+     values ($1, $2, $3, $4, $5, now())
+     on conflict (tenant_id, label_id) do update set
+       name = excluded.name, color = excluded.color, deleted = excluded.deleted, updated_at = now()`,
+    [tenant.id, labelId, name, color, deleted]
+  )
+}
+
+async function handleLabelAssociationChatEvent(tenant: TenantRow, data: LabelAssociationChatEventData): Promise<void> {
+  console.log('[webhook] payload de LabelAssociationChat recebido:', JSON.stringify(data))
+
+  const jid = data.JID ?? data.Jid ?? data.jid
+  const labelId = data.LabelID ?? data.labelId
+  if (!jid || !labelId) return
+
+  const labeled = data.Action?.labeled ?? data.Action?.Labeled ?? false
+  const phoneNumber = extractNumber(jid)
+
+  const existing = await pool.query<{ id: string; whatsapp_label_ids: string[] }>(
+    `select id, whatsapp_label_ids from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`,
+    [tenant.id, phoneNumber]
+  )
+  let contact = existing.rows[0]
+  if (!contact) {
+    const normalized = normalizeBrazilianNumber(phoneNumber)
+    if (normalized !== phoneNumber) {
+      const fallback = await pool.query<{ id: string; whatsapp_label_ids: string[] }>(
+        `select id, whatsapp_label_ids from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`,
+        [tenant.id, normalized]
+      )
+      contact = fallback.rows[0]
+    }
+  }
+  // Contato ainda não existe na base — label só importa depois que já há conversa com ele.
+  if (!contact) return
+
+  const current = contact.whatsapp_label_ids ?? []
+  const nextIds = labeled ? Array.from(new Set([...current, labelId])) : current.filter((id) => id !== labelId)
+
+  await pool.query(`update contacts set whatsapp_label_ids = $1 where id = $2`, [nextIds, contact.id])
+}
+
 export async function findTenantByWebhookSecret(secret: string): Promise<TenantRow | null> {
   const res = await pool.query<TenantRow>(
     `select id, status, evolution_api_url, evolution_api_key, evolution_instance_name, webhook_secret
@@ -378,5 +473,15 @@ export async function handleWebhookEvent(tenant: TenantRow, rawEventType: string
 
   if (eventType === 'CONNECTION') {
     await handleConnectionEvent(tenant, rawEventType, data as EvolutionConnectionData)
+    return
+  }
+
+  if (eventType === 'LABEL_EDIT') {
+    await handleLabelEditEvent(tenant, data as LabelEditEventData)
+    return
+  }
+
+  if (eventType === 'LABEL_ASSOCIATION_CHAT') {
+    await handleLabelAssociationChatEvent(tenant, data as LabelAssociationChatEventData)
   }
 }

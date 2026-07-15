@@ -362,6 +362,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   phone            TEXT,
   notes            TEXT,
   tags             TEXT[]      NOT NULL DEFAULT '{}',
+  -- IDs de etiquetas NATIVAS do WhatsApp (feature de labels do app,
+  -- diferente de `tags` que é só do painel/CRM) atualmente associadas a
+  -- este contato. Resolvidos pra nome via a tabela whatsapp_labels.
+  whatsapp_label_ids TEXT[]    NOT NULL DEFAULT '{}',
   metadata         JSONB       NOT NULL DEFAULT '{}',
   first_contact_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_contact_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -385,6 +389,36 @@ CREATE POLICY "super_admin_full_access" ON contacts
   FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
 
 CREATE POLICY "service_role_full_access" ON contacts
+  FOR ALL USING (auth.role() = 'service_role');
+
+
+-- ================================================================
+-- TABELA: whatsapp_labels
+-- Mapa label_id -> nome, por tenant. Populado pelos eventos LabelEdit
+-- recebidos via webhook da Evolution Go (etiquetas nativas do WhatsApp,
+-- criadas/editadas pelo usuário direto no app do celular).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS whatsapp_labels (
+  tenant_id  UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  label_id   TEXT        NOT NULL,
+  name       TEXT        NOT NULL,
+  color      INTEGER,
+  deleted    BOOLEAN     NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, label_id)
+);
+
+COMMENT ON TABLE whatsapp_labels IS 'Etiquetas nativas do WhatsApp por tenant — nome resolvido a partir do label_id recebido em LabelAssociationChat.';
+
+ALTER TABLE whatsapp_labels ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON whatsapp_labels
+  FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "super_admin_full_access" ON whatsapp_labels
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+
+CREATE POLICY "service_role_full_access" ON whatsapp_labels
   FOR ALL USING (auth.role() = 'service_role');
 
 

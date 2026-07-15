@@ -130,7 +130,12 @@ export default function ConversationsPage() {
   useEffect(() => {
     if (!tenantId) return
     const pusherClient = getPusherClient()
-    if (!pusherClient) return
+
+    if (!pusherClient) {
+      // Sem Pusher configurado: polling leve a cada 8s mantém o kanban atualizado.
+      const interval = setInterval(() => { loadData() }, 8000)
+      return () => clearInterval(interval)
+    }
 
     const channel = pusherClient.subscribe(tenantChannel(tenantId))
     const handler = () => { loadData() }
