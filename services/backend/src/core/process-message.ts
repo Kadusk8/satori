@@ -614,6 +614,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   let imageSent = false
   let deferredImage: DeferredImage | null = null
   let deferredImageProductId: string | null = null
+  let deferredImageIsExplicit = false
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
   let staleQueryTerm: string | null = null
 
@@ -673,6 +674,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
         if (imageData) {
           deferredImage = imageData
           deferredImageProductId = productId
+          deferredImageIsExplicit = true
           imageSent = true
           result = 'ok'
           const responseText = response.text?.trim() ?? ''
@@ -859,6 +861,18 @@ como um atendimento genérico de primeiro contato.` : ''}`
     finalText = shortReplies[Math.floor(Math.random() * shortReplies.length)]
   }
 
+  // Descarta um deferredImage "adivinhado" (só veio do fallback de auto-imagem, casando por
+  // coincidência algum nome de produto no texto gerado — não de uma chamada explícita de
+  // send_product_image) quando o cliente pediu mais fotos de um produto que JÁ estava em foco
+  // antes deste turno. Visto em produção: cliente pede "mais fotos dele" (referindo-se ao carro
+  // já mostrado), a IA chama search_products com a própria frase dele em vez de reconhecer o
+  // foco, cai no fallback de listar tudo, e o texto gerado por coincidência bate o nome de OUTRO
+  // carro da lista — mandando a foto principal errada antes das fotos certas do bloco abaixo.
+  if (moreImagesIntent && !deferredImageIsExplicit && focusProduct !== null && deferredImage) {
+    deferredImage = null
+    deferredImageProductId = null
+  }
+
   if (deferredImage && finalText) {
     const cleaned = finalText
       .replace(/[^\n]*[Vv]ou (te )?(enviar|mandar|compartilhar)[^\n]*(imagem|foto)[^\n]*(\n|$)/gi, '')
@@ -947,7 +961,16 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // agora, ou o último produto mostrado na conversa), forçamos o envio das demais fotos.
   if (agent.can_send_images) {
     const alreadySentMore = allToolCalls.some((c) => c.name === 'send_more_product_images')
-    const moreImagesProductId = deferredImageProductId ?? focusProduct?.id ?? null
+    // Prioridade: (1) send_product_image explícito ESTE turno — o cliente pode ter pedido foto
+    // de um produto novo e mais fotos dele na mesma mensagem; (2) o produto que já estava em
+    // foco ANTES deste turno; (3) por último, um deferredImage que só veio do fallback de
+    // auto-imagem (heurística de nome batendo no texto da IA) — não confiável o suficiente pra
+    // sobrepor o foco real. Sem essa ordem, um "me manda mais fotos dele" (referindo-se ao
+    // produto já mostrado) podia ser respondido com fotos de OUTRO carro: a IA às vezes chama
+    // search_products com a própria frase do cliente como query em vez de reconhecer "dele" e
+    // usar o foco — cai no fallback de listar tudo, o auto-imagem casa por acaso com algum nome
+    // do texto gerado, e esse produto errado teria prioridade sobre o foco real sem este ajuste.
+    const moreImagesProductId = (deferredImageIsExplicit ? deferredImageProductId : null) ?? focusProduct?.id ?? deferredImageProductId ?? null
 
     if (moreImagesIntent && !alreadySentMore && moreImagesProductId) {
       try {
