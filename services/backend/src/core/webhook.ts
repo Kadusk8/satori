@@ -263,9 +263,15 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
       if (mediaRes.ok) {
         const mediaBody = (await mediaRes.json()) as any
         const dataUri: string | undefined = mediaBody?.data?.base64
-        const match = dataUri?.match(/^data:([^;]+);base64,(.+)$/)
-        if (match) {
-          const [, mimeType, base64] = match
+        // Data URI real da Evolution Go vem com parâmetro extra no mimetype (ex:
+        // "data:audio/ogg; codecs=opus;base64,XXXX") — um regex que exige ";base64," logo
+        // depois do mimetype (sem outros ";param" no meio) nunca casava. Parseia pela vírgula
+        // (delimitador entre header e payload — base64 nunca contém vírgula) em vez de regex.
+        const commaIdx = dataUri?.indexOf(',') ?? -1
+        const header = commaIdx > -1 ? dataUri!.slice('data:'.length, commaIdx) : ''
+        if (commaIdx > -1 && /base64$/i.test(header)) {
+          const mimeType = header.split(';')[0].trim() || 'audio/ogg'
+          const base64 = dataUri!.slice(commaIdx + 1)
           const bytes = Buffer.from(base64, 'base64')
           finalMediaUrl = await uploadAudio(tenantId, envelope.id, bytes, mimeType)
         } else {
