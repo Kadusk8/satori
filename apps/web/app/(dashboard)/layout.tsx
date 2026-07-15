@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getSessionClaims } from '@/lib/auth/session'
 import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar'
+import { NotificationPermissionBanner } from '@/components/pwa/notification-permission-banner'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const claims = await getSessionClaims()
@@ -9,10 +10,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (claims.isSuperAdmin && !claims.tenantId) redirect('/admin')
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-background">
       <DashboardSidebar tenantId={claims.tenantId} userRole={claims.userRole} />
-      <main className="flex-1 overflow-y-auto bg-background">
-        {children}
+      <main className="flex-1 flex flex-col h-full overflow-hidden bg-background">
+        <NotificationPermissionBanner />
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </main>
     </div>
   )

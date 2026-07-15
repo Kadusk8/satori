@@ -480,6 +480,25 @@ export const aiQualityFlags = pgTable(
   ]
 )
 
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull().unique(),
+    keysP256dh: text('keys_p256dh').notNull(),
+    keysAuth: text('keys_auth').notNull(),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_push_subs_tenant_user').on(t.tenantId, t.userId)]
+)
+
 // Tipos inferidos — usar nos Server Components/Actions ao invés das interfaces
 // DB manuais espalhadas hoje pelas páginas.
 export type Tenant = typeof tenants.$inferSelect
@@ -496,3 +515,4 @@ export type SuperAdmin = typeof superAdmins.$inferSelect
 export type AuthUser = typeof authUsers.$inferSelect
 export type AiErrorLog = typeof aiErrorLogs.$inferSelect
 export type AiQualityFlag = typeof aiQualityFlags.$inferSelect
+export type PushSubscription = typeof pushSubscriptions.$inferSelect

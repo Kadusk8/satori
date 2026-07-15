@@ -1,6 +1,6 @@
 'use server'
 
-import { and, eq, gte, like, isNull } from 'drizzle-orm'
+import { and, eq, gte, isNull } from 'drizzle-orm'
 import { sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { getDbClaims } from '@/lib/auth/session'

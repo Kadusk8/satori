@@ -5,7 +5,7 @@
 
 import { and, desc, eq, ne } from 'drizzle-orm'
 import { db, pool, getDecryptedEvolutionKey } from '../db/index.js'
-import { contacts, conversations, messages } from '../db/schema.js'
+import { contacts, conversations, messages, users } from '../db/schema.js'
 import { uploadAudio } from '../shared/cloudinary.js'
 import { processMessage } from './process-message.js'
 import { triggerEvent, tenantChannel, conversationChannel } from '../shared/realtime.js'
@@ -202,7 +202,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
 
   // Busca ou cria conversa ativa
   const existingConvRows = await db
-    .select({ id: conversations.id, status: conversations.status })
+    .select({ id: conversations.id, status: conversations.status, assignedTo: conversations.assignedTo })
     .from(conversations)
     .where(and(eq(conversations.tenantId, tenantId), eq(conversations.contactId, contactId), ne(conversations.status, 'closed')))
     .orderBy(desc(conversations.createdAt))
@@ -330,6 +330,31 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
     } catch (err) {
       console.warn('[webhook] Erro ao disparar evento de conversa (Realtime):', err)
     }
+  }
+
+  // Notificação Push
+  try {
+    let targetUserIds: string[] = []
+    if (existingConvRows[0]?.assignedTo) {
+      targetUserIds = [existingConvRows[0].assignedTo]
+    } else {
+      const activeUsers = await db.select({ id: users.id }).from(users).where(eq(users.tenantId, tenantId))
+      targetUserIds = activeUsers.map(u => u.id)
+    }
+
+    if (targetUserIds.length > 0) {
+      const contactName = envelope.pushName || phoneNumber
+      const bodyText = text || (contentType === 'image' ? '📷 Imagem recebida' : (contentType === 'audio' ? '🎵 Áudio recebido' : 'Nova mensagem'))
+      
+      const { sendPushNotification } = await import('../shared/push-sender.js')
+      sendPushNotification(tenantId, targetUserIds, {
+        title: `Mensagem de ${contactName}`,
+        body: bodyText.length > 100 ? bodyText.substring(0, 97) + '...' : bodyText,
+        conversationId,
+      }).catch(err => console.error('[webhook] Erro não tratado no push:', err))
+    }
+  } catch (err) {
+    console.error('[webhook] Erro ao tentar disparar notificação push:', err)
   }
 
   // Cancela follow-ups pendentes do contato que respondeu

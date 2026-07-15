@@ -187,3 +187,14 @@ export const aiQualityFlags = pgTable('ai_quality_flags', {
   detail: text('detail'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  keysP256dh: text('keys_p256dh').notNull(),
+  keysAuth: text('keys_auth').notNull(),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})

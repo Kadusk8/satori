@@ -35,7 +35,17 @@
       "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'docker exec __CMDSUB_OUTPUT__ grep -o '\\\\''staleQueryTerm'\\\\'' /app/dist/core/process-message.js | head -2')",
       "Bash(npm test *)",
       "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . 2>&1 | tail -60\")",
-      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force zapagent_backend 2>&1 | tail -20\")"
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force zapagent_backend 2>&1 | tail -20\")",
+      "Bash(rsync -avz --delete /Users/mac/zapai/services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(ssh -i ~/.ssh/id_rsa root@77.237.244.254 \"echo 'Conectado'\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . && docker service update --force --image zapagent-backend:latest zapagent_backend\")",
+      "Bash(awk '{print NR\": \"length\\($0\\)\" chars, starts with: \"substr\\($0,1,12\\)}' .env)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"grep -c 'PUSHER' /opt/zapagent-backend/.env 2>/dev/null; grep '^PUSHER_APP_ID=\\\\|^NEXT_PUBLIC_PUSHER_KEY=\\\\|^PUSHER_SECRET=\\\\|^NEXT_PUBLIC_PUSHER_CLUSTER=' /opt/zapagent-backend/.env 2>/dev/null | sed -E 's/=\\(.+\\)/=<set>/'\")",
+      "Bash(rsync -az --delete -e 'ssh -i ~/.ssh/zapagent_vps' --exclude node_modules --exclude dist --exclude .env /Users/mac/zapai/services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(rsync -azv --delete -e 'ssh -i ~/.ssh/zapagent_vps' --exclude node_modules --exclude dist --exclude .env /Users/mac/zapai/services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force --image zapagent-backend:latest zapagent_backend 2>&1 | tail -20\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'CID=$\\(docker ps -qf name=zapagent_backend\\); docker exec $CID grep -o '\\\\''private-tenant-'\\\\'' dist/shared/realtime.js; docker exec $CID grep -o '\\\\''LABEL_ASSOCIATION_CHAT'\\\\'' dist/core/webhook.js | head -1; docker exec $CID grep -o '\\\\''whatsapp_label_names'\\\\'' dist/core/process-message.js | head -1')",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'CID=$\\(docker ps -qf name=zapagent_backend\\); docker logs --tail 30 $CID 2>&1')"
     ]
   }
 }

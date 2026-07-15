@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import {
   MessageSquare, Users, Bot, Clock,
-  ArrowUpRight, CheckCircle2, AlertCircle, TrendingUp,
+  ArrowUpRight, CheckCircle2, AlertCircle,
 } from 'lucide-react'
 import { getTenantDashboardMetrics } from '@/lib/data/dashboard'
 

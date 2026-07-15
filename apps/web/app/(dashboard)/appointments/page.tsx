@@ -42,11 +42,7 @@ interface DBAppointment {
   }
 }
 
-interface DBTenant {
-  appointment_duration_minutes: number
-  appointment_slot_interval_minutes: number
-  business_hours: Record<string, { start: string; end: string } | null>
-}
+
 
 function mapAppointment(row: DBAppointment): Appointment {
   return {
