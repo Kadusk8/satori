@@ -8,6 +8,8 @@ import { db } from '../db/index.js'
 import { conversations, messages } from '../db/schema.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
+
 export interface SendWhatsAppPayload {
   tenantId: string
   to: string
@@ -21,7 +23,7 @@ export interface SendWhatsAppPayload {
 export async function sendWhatsAppMessage(payload: SendWhatsAppPayload): Promise<{ whatsappMessageId: string | null }> {
   const { tenantId, to, type, text, imageUrl, caption, conversationId } = payload
 
-  const evo = await getEvolutionClient(tenantId)
+  const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
 
   let whatsappMessageId: string | null = null
   if (type === 'text') {

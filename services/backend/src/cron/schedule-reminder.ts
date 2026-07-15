@@ -6,6 +6,8 @@ import { pool } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { zonedWallTimeToDate } from '../shared/timezone.js'
 
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
+
 interface AppointmentRow {
   id: string
   tenant_id: string
@@ -62,7 +64,7 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       if (diffHours < 23 || diffHours > 25) continue
       if (!appt.evolution_instance_name) continue
 
-      const evo = await getEvolutionClient(appt.tenant_id)
+      const evo = await getEvolutionClient(appt.tenant_id, ENCRYPTION_KEY)
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'
       const service = appt.title ? ` para *${appt.title}*` : ''
       const message =
@@ -86,7 +88,7 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       if (diffMinutes < 50 || diffMinutes > 70) continue
       if (!appt.evolution_instance_name) continue
 
-      const evo = await getEvolutionClient(appt.tenant_id)
+      const evo = await getEvolutionClient(appt.tenant_id, ENCRYPTION_KEY)
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'
       const service = appt.title ? ` (${appt.title})` : ''
       const message =
