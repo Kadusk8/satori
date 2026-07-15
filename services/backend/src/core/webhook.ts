@@ -8,6 +8,7 @@ import { db, pool, getDecryptedEvolutionKey } from '../db/index.js'
 import { contacts, conversations, messages } from '../db/schema.js'
 import { uploadAudio } from '../shared/cloudinary.js'
 import { processMessage } from './process-message.js'
+import { triggerEvent, tenantChannel, conversationChannel } from '../shared/realtime.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -286,17 +287,47 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   }
 
   // Salva mensagem do cliente
-  await db.insert(messages).values({
-    tenantId,
-    conversationId,
-    contactId,
-    senderType: 'customer',
-    content: text,
-    contentType,
-    mediaUrl: finalMediaUrl,
-    whatsappMessageId: envelope.id,
-    createdAt: new Date(),
-  })
+  const savedMsg = await db
+    .insert(messages)
+    .values({
+      tenantId,
+      conversationId,
+      contactId,
+      senderType: 'customer',
+      content: text,
+      contentType,
+      mediaUrl: finalMediaUrl,
+      whatsappMessageId: envelope.id,
+      createdAt: new Date(),
+    })
+    .returning()
+
+  // Dispara evento Realtime pra atualizar o chat
+  if (savedMsg[0]) {
+    try {
+      const msgData = {
+        id: savedMsg[0].id,
+        sender_type: 'customer',
+        content: savedMsg[0].content,
+        content_type: savedMsg[0].contentType,
+        media_url: savedMsg[0].mediaUrl,
+        created_at: savedMsg[0].createdAt.toISOString(),
+        contact_id: contactId,
+      }
+      await triggerEvent(conversationChannel(conversationId), 'message:new', msgData)
+    } catch (err) {
+      console.warn('[webhook] Erro ao disparar evento de mensagem (Realtime):', err)
+    }
+  }
+
+  // Se é conversa nova, avisa o kanban também
+  if (conversationStatus === 'ai_handling') {
+    try {
+      await triggerEvent(tenantChannel(tenantId), 'conversation:changed', { conversationId })
+    } catch (err) {
+      console.warn('[webhook] Erro ao disparar evento de conversa (Realtime):', err)
+    }
+  }
 
   // Cancela follow-ups pendentes do contato que respondeu
   await pool.query(`update follow_ups set status = 'replied' where contact_id = $1 and status = 'pending'`, [contactId])

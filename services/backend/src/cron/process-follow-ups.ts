@@ -7,6 +7,7 @@
 import { getTenantLlmKeys, getAgentLlmKey, pool } from '../db/index.js'
 import { callLLM, type LLMProvider } from '../shared/llm-client.js'
 import { sendWhatsAppMessage } from '../core/send-whatsapp.js'
+import { isContactBlockedByTags } from '../shared/contact-block.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -21,6 +22,7 @@ interface FollowUpRow {
   contact_number: string
   contact_whatsapp_name: string | null
   contact_custom_name: string | null
+  contact_tags: string[]
   agent_model: string
   agent_system_prompt: string
   agent_follow_up_delay_hours: number
@@ -89,6 +91,13 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
     return
   }
 
+  // Trava manual: contato com as etiquetas "jonathan" + "loja" — nunca recebe
+  // follow-up automático.
+  if (isContactBlockedByTags(row.contact_tags)) {
+    await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
+    return
+  }
+
   const llmKeysRaw = await getTenantLlmKeys(row.tenant_id, ENCRYPTION_KEY)
   const agentLlmKey = await getAgentLlmKey(row.ai_agent_id, ENCRYPTION_KEY)
   const provider = row.agent_llm_provider ?? 'anthropic'
@@ -137,6 +146,7 @@ export async function runProcessFollowUps(): Promise<{ processed: number; failed
   const res = await pool.query<FollowUpRow>(
     `select f.id, f.tenant_id, f.contact_id, f.conversation_id, f.ai_agent_id, f.attempt_number, f.context,
             c.whatsapp_number as contact_number, c.whatsapp_name as contact_whatsapp_name, c.custom_name as contact_custom_name,
+            c.tags as contact_tags,
             ag.model as agent_model, ag.system_prompt as agent_system_prompt,
             ag.follow_up_delay_hours as agent_follow_up_delay_hours, ag.follow_up_max_attempts as agent_follow_up_max_attempts,
             ag.follow_up_message_template as agent_follow_up_message_template,

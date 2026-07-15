@@ -16,7 +16,8 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.6.1",
     "node-cron": "^4.2.1",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "pusher": "^5.3.4"
   },
   "devDependencies": {
     "@types/node": "^20",

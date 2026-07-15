@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vitest *)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 3h 2>&1 | grep -iE '\\\\[ai\\\\]|\\\\[process-message\\\\]|resposta da ia|claude' | tail -80\")",
+      "Bash(lsof -i :3000 -sTCP:LISTEN)",
+      "Bash(PORT=3210 npx next dev -p 3210)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3210/login)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"find / -maxdepth 4 -iname 'zapai' -o -iname 'zapagent' 2>/dev/null | grep -v proc\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service ls | grep -i zapagent; echo '---'; docker service inspect zapagent_backend --format '{{json .Spec.TaskTemplate.ContainerSpec.Image}}' 2>&1\")",
+      "Bash(rsync -avz --exclude node_modules --exclude dist --exclude .env --exclude .git -e 'ssh -i ~/.ssh/zapagent_vps' /Users/mac/zapai/services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(npx playwright *)",
+      "Bash(npx tsx *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"BACKEND TSC EXIT: $?\")",
+      "Bash(grep -vE \"^\\(sending|sent|total|$\\)\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . 2>&1 | tail -8 && echo '=== CONVERGE ===' && docker service update --force zapagent_backend 2>&1 | tail -4\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 90s --tail 20 2>&1\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 90s --tail 6 2>&1\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service ps zapagent_backend --no-trunc --format '{{.CurrentState}} | {{.Error}}' | head -3; echo '=== recent logs ==='; docker service logs zapagent_backend --since 5m --tail 25 2>&1 | grep -iE 'listening|error|erro|falh|cron' | tail -15\")",
+      "Bash(node -e ' *)",
+      "Bash(grep -vE \"^\\(sending|total|$\\)\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 90s --tail 10 2>&1\")",
+      "Bash(grep -vE \"^\\(sending|total|sent|$\\)\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . 2>&1 | tail -4 && echo '=== CONVERGE ===' && docker service update --force zapagent_backend 2>&1 | tail -3\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'docker exec __CMDSUB_OUTPUT__ grep -o '\\\\''NÃO REPITA INDISPONIBILIDADE'\\\\'' /app/dist/core/process-message.js')",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'docker exec __CMDSUB_OUTPUT__ grep -o '\\\\''aiQueryMatchesCurrentMsg'\\\\'' /app/dist/core/process-message.js | head -3')",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force zapagent_backend 2>&1 | tail -15\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 6h 2>&1 | grep -c 'Request body is too large'\")",
+      "Bash(rsync -az --delete --exclude node_modules --exclude dist -e \"ssh -i ~/.ssh/zapagent_vps\" /Users/mac/zapai/services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . 2>&1 | tail -20\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force zapagent_backend 2>&1 | tail -10\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'docker exec __CMDSUB_OUTPUT__ grep -o '\\\\''base64$/i'\\\\'' /app/dist/core/webhook.js | head -2')",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend -f --since 0s 2>&1\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 'docker exec __CMDSUB_OUTPUT__ grep -o '\\\\''staleQueryTerm'\\\\'' /app/dist/core/process-message.js | head -2')",
+      "Bash(npm test *)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"cd /opt/zapagent-backend && docker build -t zapagent-backend:latest . 2>&1 | tail -60\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service update --force zapagent_backend 2>&1 | tail -20\")"
+    ]
+  }
+}

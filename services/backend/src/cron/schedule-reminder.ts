@@ -5,6 +5,7 @@
 import { pool } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { zonedWallTimeToDate } from '../shared/timezone.js'
+import { isContactBlockedByTags } from '../shared/contact-block.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -17,6 +18,7 @@ interface AppointmentRow {
   contact_number: string
   contact_custom_name: string | null
   contact_whatsapp_name: string | null
+  contact_tags: string[]
   evolution_instance_name: string | null
   timezone: string | null
 }
@@ -43,6 +45,7 @@ async function fetchCandidates(column: 'reminder_24h_sent' | 'reminder_1h_sent')
   const res = await pool.query<AppointmentRow>(
     `select a.id, a.tenant_id, a.date, a.start_time, a.title,
             c.whatsapp_number as contact_number, c.custom_name as contact_custom_name, c.whatsapp_name as contact_whatsapp_name,
+            c.tags as contact_tags,
             t.evolution_instance_name, t.timezone
      from appointments a
      join contacts c on c.id = a.contact_id
@@ -63,6 +66,13 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const diffHours = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60)
       if (diffHours < 23 || diffHours > 25) continue
       if (!appt.evolution_instance_name) continue
+      // Trava manual: contato com as etiquetas "jonathan" + "loja" — nunca
+      // recebe lembrete automático. Marca como enviado pra não ficar
+      // reprocessando pra sempre a cada execução do cron.
+      if (isContactBlockedByTags(appt.contact_tags)) {
+        await pool.query(`update appointments set reminder_24h_sent = true where id = $1`, [appt.id])
+        continue
+      }
 
       const evo = await getEvolutionClient(appt.tenant_id, ENCRYPTION_KEY)
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'
@@ -87,6 +97,10 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const diffMinutes = (apptDateTime.getTime() - now.getTime()) / (1000 * 60)
       if (diffMinutes < 50 || diffMinutes > 70) continue
       if (!appt.evolution_instance_name) continue
+      if (isContactBlockedByTags(appt.contact_tags)) {
+        await pool.query(`update appointments set reminder_1h_sent = true where id = $1`, [appt.id])
+        continue
+      }
 
       const evo = await getEvolutionClient(appt.tenant_id, ENCRYPTION_KEY)
       const contactName = appt.contact_custom_name ?? appt.contact_whatsapp_name ?? 'Cliente'

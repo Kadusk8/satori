@@ -6,7 +6,7 @@
 // invocava esta function via HTTP fetch (hop extra). Aqui, como tudo roda no
 // mesmo processo Node, é uma chamada de função direta — ver routes/webhook.ts.
 
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { pool, getTenantLlmKeys, getAgentLlmKey } from '../db/index.js'
 import { conversations, kanbanStages, messages, products } from '../db/schema.js'
 import { db } from '../db/index.js'
@@ -23,6 +23,7 @@ import {
   type DeferredImage,
   type ToolContext,
 } from './tools.js'
+import { isContactBlockedByTags } from '../shared/contact-block.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -123,6 +124,7 @@ interface ConversationRow {
   autonomous_mode: boolean
   metadata: { source?: string; ad_referral?: { title: string | null; body: string | null } } | null
   whatsapp_number: string
+  contact_tags: string[]
   t_name: string
   business_hours: BusinessHours
   timezone: string
@@ -276,7 +278,7 @@ export function extractFocusProductCandidate(history: MessageRow[]): { id: strin
 export async function processMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
   const convRes = await pool.query<ConversationRow>(
     `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode, c.metadata,
-            ct.whatsapp_number,
+            ct.whatsapp_number, ct.tags as contact_tags,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key
      from conversations c
@@ -290,6 +292,12 @@ export async function processMessage(conversationId: string): Promise<{ success:
 
   if (conv.status === 'waiting_human' || conv.status === 'human_handling') {
     return { success: true, skipped: 'Conversa sob atendimento humano' }
+  }
+
+  // Trava manual: contato com as etiquetas "jonathan" + "loja" — a IA nunca
+  // responde, nem move o card de kanban.
+  if (isContactBlockedByTags(conv.contact_tags)) {
+    return { success: true, skipped: 'Contato bloqueado por tags (jonathan+loja)' }
   }
 
   const agentsRes = await pool.query<AgentRow>(
@@ -345,7 +353,15 @@ export async function processMessage(conversationId: string): Promise<{ success:
   const businessHours = conv.business_hours
   const timezone = conv.timezone ?? 'America/Sao_Paulo'
 
-  // Histórico (últimas 40 mensagens)
+  // Histórico (últimas 40 mensagens). ORDER BY DESC + LIMIT pega as mais
+  // recentes; sem o DESC aqui, LIMIT pegaria as 40 MAIS ANTIGAS da conversa
+  // (bug real encontrado em produção: conversas com mais de 40 linhas em
+  // `messages` — fácil de estourar, já que cada "mais fotos" grava uma linha
+  // por foto — travavam pra sempre numa janela de histórico antiga, fazendo
+  // a IA "grudar" no último produto daquela janela congelada não importa o
+  // que o cliente dissesse depois). Reverte pra ordem cronológica em seguida,
+  // que é o que o resto do código (extractFocusProductCandidate,
+  // isReturningAfterGap, montagem de llmMessages) assume.
   const historyRows = await db
     .select({
       id: messages.id,
@@ -358,17 +374,19 @@ export async function processMessage(conversationId: string): Promise<{ success:
     })
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
-    .orderBy(asc(messages.createdAt))
+    .orderBy(desc(messages.createdAt))
     .limit(40)
-  const history: MessageRow[] = historyRows.map((m) => ({
-    id: m.id,
-    sender_type: m.senderType,
-    content: m.content,
-    content_type: m.contentType,
-    media_url: m.mediaUrl,
-    ai_tool_calls: m.aiToolCalls as MessageRow['ai_tool_calls'],
-    created_at: m.createdAt,
-  }))
+  const history: MessageRow[] = historyRows
+    .map((m) => ({
+      id: m.id,
+      sender_type: m.senderType,
+      content: m.content,
+      content_type: m.contentType,
+      media_url: m.mediaUrl,
+      ai_tool_calls: m.aiToolCalls as MessageRow['ai_tool_calls'],
+      created_at: m.createdAt,
+    }))
+    .reverse()
 
   // Última mensagem do cliente (query separada, não limitada pelo histórico)
   const lastCustomerRows = await db
