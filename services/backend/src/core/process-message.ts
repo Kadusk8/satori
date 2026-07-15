@@ -615,6 +615,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   let deferredImage: DeferredImage | null = null
   let deferredImageProductId: string | null = null
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
+  let staleQueryTerm: string | null = null
 
   for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
     let response: Awaited<ReturnType<typeof callLLM>>
@@ -715,10 +716,11 @@ como um atendimento genérico de primeiro contato.` : ''}`
           const aiQuery = String(tu.input.query ?? '').toLowerCase()
           const aiQueryWords = aiQuery.split(/\s+/).filter((w) => w.length >= 2)
           const aiQueryMatchesCurrentMsg = aiQueryWords.length > 0 && aiQueryWords.some((w) => lastMsgLower.includes(w))
-          if (!aiQueryMatchesCurrentMsg) {
+          if (aiQuery && !aiQueryMatchesCurrentMsg) {
             const correctedQuery = lastMsgKeywords.slice(0, 3).join(' ')
             searchInput = { ...tu.input, query: correctedQuery }
             queryCorrected = true
+            staleQueryTerm = aiQuery
           }
         }
         result = await toolSearchProducts(tenantId, searchInput, conversationId)
@@ -746,6 +748,18 @@ como um atendimento genérico de primeiro contato.` : ''}`
 
     loopMessages.push({ role: 'assistant', content: response.content })
     loopMessages.push({ role: 'user', content: toolResults })
+  }
+
+  // Reincidência determinística: o guard-rail "pra frente" (acima) já detectou que a IA tentou
+  // buscar de novo um termo antigo sem relação com a mensagem atual (ex: "Fox", que ela mesma já
+  // tinha dito antes que não tem em estoque) e corrigiu a busca — mas em produção o texto final
+  // da IA às vezes CONTINUA mencionando esse termo antigo mesmo depois de corrigido e instruído a
+  // apresentar os resultados reais (visto mais de uma vez: ela ignora tanto os resultados quanto
+  // a instrução [SISTEMA]). Nesse ponto o problema não é mais a busca, é o texto do LLM — descarta
+  // e monta uma resposta determinística com o primeiro resultado real que a busca encontrou.
+  if (staleQueryTerm && finalText && finalText.toLowerCase().includes(staleQueryTerm) && lastSearchProductsWithImages.length > 0) {
+    const { name } = lastSearchProductsWithImages[0]
+    finalText = `Não temos essa opção específica no momento, mas dá uma olhada nessa aqui: *${name}* 👇`
   }
 
   // Auto-imagem: fallback quando o LLM não chamou send_product_image
