@@ -213,3 +213,27 @@ export async function getWaitingCount(): Promise<number> {
   )
   return rows.length
 }
+
+/** Devolve uma conversa do atendimento humano de volta para a IA. Move o card e atualiza o status. */
+export async function returnConversationToAI(conversationId: string): Promise<void> {
+  const claims = await claimsOrThrow()
+  await withClaims(claims, async (tx) => {
+    await assertCanTouchConversation(tx, claims, conversationId)
+
+    const stageRows = await tx
+      .select({ id: kanbanStages.id })
+      .from(kanbanStages)
+      .where(and(eq(kanbanStages.tenantId, claims.tenant_id!), eq(kanbanStages.slug, 'ia_atendendo')))
+      .limit(1)
+
+    const stageId = stageRows[0]?.id
+    if (!stageId) throw new Error('Stage "ia_atendendo" não encontrado.')
+
+    await tx
+      .update(conversations)
+      .set({ status: 'ai_handling', kanbanStageId: stageId })
+      .where(eq(conversations.id, conversationId))
+  })
+  revalidatePath('/conversations')
+  await triggerEvent(tenantChannel(claims.tenant_id!), 'conversation:changed', { conversationId })
+}

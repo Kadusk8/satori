@@ -22,6 +22,7 @@ import { ChatInput } from '@/components/chat/chat-input'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { cn } from '@/lib/utils'
 import { getChat, getMessagesSince, assumeConversation, closeConversation } from '@/lib/data/chat'
+import { returnConversationToAI } from '@/lib/data/conversations'
 import { getPusherClient, conversationChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
@@ -88,6 +89,7 @@ export default function ChatPage() {
   const [isSending, setIsSending] = useState(false)
   const [isAssuming, setIsAssuming] = useState(false)
   const [isClosing, setIsClosing] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const contactIdRef = useRef<string>('')
 
@@ -228,6 +230,20 @@ export default function ChatPage() {
     setIsClosing(false)
   }, [conversationId, router])
 
+  // ── Devolver para IA ────────────────────────────────────────────────────
+
+  const handleReturnToAI = useCallback(async () => {
+    setIsReturning(true)
+    try {
+      await returnConversationToAI(conversationId)
+      toast.success('Conversa devolvida para a IA.')
+      setConversation((prev) => prev ? { ...prev, status: 'ai_handling' } : prev)
+    } catch (err) {
+      toast.error('Erro ao devolver: ' + (err instanceof Error ? err.message : 'erro'))
+    }
+    setIsReturning(false)
+  }, [conversationId])
+
   // ── Renderização ─────────────────────────────────────────────────────────
 
   if (isLoading) {
@@ -298,6 +314,19 @@ export default function ChatPage() {
             >
               <UserCheck className="h-3.5 w-3.5" />
               {isAssuming ? 'Assumindo...' : 'Assumir'}
+            </Button>
+          )}
+
+          {convStatus === 'human_handling' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-xs h-8"
+              onClick={handleReturnToAI}
+              disabled={isReturning}
+            >
+              <Bot className="h-3.5 w-3.5" />
+              {isReturning ? 'Devolvendo...' : 'Devolver IA'}
             </Button>
           )}
 
