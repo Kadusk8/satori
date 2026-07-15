@@ -762,6 +762,28 @@ como um atendimento genérico de primeiro contato.` : ''}`
     finalText = `Não temos essa opção específica no momento, mas dá uma olhada nessa aqui: *${name}* 👇`
   }
 
+  // Alucinação SEM tool call nenhuma: às vezes a IA nem chega a chamar search_products — só
+  // escreve "não temos o X" puxando de memória um produto que ela mesma já declarou indisponível
+  // em turnos anteriores, mesmo pra pedidos novos e genéricos (ex: "Olá, eu queria ver um carro
+  // pra comprar"). O guard-rail acima só age quando a IA CHAMA search_products com query errada —
+  // aqui ela não chamou nenhuma tool, então não há query pra corrigir. O próprio prompt já proíbe
+  // isso ("NUNCA DIGA não temos — search_products SEMPRE retorna produtos reais"), então se o
+  // texto alega indisponibilidade sem nenhuma tool chamada neste turno, força uma busca de
+  // verdade (com as palavras da mensagem atual, ou busca geral se ela não tiver nenhuma — ex:
+  // "quero" sozinho) e monta a resposta a partir do resultado real.
+  if (!wasEscalated && finalText && allToolCalls.length === 0 && agent.can_search_products && /n[ãa]o temos\b/i.test(finalText)) {
+    const currentKeywords = extractCustomerKeywords(lastCustomerMsg?.content)
+    const forcedQuery = currentKeywords.slice(0, 3).join(' ')
+    const forcedResult = await toolSearchProducts(tenantId, { query: forcedQuery }, conversationId)
+    const imgMatches = [...forcedResult.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
+    const forced = imgMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
+    allToolCalls.push({ name: 'search_products', input: { query: forcedQuery }, result: forcedResult })
+    if (forced.length > 0) {
+      lastSearchProductsWithImages = forced
+      finalText = `Deixa eu te mostrar uma opção: *${forced[0].name}* 👇`
+    }
+  }
+
   // Auto-imagem: fallback quando o LLM não chamou send_product_image
   if (!deferredImage && finalText && lastSearchProductsWithImages.length > 0) {
     const finalTextLower = finalText.toLowerCase()
