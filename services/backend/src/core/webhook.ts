@@ -255,7 +255,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
       } catch {
         // chave em texto plano ou sem criptografia — usa valor cru
       }
-      const mediaRes = await fetch(`${evoUrl}/message/downloadimage`, {
+      const mediaRes = await fetch(`${evoUrl}/message/downloadmedia`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: evoApiKey },
         body: JSON.stringify({ message: data.Message }),
@@ -269,10 +269,10 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
           const bytes = Buffer.from(base64, 'base64')
           finalMediaUrl = await uploadAudio(tenantId, envelope.id, bytes, mimeType)
         } else {
-          console.error('[webhook] Resposta de downloadimage sem base64 reconhecível')
+          console.error('[webhook] Resposta de downloadmedia sem base64 reconhecível:', JSON.stringify(mediaBody).slice(0, 500))
         }
       } else {
-        console.error('[webhook] Erro downloadimage:', await mediaRes.text())
+        console.error('[webhook] Erro downloadmedia:', await mediaRes.text())
       }
     } catch (err) {
       console.error('[webhook] Erro ao buscar mídia da Evolution Go:', err)
