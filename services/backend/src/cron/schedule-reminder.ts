@@ -20,6 +20,7 @@ interface AppointmentRow {
   contact_whatsapp_name: string | null
   contact_tags: string[]
   whatsapp_label_names: string[] | null
+  blocked_labels: string[]
   evolution_instance_name: string | null
   timezone: string | null
 }
@@ -49,6 +50,7 @@ async function fetchCandidates(column: 'reminder_24h_sent' | 'reminder_1h_sent')
             c.tags as contact_tags,
             (select array_agg(lower(wl.name)) from whatsapp_labels wl
              where wl.tenant_id = c.tenant_id and wl.label_id = any(c.whatsapp_label_ids) and wl.deleted = false) as whatsapp_label_names,
+            t.blocked_labels as blocked_labels,
             t.evolution_instance_name, t.timezone
      from appointments a
      join contacts c on c.id = a.contact_id
@@ -69,10 +71,11 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const diffHours = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60)
       if (diffHours < 23 || diffHours > 25) continue
       if (!appt.evolution_instance_name) continue
-      // Trava manual: contato com as etiquetas "jonathan" + "loja" — nunca
-      // recebe lembrete automático. Marca como enviado pra não ficar
-      // reprocessando pra sempre a cada execução do cron.
-      if (isContactBlockedByTags(appt.contact_tags, appt.whatsapp_label_names)) {
+      // Trava configurável por tenant: contato com qualquer uma das etiquetas
+      // cadastradas em tenants.blocked_labels — nunca recebe lembrete
+      // automático. Marca como enviado pra não ficar reprocessando pra
+      // sempre a cada execução do cron.
+      if (isContactBlockedByTags(appt.blocked_labels, appt.contact_tags, appt.whatsapp_label_names)) {
         await pool.query(`update appointments set reminder_24h_sent = true where id = $1`, [appt.id])
         continue
       }
@@ -100,7 +103,7 @@ export async function runScheduleReminder(): Promise<{ sent24h: number; sent1h: 
       const diffMinutes = (apptDateTime.getTime() - now.getTime()) / (1000 * 60)
       if (diffMinutes < 50 || diffMinutes > 70) continue
       if (!appt.evolution_instance_name) continue
-      if (isContactBlockedByTags(appt.contact_tags, appt.whatsapp_label_names)) {
+      if (isContactBlockedByTags(appt.blocked_labels, appt.contact_tags, appt.whatsapp_label_names)) {
         await pool.query(`update appointments set reminder_1h_sent = true where id = $1`, [appt.id])
         continue
       }

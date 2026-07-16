@@ -146,7 +146,7 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
       const res = await fetch(`${url}/instance/connect`, {
         method: 'POST',
         headers: headers(),
-        body: JSON.stringify({ webhookUrl }),
+        body: JSON.stringify({ webhookUrl, subscribe: ['MESSAGE', 'CONNECTION', 'LABEL', 'CONTACT'] }),
       })
       if (!res.ok) throw new Error(`Evolution Go instance/connect: ${await res.text()}`)
     },

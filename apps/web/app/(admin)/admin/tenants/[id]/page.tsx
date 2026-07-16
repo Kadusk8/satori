@@ -12,6 +12,7 @@ import { LlmEditor } from './llm-editor'
 import { AudioEditor } from './audio-editor'
 import { EvolutionConnection } from './evolution-connection'
 import { EvolutionEditor } from './evolution-editor'
+import { BlockedLabelsEditor } from './blocked-labels-editor'
 import { BusinessHoursEditor } from './business-hours-editor'
 import { MetaCapiEditor } from './meta-capi-editor'
 
@@ -57,6 +58,7 @@ interface AdminTenantRow {
   whatsapp_number: string | null; whatsapp_connected: boolean | null
   evolution_api_url: string | null; evolution_instance_name: string | null
   webhook_secret: string
+  blocked_labels: string[] | null
   openai_api_key: string | null; gemini_api_key: string | null
   anthropic_api_key: string | null; elevenlabs_api_key: string | null
   meta_dataset_id: string | null; meta_access_token: string | null; meta_capi_enabled: boolean
@@ -195,6 +197,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
               webhookUrl={webhookUrl}
               hasEvolutionConfig={!!tenant.evolution_api_url}
             />
+            <BlockedLabelsEditor tenantId={id} currentLabels={tenant.blocked_labels ?? []} />
           </CardContent>
         </Card>
 

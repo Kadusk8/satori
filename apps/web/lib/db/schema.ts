@@ -68,6 +68,10 @@ export const tenants = pgTable(
     evolutionApiUrl: text('evolution_api_url'),
     evolutionApiKey: text('evolution_api_key'),
     webhookSecret: text('webhook_secret').notNull(),
+    // Trava configurável: contatos com qualquer uma dessas etiquetas (CRM ou
+    // nativas do WhatsApp) nunca recebem mensagem automática — ver
+    // services/backend/src/shared/contact-block.ts.
+    blockedLabels: text('blocked_labels').array().notNull().default([]),
     whatsappNumber: text('whatsapp_number'),
     whatsappConnectionType: text('whatsapp_connection_type').default('baileys'),
     whatsappConnected: boolean('whatsapp_connected').notNull().default(false),

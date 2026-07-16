@@ -286,6 +286,14 @@ export async function updateEvolutionConnection(tenantId: string, data: {
   return syncEvolutionWebhook(tenantId, evolutionApiUrl, row.evolution_api_key, row.webhook_secret)
 }
 
+// Salva as etiquetas que bloqueiam a IA de responder automaticamente pra um
+// contato (CRM ou nativas do WhatsApp) — ver contact-block.ts no backend.
+export async function updateTenantBlockedLabels(tenantId: string, labels: string[]) {
+  const cleaned = Array.from(new Set(labels.map((l) => l.trim().toLowerCase()).filter(Boolean))).slice(0, 30)
+  await withAdmin((tx) => tx.update(tenants).set({ blockedLabels: cleaned, updatedAt: new Date() }).where(eq(tenants.id, tenantId)))
+  revalidatePath(`/admin/tenants/${tenantId}`)
+}
+
 export async function deleteTenant(tenantId: string) {
   await withAdmin((tx) => tx.delete(tenants).where(eq(tenants.id, tenantId)))
   revalidatePath('/admin/tenants')

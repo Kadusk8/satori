@@ -1,20 +1,15 @@
-// Trava manual: contatos com AMBAS as etiquetas abaixo (ex: números internos/de
-// teste da loja) nunca recebem mensagem automática — nem resposta da IA a
-// mensagem recebida, nem follow-up, nem lembrete de agendamento. Comparação em
-// minúsculas porque o frontend já normaliza as tags assim, mas não confiamos
-// só nisso (defesa contra escrita direta no banco fora desse fluxo).
-//
-// Duas fontes possíveis, combinadas com OR (qualquer uma das duas ativa a
-// trava): as tags do painel/CRM (`contacts.tags`) e as etiquetas NATIVAS do
-// app do WhatsApp (resolvidas via `whatsapp_labels`, populadas pelos eventos
-// LabelEdit/LabelAssociationChat do webhook — ver core/webhook.ts).
-const BLOCKED_TAGS = ['jonathan', 'loja']
-
+// Trava configurável por tenant: contatos com QUALQUER uma das etiquetas
+// cadastradas em tenants.blocked_labels nunca recebem mensagem automática —
+// nem resposta da IA, nem follow-up, nem lembrete. Combina duas fontes de
+// etiqueta do contato: tags do CRM (contacts.tags) e etiquetas nativas do
+// WhatsApp (resolvidas via whatsapp_labels). Comparação em minúsculas.
 export function isContactBlockedByTags(
+  blockedLabels: string[] | null | undefined,
   crmTags: string[] | null | undefined,
   whatsappLabelNames?: string[] | null | undefined
 ): boolean {
-  const combined = [...(crmTags ?? []), ...(whatsappLabelNames ?? [])].map((t) => t.toLowerCase())
-  if (combined.length === 0) return false
-  return BLOCKED_TAGS.every((t) => combined.includes(t))
+  const blocked = (blockedLabels ?? []).map((t) => t.toLowerCase().trim()).filter(Boolean)
+  if (blocked.length === 0) return false
+  const contactLabels = [...(crmTags ?? []), ...(whatsappLabelNames ?? [])].map((t) => t.toLowerCase().trim())
+  return blocked.some((b) => contactLabels.includes(b))
 }

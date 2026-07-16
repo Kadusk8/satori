@@ -36,7 +36,7 @@ export async function setEvolutionWebhook(params: {
   const res = await fetch(`${base}/instance/connect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: params.apiKey },
-    body: JSON.stringify({ webhookUrl: params.webhookUrl }),
+    body: JSON.stringify({ webhookUrl: params.webhookUrl, subscribe: ['MESSAGE', 'CONNECTION', 'LABEL', 'CONTACT'] }),
   })
   if (!res.ok) throw new Error(`Evolution Go instance/connect: ${await res.text()}`)
 }

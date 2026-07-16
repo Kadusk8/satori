@@ -24,6 +24,7 @@ interface FollowUpRow {
   contact_custom_name: string | null
   contact_tags: string[]
   whatsapp_label_names: string[] | null
+  blocked_labels: string[]
   agent_model: string
   agent_system_prompt: string
   agent_follow_up_delay_hours: number
@@ -92,9 +93,10 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
     return
   }
 
-  // Trava manual: contato com as etiquetas "jonathan" + "loja" (CRM ou
-  // nativas do WhatsApp) — nunca recebe follow-up automático.
-  if (isContactBlockedByTags(row.contact_tags, row.whatsapp_label_names)) {
+  // Trava configurável por tenant: contato com qualquer uma das etiquetas
+  // cadastradas em tenants.blocked_labels (CRM ou nativas do WhatsApp) —
+  // nunca recebe follow-up automático.
+  if (isContactBlockedByTags(row.blocked_labels, row.contact_tags, row.whatsapp_label_names)) {
     await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
     return
   }
@@ -150,6 +152,7 @@ export async function runProcessFollowUps(): Promise<{ processed: number; failed
             c.tags as contact_tags,
             (select array_agg(lower(wl.name)) from whatsapp_labels wl
              where wl.tenant_id = c.tenant_id and wl.label_id = any(c.whatsapp_label_ids) and wl.deleted = false) as whatsapp_label_names,
+            t.blocked_labels as blocked_labels,
             ag.model as agent_model, ag.system_prompt as agent_system_prompt,
             ag.follow_up_delay_hours as agent_follow_up_delay_hours, ag.follow_up_max_attempts as agent_follow_up_max_attempts,
             ag.follow_up_message_template as agent_follow_up_message_template,
