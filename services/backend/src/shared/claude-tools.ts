@@ -19,7 +19,7 @@ export const AI_TOOLS: Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Termo de busca (nome, categoria ou descrição). Se omitido, lista todos os produtos disponíveis.' },
+        query: { type: 'string', description: 'Termo de busca (nome, categoria, descrição ou características cadastradas — cor, tamanho, modelo, voltagem, etc). Se omitido, lista todos os produtos disponíveis.' },
         category: { type: 'string', description: 'Filtrar por categoria específica' },
         max_results: { type: 'number', description: 'Máximo de resultados (padrão: 8)' },
         price_max: { type: 'number', description: 'Preço máximo' },

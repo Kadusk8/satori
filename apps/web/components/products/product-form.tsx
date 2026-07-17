@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -75,6 +75,26 @@ export function ProductForm({
     })) ?? []
   )
   const [saving, setSaving] = useState(false)
+  const [characteristics, setCharacteristics] = useState<string[]>(product?.characteristics ?? [])
+  const [characteristicInput, setCharacteristicInput] = useState('')
+
+  const addCharacteristic = () => {
+    const value = characteristicInput.trim()
+    if (!value || characteristics.includes(value)) return
+    setCharacteristics((prev) => [...prev, value])
+    setCharacteristicInput('')
+  }
+
+  const removeCharacteristic = (value: string) => {
+    setCharacteristics((prev) => prev.filter((c) => c !== value))
+  }
+
+  const onCharacteristicKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addCharacteristic()
+    }
+  }
 
   const {
     register,
@@ -111,6 +131,7 @@ export function ProductForm({
         tags: data.tags
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
+        characteristics,
         images: images.map((img) => ({
           url: img.url,
           thumbnailUrl: img.thumbnailUrl,
@@ -202,6 +223,46 @@ export function ProductForm({
               placeholder="Descrição detalhada do produto..."
               rows={3}
             />
+          </div>
+
+          {/* Características */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Características</label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Cadastre quantas forem necessárias (cor, tamanho, modelo, voltagem, ano, material...).
+              A IA usa isso pra identificar o produto certo mesmo quando o cliente pergunta por um
+              detalhe que não está na descrição.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                value={characteristicInput}
+                onChange={(e) => setCharacteristicInput(e.target.value)}
+                onKeyDown={onCharacteristicKeyDown}
+                placeholder="Ex: Cor preta"
+              />
+              <Button type="button" variant="outline" size="icon" onClick={addCharacteristic}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            {characteristics.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {characteristics.map((c) => (
+                  <span
+                    key={c}
+                    className="inline-flex items-center gap-1 text-xs bg-muted rounded-full pl-2.5 pr-1 py-1"
+                  >
+                    {c}
+                    <button
+                      type="button"
+                      onClick={() => removeCharacteristic(c)}
+                      className="rounded-full p-0.5 hover:bg-background transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Preço */}

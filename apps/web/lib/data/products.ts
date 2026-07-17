@@ -15,6 +15,7 @@ export interface DBProductRow {
   price_display: string | null
   category: string | null
   tags: string[]
+  characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
@@ -30,6 +31,7 @@ export interface ProductInput {
   priceDisplay: string | null
   category: string | null
   tags: string[]
+  characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
@@ -52,6 +54,7 @@ function toRow(p: typeof products.$inferSelect): DBProductRow {
     price_display: p.priceDisplay,
     category: p.category,
     tags: p.tags ?? [],
+    characteristics: p.characteristics ?? [],
     images: (p.images ?? []) as DBProductRow['images'],
     is_available: p.isAvailable,
     is_featured: p.isFeatured,
@@ -85,6 +88,7 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     priceDisplay: input.priceDisplay,
     category: input.category,
     tags: input.tags,
+    characteristics: input.characteristics,
     images: input.images,
     isAvailable: input.isAvailable,
     isFeatured: input.isFeatured,

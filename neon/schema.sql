@@ -763,6 +763,11 @@ CREATE TABLE IF NOT EXISTS products (
   category          TEXT,
   subcategory       TEXT,
   tags              TEXT[] NOT NULL DEFAULT '{}',
+  -- Características cadastradas livremente pelo tenant (cor, voltagem,
+  -- tamanho, material, ano, o que for) — entram na busca full-text e são
+  -- mostradas pra IA junto do resultado, pra ela conseguir identificar o
+  -- produto certo mesmo quando isso não está na descrição.
+  characteristics   TEXT[] NOT NULL DEFAULT '{}',
 
   images JSONB NOT NULL DEFAULT '[]',
 
@@ -786,6 +791,7 @@ CREATE INDEX IF NOT EXISTS idx_products_is_available ON products (tenant_id, is_
 CREATE INDEX IF NOT EXISTS idx_products_is_featured  ON products (tenant_id, is_featured);
 CREATE INDEX IF NOT EXISTS idx_products_is_running_ad ON products (tenant_id, is_running_ad);
 CREATE INDEX IF NOT EXISTS idx_products_tags         ON products USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_products_characteristics ON products USING GIN (characteristics);
 CREATE INDEX IF NOT EXISTS idx_products_search       ON products USING GIN (search_vector);
 
 CREATE OR REPLACE FUNCTION update_product_search_vector()
@@ -798,7 +804,8 @@ BEGIN
     coalesce(NEW.short_description, '') || ' ' ||
     coalesce(NEW.category, '')          || ' ' ||
     coalesce(NEW.subcategory, '')       || ' ' ||
-    coalesce(array_to_string(NEW.tags, ' '), '')
+    coalesce(array_to_string(NEW.tags, ' '), '')            || ' ' ||
+    coalesce(array_to_string(NEW.characteristics, ' '), '')
   );
   RETURN NEW;
 END;

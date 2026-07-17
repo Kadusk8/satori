@@ -19,11 +19,12 @@ interface ProductRow {
   price: string | null
   category: string | null
   images: unknown
+  characteristics: string[] | null
 }
 
 async function queryProducts(whereSql: string, params: unknown[], orderLimitSql: string): Promise<ProductRow[]> {
   const res = await pool.query<ProductRow>(
-    `select id, name, short_description, description, price_display, price, category, images
+    `select id, name, short_description, description, price_display, price, category, images, characteristics
      from products
      where tenant_id = $1 and is_available = true ${whereSql}
      ${orderLimitSql}`,
@@ -104,7 +105,7 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
         .map((w) => {
           params.push(`%${w}%`)
           const idx = params.length
-          return `name ilike $${idx} or description ilike $${idx}`
+          return `name ilike $${idx} or description ilike $${idx} or exists (select 1 from unnest(characteristics) c where c ilike $${idx})`
         })
         .join(' or ')
       data = await queryProducts(`${priceSql} and (${clauses})`, params, `limit ${maxResults}`)
@@ -140,11 +141,13 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
       const images = Array.isArray(p.images) ? p.images : []
       const hasImage = images.length > 0
       const desc = p.short_description || p.description
+      const characteristics = p.characteristics ?? []
       return [
         `📦 *${p.name}*`,
         p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
         desc ? `📝 ${desc}` : '',
         p.category ? `🏷️ ${p.category}` : '',
+        characteristics.length > 0 ? `🔧 Características: ${characteristics.join(', ')}` : '',
         hasImage ? `🖼️ [tem imagem — use send_product_image com id: ${p.id}]` : '',
         `ID: ${p.id}`,
       ]

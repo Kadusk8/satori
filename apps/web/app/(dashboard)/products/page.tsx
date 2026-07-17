@@ -27,6 +27,7 @@ interface DBProduct {
   price_display: string | null
   category: string | null
   tags: string[]
+  characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
@@ -43,6 +44,7 @@ function mapProduct(row: DBProduct): Product {
     priceDisplay: row.price_display,
     category: row.category,
     tags: row.tags ?? [],
+    characteristics: row.characteristics ?? [],
     images: (row.images ?? []) as { url: string; thumbnailUrl: string; alt: string }[],
     isAvailable: row.is_available,
     isFeatured: row.is_featured,
@@ -98,7 +100,8 @@ export default function ProductsPage() {
         !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.category?.toLowerCase().includes(search.toLowerCase()) ||
-        p.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))
+        p.tags.some((t) => t.toLowerCase().includes(search.toLowerCase())) ||
+        p.characteristics.some((c) => c.toLowerCase().includes(search.toLowerCase()))
 
       const matchStatus =
         filterStatus === 'all' ||
@@ -127,6 +130,7 @@ export default function ProductsPage() {
         priceDisplay: data.priceDisplay,
         category: data.category,
         tags: data.tags,
+        characteristics: data.characteristics,
         images: data.images,
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,

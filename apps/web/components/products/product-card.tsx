@@ -13,6 +13,7 @@ export interface Product {
   priceDisplay: string | null
   category: string | null
   tags: string[]
+  characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
@@ -140,6 +141,19 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
             ))}
             {product.tags.length > 3 && (
               <span className="text-[10px] text-muted-foreground">+{product.tags.length - 3}</span>
+            )}
+          </div>
+        )}
+
+        {product.characteristics.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {product.characteristics.slice(0, 3).map((c) => (
+              <span key={c} className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5">
+                {c}
+              </span>
+            ))}
+            {product.characteristics.length > 3 && (
+              <span className="text-[10px] text-muted-foreground">+{product.characteristics.length - 3}</span>
             )}
           </div>
         )}
