@@ -186,16 +186,33 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
     }
   }
 
+  // JID @lid: identificador interno do WhatsApp, sem relação com o número de
+  // telefone. Alguns eventos (ex: LabelAssociationChat) só trazem o contato
+  // nesse formato — guardamos aqui, toda vez que vemos o par @lid + número
+  // real junto (via SenderAlt), pra poder resolver o contato depois só com
+  // o @lid disponível.
+  const lidValue = envelope.remoteJid.endsWith('@lid') ? envelope.remoteJid : null
+
   if (existingContact) {
     contactId = existingContact.id
     await db
       .update(contacts)
-      .set({ lastContactAt: new Date(), ...(envelope.pushName ? { whatsappName: envelope.pushName } : {}) })
+      .set({
+        lastContactAt: new Date(),
+        ...(envelope.pushName ? { whatsappName: envelope.pushName } : {}),
+        ...(lidValue ? { whatsappLid: lidValue } : {}),
+      })
       .where(eq(contacts.id, contactId))
   } else {
     const created = await db
       .insert(contacts)
-      .values({ tenantId, whatsappNumber: phoneNumber, whatsappName: envelope.pushName ?? null, lastContactAt: new Date() })
+      .values({
+        tenantId,
+        whatsappNumber: phoneNumber,
+        whatsappName: envelope.pushName ?? null,
+        lastContactAt: new Date(),
+        ...(lidValue ? { whatsappLid: lidValue } : {}),
+      })
       .returning({ id: contacts.id })
     contactId = created[0].id
   }
@@ -437,30 +454,18 @@ async function handleLabelAssociationChatEvent(tenant: TenantRow, data: LabelAss
   if (!jid || !labelId) return
 
   const labeled = data.Action?.labeled ?? data.Action?.Labeled ?? false
-  const phoneNumber = extractNumber(jid)
 
-  const existing = await pool.query<{ id: string; whatsapp_label_ids: string[] }>(
-    `select id, whatsapp_label_ids from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`,
-    [tenant.id, phoneNumber]
+  // Grava a associação bruta (etiqueta <-> JID) direto, sem tentar casar com
+  // um contato agora — isso nunca falha, mesmo que o contato ainda não
+  // exista ou o JID venha num formato inesperado (@lid, número, etc). O
+  // cruzamento com o contato certo acontece na hora de checar o bloqueio
+  // (ver isContactBlockedByTags), com o contato já existente e atualizado.
+  await pool.query(
+    `insert into whatsapp_label_associations (tenant_id, jid, label_id, labeled, updated_at)
+     values ($1, $2, $3, $4, now())
+     on conflict (tenant_id, jid, label_id) do update set labeled = excluded.labeled, updated_at = now()`,
+    [tenant.id, jid, labelId, labeled]
   )
-  let contact = existing.rows[0]
-  if (!contact) {
-    const normalized = normalizeBrazilianNumber(phoneNumber)
-    if (normalized !== phoneNumber) {
-      const fallback = await pool.query<{ id: string; whatsapp_label_ids: string[] }>(
-        `select id, whatsapp_label_ids from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`,
-        [tenant.id, normalized]
-      )
-      contact = fallback.rows[0]
-    }
-  }
-  // Contato ainda não existe na base — label só importa depois que já há conversa com ele.
-  if (!contact) return
-
-  const current = contact.whatsapp_label_ids ?? []
-  const nextIds = labeled ? Array.from(new Set([...current, labelId])) : current.filter((id) => id !== labelId)
-
-  await pool.query(`update contacts set whatsapp_label_ids = $1 where id = $2`, [nextIds, contact.id])
 }
 
 export async function findTenantByWebhookSecret(secret: string): Promise<TenantRow | null> {

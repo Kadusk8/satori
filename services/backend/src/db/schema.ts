@@ -62,6 +62,7 @@ export const contacts = pgTable('contacts', {
   whatsappNumber: text('whatsapp_number').notNull(),
   whatsappName: text('whatsapp_name'),
   customName: text('custom_name'),
+  whatsappLid: text('whatsapp_lid'),
   lastContactAt: timestamp('last_contact_at', { withTimezone: true }),
 })
 

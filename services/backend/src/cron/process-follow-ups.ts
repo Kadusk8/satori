@@ -150,8 +150,10 @@ export async function runProcessFollowUps(): Promise<{ processed: number; failed
     `select f.id, f.tenant_id, f.contact_id, f.conversation_id, f.ai_agent_id, f.attempt_number, f.context,
             c.whatsapp_number as contact_number, c.whatsapp_name as contact_whatsapp_name, c.custom_name as contact_custom_name,
             c.tags as contact_tags,
-            (select array_agg(lower(wl.name)) from whatsapp_labels wl
-             where wl.tenant_id = c.tenant_id and wl.label_id = any(c.whatsapp_label_ids) and wl.deleted = false) as whatsapp_label_names,
+            (select array_agg(distinct lower(wl.name)) from whatsapp_label_associations wla
+             join whatsapp_labels wl on wl.tenant_id = wla.tenant_id and wl.label_id = wla.label_id and wl.deleted = false
+             where wla.tenant_id = c.tenant_id and wla.labeled = true
+               and wla.jid in (c.whatsapp_lid, c.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
             ag.model as agent_model, ag.system_prompt as agent_system_prompt,
             ag.follow_up_delay_hours as agent_follow_up_delay_hours, ag.follow_up_max_attempts as agent_follow_up_max_attempts,

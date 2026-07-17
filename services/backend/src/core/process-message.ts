@@ -282,8 +282,10 @@ export async function processMessage(conversationId: string): Promise<{ success:
   const convRes = await pool.query<ConversationRow>(
     `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode, c.metadata,
             ct.whatsapp_number, ct.tags as contact_tags,
-            (select array_agg(lower(wl.name)) from whatsapp_labels wl
-             where wl.tenant_id = ct.tenant_id and wl.label_id = any(ct.whatsapp_label_ids) and wl.deleted = false) as whatsapp_label_names,
+            (select array_agg(distinct lower(wl.name)) from whatsapp_label_associations wla
+             join whatsapp_labels wl on wl.tenant_id = wla.tenant_id and wl.label_id = wla.label_id and wl.deleted = false
+             where wla.tenant_id = ct.tenant_id and wla.labeled = true
+               and wla.jid in (ct.whatsapp_lid, ct.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key

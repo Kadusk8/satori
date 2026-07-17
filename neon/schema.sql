@@ -366,6 +366,11 @@ CREATE TABLE IF NOT EXISTS contacts (
   -- diferente de `tags` que é só do painel/CRM) atualmente associadas a
   -- este contato. Resolvidos pra nome via a tabela whatsapp_labels.
   whatsapp_label_ids TEXT[]    NOT NULL DEFAULT '{}',
+  -- JID @lid (identificador interno do WhatsApp, não é o número de telefone)
+  -- usado em alguns eventos — ex: LabelAssociationChat só traz o JID nesse
+  -- formato, sem número real. Guardamos pra poder resolver o contato quando
+  -- só temos o @lid disponível.
+  whatsapp_lid     TEXT,
   metadata         JSONB       NOT NULL DEFAULT '{}',
   first_contact_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_contact_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -379,6 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_tenant_id       ON contacts (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_whatsapp_number ON contacts (tenant_id, whatsapp_number);
 CREATE INDEX IF NOT EXISTS idx_contacts_last_contact_at ON contacts (tenant_id, last_contact_at DESC);
 CREATE INDEX IF NOT EXISTS idx_contacts_tags            ON contacts USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_contacts_whatsapp_lid     ON contacts (tenant_id, whatsapp_lid) WHERE whatsapp_lid IS NOT NULL;
 
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
 
@@ -419,6 +425,39 @@ CREATE POLICY "super_admin_full_access" ON whatsapp_labels
   FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
 
 CREATE POLICY "service_role_full_access" ON whatsapp_labels
+  FOR ALL USING (auth.role() = 'service_role');
+
+
+-- ================================================================
+-- TABELA: whatsapp_label_associations
+-- Associação bruta etiqueta <-> JID, por tenant. Gravada direto do evento
+-- LabelAssociationChat, SEM depender de já existir um contato casando com
+-- esse JID — assim a gravação nunca falha silenciosamente. O cruzamento com
+-- o contato (via contacts.whatsapp_lid ou número) acontece só na hora de
+-- checar o bloqueio, com o contato já existente e atualizado.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS whatsapp_label_associations (
+  tenant_id  UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  jid        TEXT        NOT NULL,
+  label_id   TEXT        NOT NULL,
+  labeled    BOOLEAN     NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, jid, label_id)
+);
+
+COMMENT ON TABLE whatsapp_label_associations IS 'Associação bruta etiqueta<->JID do WhatsApp, gravada direto do evento sem exigir contato já resolvido.';
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_label_assoc_jid ON whatsapp_label_associations (tenant_id, jid) WHERE labeled = true;
+
+ALTER TABLE whatsapp_label_associations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON whatsapp_label_associations
+  FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "super_admin_full_access" ON whatsapp_label_associations
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+
+CREATE POLICY "service_role_full_access" ON whatsapp_label_associations
   FOR ALL USING (auth.role() = 'service_role');
 
 
