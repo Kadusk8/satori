@@ -119,6 +119,13 @@ function extractNumber(jid: string, jidAlt?: string): string {
   return resolved.replace(/@.*$/, '').replace(/:\d+$/, '')
 }
 
+// Normaliza um jid @lid pro formato "<user>@lid", removendo o sufixo de device
+// (":N"), pra bater exatamente com o jid gravado nas associações de etiqueta.
+// No-op em jid já limpo ou que não termina em @lid.
+function normalizeLid(jid: string): string {
+  return jid.replace(/:\d+(?=@lid$)/, '')
+}
+
 function normalizeBrazilianNumber(phone: string): string {
   if (/^55\d{11}$/.test(phone)) return phone.slice(0, 4) + phone.slice(5)
   return phone
@@ -156,6 +163,10 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   if (envelope.fromMe) return null
   if (envelope.isGroup || envelope.remoteJid.includes('@g.us')) return null
 
+  // Diagnóstico: confirma que este build do Evolution Go entrega o SenderAlt
+  // (de onde extraímos o @lid pra casar etiqueta nativa). Remover se ficar ruidoso.
+  console.log(`[webhook] msg jids: chat=${envelope.remoteJid} senderAlt=${envelope.remoteJidAlt ?? '(vazio)'}`)
+
   const phoneNumber = extractNumber(envelope.remoteJid, envelope.remoteJidAlt)
   const { text, contentType, mediaUrl } = parseMessage(data)
   const adReferral = extractAdReferral(data)
@@ -187,11 +198,17 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   }
 
   // JID @lid: identificador interno do WhatsApp, sem relação com o número de
-  // telefone. Alguns eventos (ex: LabelAssociationChat) só trazem o contato
-  // nesse formato — guardamos aqui, toda vez que vemos o par @lid + número
-  // real junto (via SenderAlt), pra poder resolver o contato depois só com
-  // o @lid disponível.
-  const lidValue = envelope.remoteJid.endsWith('@lid') ? envelope.remoteJid : null
+  // telefone. Eventos de etiqueta (LabelAssociationChat) só trazem o contato
+  // nesse formato, então precisamos capturar o @lid de TODA mensagem pra poder
+  // casar a etiqueta depois. Em mensagem normal o `Chat` é o número
+  // (@s.whatsapp.net) e o @lid vem no `SenderAlt` (=remoteJidAlt); em alguns
+  // casos é o inverso. Pegamos de qualquer um dos dois e normalizamos.
+  const rawLid = envelope.remoteJid.endsWith('@lid')
+    ? envelope.remoteJid
+    : envelope.remoteJidAlt?.endsWith('@lid')
+      ? envelope.remoteJidAlt
+      : null
+  const lidValue = rawLid ? normalizeLid(rawLid) : null
 
   if (existingContact) {
     contactId = existingContact.id
@@ -449,9 +466,12 @@ async function handleLabelEditEvent(tenant: TenantRow, data: LabelEditEventData)
 async function handleLabelAssociationChatEvent(tenant: TenantRow, data: LabelAssociationChatEventData): Promise<void> {
   console.log('[webhook] payload de LabelAssociationChat recebido:', JSON.stringify(data))
 
-  const jid = data.JID ?? data.Jid ?? data.jid
+  const rawJid = data.JID ?? data.Jid ?? data.jid
   const labelId = data.LabelID ?? data.labelId
-  if (!jid || !labelId) return
+  if (!rawJid || !labelId) return
+  // Normaliza pro mesmo formato do @lid capturado das mensagens (sem device),
+  // pra garantir o casamento exato na checagem de bloqueio.
+  const jid = normalizeLid(rawJid)
 
   const labeled = data.Action?.labeled ?? data.Action?.Labeled ?? false
 
