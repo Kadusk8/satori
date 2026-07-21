@@ -9,6 +9,7 @@ import { contacts, conversations, messages, users } from '../db/schema.js'
 import { uploadAudio } from '../shared/cloudinary.js'
 import { processMessage } from './process-message.js'
 import { triggerEvent, tenantChannel, conversationChannel } from '../shared/realtime.js'
+import { isContactBlockedByTags } from '../shared/contact-block.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -154,20 +155,111 @@ function parseMessage(data: EvolutionMessageData): { text: string | null; conten
   return { text: null, contentType: 'text', mediaUrl: null }
 }
 
+// Bloqueio por etiqueta usando os JIDs VIVOS da mensagem que acabou de chegar
+// (o @lid do próprio remetente + o número), sem depender de mapeamento salvo
+// antes no contato. "Pesquisa as etiquetas" desses JIDs direto na tabela de
+// associações (fonte confiável, vinda dos eventos) + tags de CRM, e compara com
+// tenants.blocked_labels. É o único identificador que o WhatsApp entrega pra
+// etiqueta nativa, mas aqui usamos o mais fresco possível.
+async function isMessageBlockedByLabel(tenantId: string, contactId: string, liveJids: string[]): Promise<boolean> {
+  const res = await pool.query<{ blocked_labels: string[]; contact_tags: string[]; label_names: string[] | null }>(
+    `select t.blocked_labels, c.tags as contact_tags,
+       (select array_agg(distinct lower(wl.name))
+        from whatsapp_label_associations wla
+        join whatsapp_labels wl on wl.tenant_id = wla.tenant_id and wl.label_id = wla.label_id and wl.deleted = false
+        where wla.tenant_id = t.id and wla.labeled = true and wla.jid = any($3::text[])) as label_names
+     from tenants t join contacts c on c.id = $2
+     where t.id = $1`,
+    [tenantId, contactId, liveJids]
+  )
+  const row = res.rows[0]
+  if (!row) return false
+  return isContactBlockedByTags(row.blocked_labels, row.contact_tags, row.label_names)
+}
+
+// Mensagem `fromMe` (enviada pela própria conta). Pode ser eco de um envio nosso
+// (IA/painel) — nesse caso ignora — ou uma resposta que o dono digitou direto no
+// celular. No segundo caso, conta como "humano assumiu": salva a mensagem no
+// histórico, pausa a IA (status human_handling) e cancela follow-ups pendentes.
+async function handleOwnOutgoingMessage(tenant: TenantRow, envelope: NonNullable<ReturnType<typeof readEnvelope>>, phoneNumber: string, data: EvolutionMessageData): Promise<void> {
+  const { text, contentType, mediaUrl } = parseMessage(data)
+
+  // Eco de um envio nosso? Casa pelo ID da mensagem OU (proteção contra corrida
+  // entre o eco e a gravação do ID) por conteúdo idêntico enviado por nós há
+  // pouco. Se for eco, não faz nada — senão a própria IA se desligaria.
+  const known = await pool.query<{ x: number }>(
+    `select 1 as x from messages
+     where tenant_id = $1
+       and ( whatsapp_message_id = $2
+          or ($3::text is not null and sender_type in ('ai','human') and content = $3 and created_at > now() - interval '2 minutes') )
+     limit 1`,
+    [tenant.id, envelope.id, text]
+  )
+  if (known.rows[0]) return
+
+  // Resposta manual no celular — resolve contato e conversa ativa.
+  let contactId = (await pool.query<{ id: string }>(`select id from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`, [tenant.id, phoneNumber])).rows[0]?.id
+  if (!contactId) {
+    const normalized = normalizeBrazilianNumber(phoneNumber)
+    if (normalized !== phoneNumber) {
+      contactId = (await pool.query<{ id: string }>(`select id from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`, [tenant.id, normalized])).rows[0]?.id
+    }
+  }
+  if (!contactId) return
+
+  const conv = (await pool.query<{ id: string; status: string }>(
+    `select id, status from conversations where tenant_id = $1 and contact_id = $2 and status <> 'closed' order by created_at desc limit 1`,
+    [tenant.id, contactId]
+  )).rows[0]
+  if (!conv) return
+
+  // Salva a mensagem do humano pra aparecer no painel.
+  await pool.query(
+    `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url, whatsapp_message_id, created_at)
+     values ($1, $2, $3, 'human', $4, $5, $6, $7, now())`,
+    [tenant.id, conv.id, contactId, text, contentType, mediaUrl, envelope.id]
+  )
+
+  // Se a IA ainda estava no comando, passa pra atendimento humano e para os follow-ups.
+  if (conv.status === 'ai_handling') {
+    await pool.query(`update conversations set status = 'human_handling', autonomous_mode = false, last_message_at = now() where id = $1`, [conv.id])
+    await pool.query(`update follow_ups set status = 'cancelled' where conversation_id = $1 and status = 'pending'`, [conv.id])
+  } else {
+    await pool.query(`update conversations set last_message_at = now() where id = $1`, [conv.id])
+  }
+
+  try {
+    await triggerEvent(conversationChannel(conv.id), 'message:new', {
+      sender_type: 'human', content: text, content_type: contentType, media_url: mediaUrl, created_at: new Date().toISOString(), contact_id: contactId,
+    })
+    await triggerEvent(tenantChannel(tenant.id), 'conversation:changed', { conversationId: conv.id })
+  } catch (err) {
+    console.warn('[webhook] Erro ao disparar Realtime (msg manual do dono):', err)
+  }
+}
+
 async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData): Promise<{ conversationId: string; whatsappMessageId: string } | null> {
   const envelope = readEnvelope(data)
   if (!envelope) {
     console.error('[webhook] payload de mensagem sem Info reconhecível:', JSON.stringify(data))
     return null
   }
-  if (envelope.fromMe) return null
   if (envelope.isGroup || envelope.remoteJid.includes('@g.us')) return null
 
   // Diagnóstico: confirma que este build do Evolution Go entrega o SenderAlt
   // (de onde extraímos o @lid pra casar etiqueta nativa). Remover se ficar ruidoso.
-  console.log(`[webhook] msg jids: chat=${envelope.remoteJid} senderAlt=${envelope.remoteJidAlt ?? '(vazio)'}`)
+  console.log(`[webhook] msg jids: chat=${envelope.remoteJid} senderAlt=${envelope.remoteJidAlt ?? '(vazio)'} fromMe=${envelope.fromMe}`)
 
   const phoneNumber = extractNumber(envelope.remoteJid, envelope.remoteJidAlt)
+
+  // Mensagem enviada pela própria conta (fromMe): ou é eco de um envio nosso
+  // (IA/painel) — ignorado — ou uma resposta que o dono digitou direto no
+  // celular. Nesse segundo caso conta como "humano assumiu": pausa IA/follow-up.
+  if (envelope.fromMe) {
+    await handleOwnOutgoingMessage(tenant, envelope, phoneNumber, data)
+    return null
+  }
+
   const { text, contentType, mediaUrl } = parseMessage(data)
   const adReferral = extractAdReferral(data)
 
@@ -233,6 +325,15 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
       .returning({ id: contacts.id })
     contactId = created[0].id
   }
+
+  // Bloqueio por etiqueta com o @lid VIVO desta mensagem (+ número). Se o
+  // remetente tem etiqueta de bloqueio, a IA não responde — a mensagem ainda é
+  // salva e aparece no painel pro humano tratar.
+  const blockedByLabel = await isMessageBlockedByLabel(
+    tenantId,
+    contactId,
+    [lidValue, `${phoneNumber}@s.whatsapp.net`].filter((j): j is string => Boolean(j))
+  )
 
   // Busca ou cria conversa ativa
   const existingConvRows = await db
@@ -394,7 +495,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   // Cancela follow-ups pendentes do contato que respondeu
   await pool.query(`update follow_ups set status = 'replied' where contact_id = $1 and status = 'pending'`, [contactId])
 
-  return conversationStatus === 'ai_handling' ? { conversationId, whatsappMessageId: envelope.id } : null
+  return conversationStatus === 'ai_handling' && !blockedByLabel ? { conversationId, whatsappMessageId: envelope.id } : null
 }
 
 async function handleConnectionEvent(tenant: TenantRow, rawEventType: string, data: EvolutionConnectionData): Promise<void> {
