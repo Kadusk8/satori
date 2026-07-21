@@ -88,8 +88,17 @@ Esta é a tentativa número ${row.attempt_number}. Ajuste o tom conforme necess�
 
 async function processFollowUp(row: FollowUpRow): Promise<void> {
   const convRes = await pool.query<{ status: string }>(`select status from conversations where id = $1`, [row.conversation_id])
-  if (convRes.rows[0]?.status === 'closed') {
+  const convStatus = convRes.rows[0]?.status
+  if (convStatus === 'closed') {
     await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
+    return
+  }
+
+  // Humano assumiu (ou está pra assumir) o atendimento — a IA nunca manda
+  // follow-up nesse caso. Cancela todos os follow-ups pendentes dessa conversa
+  // pra não ficar reprocessando a cada execução do cron.
+  if (convStatus === 'human_handling' || convStatus === 'waiting_human') {
+    await pool.query(`update follow_ups set status = 'cancelled' where conversation_id = $1 and status = 'pending'`, [row.conversation_id])
     return
   }
 
