@@ -33,7 +33,12 @@ async function queryProducts(whereSql: string, params: unknown[], orderLimitSql:
   return res.rows
 }
 
-export async function toolSearchProducts(tenantId: string, input: Record<string, unknown>, conversationId?: string): Promise<string> {
+export async function toolSearchProducts(
+  tenantId: string,
+  input: Record<string, unknown>,
+  conversationId?: string,
+  meta?: { usedFallback?: boolean }
+): Promise<string> {
   const query = input.query ? String(input.query).trim() : ''
   const categoryParam = input.category ? String(input.category) : null
   const maxResults = Number(input.max_results ?? 8)
@@ -120,6 +125,10 @@ export async function toolSearchProducts(tenantId: string, input: Record<string,
   if (data.length === 0) {
     const params: unknown[] = priceMax ? [tenantId, priceMax] : [tenantId]
     data = await queryProducts(priceSql, params, `order by is_featured desc, random() limit ${maxResults}`)
+    // Sinaliza pro chamador que a busca não casou com nada específico e caiu na lista aleatória —
+    // usado pelo guard-rail de correção de query pra não trocar o produto quando a query "corrigida"
+    // é ruído (ex: "onde vocês", "boa tarde") e só devolveria um carro aleatório.
+    if (query && meta) meta.usedFallback = true
     // Registrar flag de qualidade se usou fallback com query não-vazia (WORKSTREAM B)
     if (query && data.length > 0 && conversationId) {
       try {
@@ -396,6 +405,7 @@ export async function resolveProductImageData(tenantId: string, productId: strin
       shortDescription: products.shortDescription,
       description: products.description,
       images: products.images,
+      characteristics: products.characteristics,
     })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
@@ -410,7 +420,15 @@ export async function resolveProductImageData(tenantId: string, productId: strin
   const imageUrl = (images[0] as Record<string, unknown>)?.url ?? images[0]
   if (!imageUrl || typeof imageUrl !== 'string') return null
 
-  const caption = [`📦 *${product.name}*`, buildImageCaptionText(product.description, product.shortDescription)]
+  // Ficha do veículo: quando o produto tem características cadastradas (Ano, Cor, Câmbio, Km...),
+  // inclui na legenda uma por linha — assim todo card mostra os dados completos mesmo se a
+  // descrição estiver pobre (ex: descrição = só o nome).
+  const characteristics = Array.isArray(product.characteristics) ? product.characteristics : []
+  const caption = [
+    `📦 *${product.name}*`,
+    buildImageCaptionText(product.description, product.shortDescription),
+    characteristics.length > 0 ? characteristics.map((c) => `▪️ ${c}`).join('\n') : '',
+  ]
     .filter(Boolean)
     .join('\n')
 

@@ -835,9 +835,23 @@ como um atendimento genérico de primeiro contato.` : ''}`
             staleQueryTerm = aiQuery
           }
         }
-        result = await toolSearchProducts(tenantId, searchInput, conversationId)
         if (queryCorrected) {
-          result = `[SISTEMA: Apresente os produtos abaixo normalmente como resultados disponíveis. NÃO mencione que houve troca de palavras. NÃO escreva "não encontrei" — há produtos no catálogo.]\n\n` + result
+          // A correção só vale se ela ACHAR um produto de verdade. Se a query corrigida cair na
+          // lista aleatória (tier 4), é porque ela virou ruído — tipicamente a mensagem atual do
+          // cliente não era um pedido de produto (ex: "de onde vocês são?", "boa tarde"), e o
+          // guard-rail sequestrou uma busca que estava certa. Nesse caso, NÃO troca o produto:
+          // roda a query original da IA (que costuma estar correta) e descarta a "correção".
+          const correctionMeta: { usedFallback?: boolean } = {}
+          const correctedResult = await toolSearchProducts(tenantId, searchInput, conversationId, correctionMeta)
+          if (!correctionMeta.usedFallback) {
+            result = `[SISTEMA: Apresente os produtos abaixo normalmente como resultados disponíveis. NÃO mencione que houve troca de palavras. NÃO escreva "não encontrei" — há produtos no catálogo.]\n\n` + correctedResult
+          } else {
+            result = await toolSearchProducts(tenantId, tu.input, conversationId)
+            queryCorrected = false
+            staleQueryTerm = null
+          }
+        } else {
+          result = await toolSearchProducts(tenantId, searchInput, conversationId)
         }
         const imgMatches = [...result.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
         lastSearchProductsWithImages = imgMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
