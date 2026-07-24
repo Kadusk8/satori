@@ -29,6 +29,19 @@ import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
 
+const LLM_FALLBACK_TEXT = 'Opa, deu uma travada aqui do meu lado 😅 me dá só um minutinho que já te respondo!'
+const LLM_FALLBACK_COOLDOWN_MS = 60_000
+// Timestamp do último envio do fallback de erro de LLM, por conversa — evita mandar a mesma
+// mensagem de novo em sequência quando o provedor fica instável/rate-limited por um tempo.
+const llmFallbackLastSentAt = new Map<string, number>()
+
+// Lock em memória (backend roda numa única réplica — ver docker-compose/Swarm) contra duas
+// execuções de processMessage rodando ao mesmo tempo pra mesma conversa. Sem isso, duas
+// mensagens do cliente espaçadas o suficiente pra escapar do buffer de 6s do webhook, mas
+// ainda dentro da janela de uma chamada de LLM lenta/travada, disparavam processMessage em
+// paralelo — cada uma podendo gerar seu próprio fallback de erro de forma independente.
+const conversationsInProgress = new Set<string>()
+
 // Helper para registrar sinais de qualidade da IA (WORKSTREAM B)
 async function recordQualityFlag(
   tenantId: string,
@@ -174,6 +187,13 @@ const STOP_WORDS = new Set([
   'quero', 'para', 'favor', 'você', 'como', 'tenho', 'esse', 'essa', 'aqui', 'mais', 'qual', 'quer', 'com', 'por',
   'uma', 'que', 'tem', 'ver', 'gostaria', 'preciso', 'pode', 'mostrar', 'produto', 'coisa', 'algo', 'isso', 'isto',
   'aquilo', 'este', 'esta',
+  // Follow-ups genéricos ("qual o valor?", "manda mais fotos") não são um pedido NOVO — são
+  // sobre o produto em foco. Sem esses termos aqui, extractCustomerKeywords() os tratava como
+  // palavra-chave própria do cliente, o guard-rail de recall (linha ~739) achava que a IA
+  // buscando por "valor"/"fotos" batia com a mensagem atual e deixava passar sem corrigir —
+  // caindo no fallback de listar produto aleatório (tools.ts tier 4) em vez do produto certo.
+  'valor', 'preço', 'preco', 'custa', 'fotos', 'foto', 'imagens', 'imagem',
+  'manda', 'mande', 'envia', 'envie', 'mostra', 'mostre',
 ])
 
 export function extractCustomerKeywords(content: string | null | undefined): string[] {
@@ -220,20 +240,26 @@ export function isPureGreeting(content: string | null | undefined): boolean {
 // cai no fallback de listar todos os produtos em campanha.
 export function matchAdReferralProduct(
   referral: { title: string | null; body: string | null },
-  adProducts: Array<{ id: string; name: string }>
-): { id: string; name: string } | null {
+  adProducts: Array<{ id: string; name: string; price_display?: string | null; price?: string | null }>
+): { id: string; name: string; priceText: string | null } | null {
   const text = `${referral.title ?? ''} ${referral.body ?? ''}`.toLowerCase().trim()
   if (!text) return null
 
+  const withPriceText = (p: { id: string; name: string; price_display?: string | null; price?: string | null }) => ({
+    id: p.id,
+    name: p.name,
+    priceText: p.price_display ?? (p.price != null ? `R$ ${Number(p.price).toFixed(2)}` : null),
+  })
+
   for (const p of adProducts) {
     const nameLower = p.name.toLowerCase()
-    if (nameLower.length > 2 && text.includes(nameLower)) return p
+    if (nameLower.length > 2 && text.includes(nameLower)) return withPriceText(p)
   }
   for (const p of adProducts) {
     // Ignora tokens puramente numéricos (ex: ano "2020") — pouco distintivos e
     // raramente citados junto com o modelo no texto curto de um anúncio.
     const words = p.name.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && /[a-zà-ÿ]/.test(w))
-    if (words.length > 0 && words.every((w) => text.includes(w))) return p
+    if (words.length > 0 && words.every((w) => text.includes(w))) return withPriceText(p)
   }
   return null
 }
@@ -279,6 +305,18 @@ export function extractFocusProductCandidate(history: MessageRow[]): { id: strin
 }
 
 export async function processMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
+  if (conversationsInProgress.has(conversationId)) {
+    return { success: true, skipped: 'Já em processamento' }
+  }
+  conversationsInProgress.add(conversationId)
+  try {
+    return await runProcessMessage(conversationId)
+  } finally {
+    conversationsInProgress.delete(conversationId)
+  }
+}
+
+async function runProcessMessage(conversationId: string): Promise<{ success: boolean; skipped?: string; outOfHours?: boolean; escalated?: boolean }> {
   const convRes = await pool.query<ConversationRow>(
     `select c.id, c.tenant_id, c.contact_id, c.status, c.autonomous_mode, c.metadata,
             ct.whatsapp_number, ct.tags as contact_tags,
@@ -512,14 +550,17 @@ export async function processMessage(conversationId: string): Promise<{ success:
   }
 
   const focusCandidate = extractFocusProductCandidate(history)
-  let focusProduct: { id: string; name: string } | null = null
+  let focusProduct: { id: string; name: string; priceText: string | null } | null = null
   if (focusCandidate) {
     const focusRows = await db
-      .select({ name: products.name })
+      .select({ name: products.name, price: products.price, priceDisplay: products.priceDisplay })
       .from(products)
       .where(and(eq(products.id, focusCandidate.id), eq(products.tenantId, tenantId), eq(products.isAvailable, true)))
       .limit(1)
-    if (focusRows[0]) focusProduct = { id: focusCandidate.id, name: focusRows[0].name }
+    if (focusRows[0]) {
+      const priceText = focusRows[0].priceDisplay ?? (focusRows[0].price != null ? `R$ ${Number(focusRows[0].price).toFixed(2)}` : null)
+      focusProduct = { id: focusCandidate.id, name: focusRows[0].name, priceText }
+    }
   }
 
   // Cliente veio de um anúncio Click-to-WhatsApp (referral gravado pelo webhook na criação
@@ -604,11 +645,14 @@ ajudar hoje — NÃO reapresente por conta própria o produto que vocês discuti
 ${focusProduct ? `
 ## Produto em foco
 O cliente estava vendo "${focusProduct.name}" (ID: ${focusProduct.id}) mais recentemente nesta conversa.
+Preço real deste produto: ${focusProduct.priceText ?? 'não cadastrado'}.
 Se — E SOMENTE SE — a mensagem ATUAL dele se referir a esse produto ("ele", "dele", "esse", "esse aí",
 "mais fotos", "tem mais?", "quanto custa?" etc. sem citar outro produto), ele está falando DESTE produto —
 use o ID acima diretamente em send_product_image / send_more_product_images, NÃO chame search_products de
-novo só pra redescobrir esse ID. Se a mensagem atual for uma saudação, uma pergunta nova ou sobre outro
-produto, IGNORE esta seção completamente — cumprimente ou busque o que ele pediu agora, sem reofertar isto.` : ''}
+novo só pra redescobrir esse ID. Se ele perguntar o preço, responda com o valor EXATO informado acima —
+NUNCA invente ou estime um valor diferente. Se a mensagem atual for uma saudação, uma pergunta nova ou
+sobre outro produto, IGNORE esta seção completamente — cumprimente ou busque o que ele pediu agora, sem
+reofertar isto.` : ''}
 ${adReferral ? `
 ## Cliente veio de anúncio
 Esta conversa começou porque o cliente clicou em um anúncio patrocinado (Facebook/Instagram Ads) e a
@@ -657,41 +701,68 @@ como um atendimento genérico de primeiro contato.` : ''}`
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
   let staleQueryTerm: string | null = null
 
+  // Loga o erro e manda o fallback fixo pro cliente — mas só se não mandou essa mesma
+  // mensagem pra essa conversa nos últimos LLM_FALLBACK_COOLDOWN_MS (rate limit/instabilidade
+  // do provedor tende a persistir por um tempo, e sem esse cooldown cada mensagem nova do
+  // cliente durante a janela de erro geraria seu próprio "deu uma travada" duplicado).
+  const logAndSendLLMFailure = async (type: string, message: string): Promise<void> => {
+    console.error(`[process-message] Erro no LLM (${llmProvider}, ${type}):`, message)
+    try {
+      await pool.query(
+        `insert into ai_error_logs (tenant_id, ai_agent_id, conversation_id, provider, error_type, message)
+         values ($1, $2, $3, $4, $5, $6)`,
+        [tenantId, agent.id, conversationId, llmProvider, type, message.slice(0, 2000)]
+      )
+    } catch (logErr) {
+      console.error('[process-message] Erro ao registrar ai_error_logs:', logErr)
+    }
+    const lastSent = llmFallbackLastSentAt.get(conversationId) ?? 0
+    if (Date.now() - lastSent < LLM_FALLBACK_COOLDOWN_MS) return
+    try {
+      const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
+      await evo.sendText(contactNumber, LLM_FALLBACK_TEXT)
+      llmFallbackLastSentAt.set(conversationId, Date.now())
+    } catch (sendErr) {
+      console.error('[process-message] Erro ao enviar fallback de erro de LLM:', sendErr)
+    }
+  }
+
   for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
     let response: Awaited<ReturnType<typeof callLLM>>
+    const llmParams = {
+      model: agent.model ?? 'claude-sonnet-4-20250514',
+      system: systemPrompt,
+      messages: loopMessages,
+      tools: allowedTools as LLMTool[],
+      maxTokens: agent.max_tokens ?? 1024,
+      temperature: Number(agent.temperature ?? 0.7),
+      provider: llmProvider,
+      anthropicApiKey: resolvedAnthropicKey ?? undefined,
+      openaiApiKey: resolvedOpenaiKey ?? undefined,
+      geminiApiKey: resolvedGeminiKey ?? undefined,
+      openrouterApiKey: resolvedOpenrouterKey ?? undefined,
+    }
     try {
-      response = await callLLM({
-        model: agent.model ?? 'claude-sonnet-4-20250514',
-        system: systemPrompt,
-        messages: loopMessages,
-        tools: allowedTools as LLMTool[],
-        maxTokens: agent.max_tokens ?? 1024,
-        temperature: Number(agent.temperature ?? 0.7),
-        provider: llmProvider,
-        anthropicApiKey: resolvedAnthropicKey ?? undefined,
-        openaiApiKey: resolvedOpenaiKey ?? undefined,
-        geminiApiKey: resolvedGeminiKey ?? undefined,
-        openrouterApiKey: resolvedOpenrouterKey ?? undefined,
-      })
+      response = await callLLM(llmParams)
     } catch (llmErr) {
       const { type, message } = classifyLLMError(llmErr)
-      console.error(`[process-message] Erro no LLM (${llmProvider}, ${type}):`, message)
-      try {
-        await pool.query(
-          `insert into ai_error_logs (tenant_id, ai_agent_id, conversation_id, provider, error_type, message)
-           values ($1, $2, $3, $4, $5, $6)`,
-          [tenantId, agent.id, conversationId, llmProvider, type, message.slice(0, 2000)]
-        )
-      } catch (logErr) {
-        console.error('[process-message] Erro ao registrar ai_error_logs:', logErr)
+      // Rate limit de TPM costuma liberar em poucos segundos — tenta mais 1x antes de desistir.
+      // Foi a causa confirmada da maioria dos "deu uma travada" em produção (rate limit da
+      // OpenAI batendo repetidamente no mesmo agente).
+      if (type === 'rate_limited') {
+        console.warn(`[process-message] Rate limit no LLM (${llmProvider}), tentando de novo em 3s...`)
+        await new Promise((resolve) => setTimeout(resolve, 3000))
+        try {
+          response = await callLLM(llmParams)
+        } catch (retryErr) {
+          const retryClassified = classifyLLMError(retryErr)
+          await logAndSendLLMFailure(retryClassified.type, retryClassified.message)
+          return { success: false, skipped: `Erro de LLM (${retryClassified.type}, retry falhou)` }
+        }
+      } else {
+        await logAndSendLLMFailure(type, message)
+        return { success: false, skipped: `Erro de LLM (${type})` }
       }
-      try {
-        const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
-        await evo.sendText(contactNumber, 'Opa, deu uma travada aqui do meu lado 😅 me dá só um minutinho que já te respondo!')
-      } catch (sendErr) {
-        console.error('[process-message] Erro ao enviar fallback de erro de LLM:', sendErr)
-      }
-      return { success: false, skipped: `Erro de LLM (${type})` }
     }
 
     if (response.stopReason !== 'tool_use') {
