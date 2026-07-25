@@ -706,6 +706,12 @@ mensagem inicial dele foi gerada automaticamente a partir desse clique — não 
 é resposta direta ao que ele acabou de ver no anúncio. Assuma que o interesse já está nos produtos em
 campanha, sem forçá-lo a explicar o que já demonstrou interesse.
 ${focusProduct ? `Pelo conteúdo do anúncio, tudo indica que ele viu "${focusProduct.name}" (já coberto na seção "Produto em foco" acima) — confirme com naturalidade e siga direto pra apresentar os diferenciais dele.` : adProducts.length > 0 ? `Produtos atualmente em campanha: ${adProductsListText}. Pergunte de forma natural e direta qual desses chamou a atenção no anúncio, sem soar como um menu.` : `Nenhum produto está marcado como "em anúncio" no momento — trate como um atendimento normal, buscando pelo que o cliente pedir.`}
+O cliente JÁ VIU a foto e as infos principais do carro no próprio anúncio — não o trate como se ele não
+soubesse de nada. Seja DIRETO e CONFIANTE: responda exatamente o que ele perguntou (ex: se perguntou sobre
+restrição de nome / financiamento, responda isso de forma objetiva) numa ÚNICA mensagem enxuta, sem encher
+de descrição genérica ("ótimo custo-benefício", "espaço confortável") e sem rodapé de "estou à disposição".
+A foto do carro sai junto com a sua mensagem — então NÃO escreva "aqui está a imagem" nem anuncie que vai
+mandar foto; só fale com o cliente como um vendedor que já está mostrando o carro.
 Conduza ativamente pra gerar interesse e avançar rumo a um agendamento ou fechamento — não trate isso
 como um atendimento genérico de primeiro contato.` : ''}`
 
@@ -1076,9 +1082,48 @@ como um atendimento genérico de primeiro contato.` : ''}`
     }
   }
 
-  // Salva e envia resposta da IA
-  if (finalText) {
-    const useAudio = !wasEscalated && clientSentAudio && agent.audio_response_enabled && agent.voice_id && tenantElevenlabsKey
+  // UMA mensagem só (foto + legenda) em vez de duas (texto solto + card da foto): é o
+  // comportamento natural de um vendedor no WhatsApp — manda a foto do carro já com a mensagem
+  // escrita junto. Não junta no modo áudio (não dá pra legendar áudio) nem se a legenda ficaria
+  // longa demais pro WhatsApp. A ficha do veículo (linhas ▪️) do card é anexada ao texto da IA.
+  const useAudio = !wasEscalated && clientSentAudio && agent.audio_response_enabled && agent.voice_id && !!tenantElevenlabsKey
+  const specLines = deferredImage ? deferredImage.caption.split('\n').filter((l) => l.trim().startsWith('▪️')) : []
+  const mergedCaption =
+    deferredImage && finalText ? (specLines.length > 0 ? `${finalText}\n\n${specLines.join('\n')}` : finalText) : ''
+  const willMerge = !!deferredImage && !!finalText && !useAudio && mergedCaption.length <= 900
+
+  if (willMerge && deferredImage) {
+    try {
+      const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
+      const composingMs = Math.min(6000, Math.max(1200, mergedCaption.length * 20 + Math.floor(Math.random() * 600)))
+      await evo.sendPresence(contactNumber, 'composing', composingMs)
+      await new Promise<void>((r) => setTimeout(r, composingMs + 200))
+      await evo.sendMedia(contactNumber, deferredImage.imageUrl, mergedCaption)
+    } catch (sendErr) {
+      console.error('[process-message] Erro ao enviar foto+legenda (mensagem única):', sendErr)
+    }
+    const savedImgMsg = await pool.query<{ id: string; created_at: Date }>(
+      `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, media_url, ai_tool_calls)
+       values ($1, $2, $3, 'ai', $4, 'image', $5, $6) returning id, created_at`,
+      [tenantId, conversationId, contactId, mergedCaption, deferredImage.imageUrl, allToolCalls.length > 0 ? JSON.stringify(allToolCalls) : null]
+    )
+    const imgMsgRow = savedImgMsg.rows[0]
+    if (imgMsgRow) {
+      await triggerEvent(conversationChannel(conversationId), 'message:new', {
+        id: imgMsgRow.id,
+        sender_type: 'ai',
+        content: mergedCaption,
+        content_type: 'image',
+        media_url: deferredImage.imageUrl,
+        created_at: imgMsgRow.created_at.toISOString(),
+        contact_id: contactId,
+      })
+    }
+    deferredImage = null // já enviada junto com o texto — não cair no bloco de imagem separada
+  }
+
+  // Salva e envia resposta da IA (texto/áudio) — só quando NÃO foi juntada com a foto acima
+  if (finalText && !willMerge) {
     let sentContentType: 'text' | 'audio' = 'text'
 
     if (useAudio && agent.voice_id && tenantElevenlabsKey) {
