@@ -406,6 +406,8 @@ export async function resolveProductImageData(tenantId: string, productId: strin
       description: products.description,
       images: products.images,
       characteristics: products.characteristics,
+      price: products.price,
+      priceDisplay: products.priceDisplay,
     })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
@@ -420,12 +422,24 @@ export async function resolveProductImageData(tenantId: string, productId: strin
   const imageUrl = (images[0] as Record<string, unknown>)?.url ?? images[0]
   if (!imageUrl || typeof imageUrl !== 'string') return null
 
+  // Preço: dado FIXO do produto — aparece sempre no card (quando cadastrado), junto do carro.
+  // price_display numérico ("36.900,00") ganha o prefixo "R$"; texto livre ("Sob consulta") sai
+  // como está; sem nenhum dos dois, não mostra linha de preço (produto sem preço não quebra nada).
+  const priceText = product.priceDisplay
+    ? /^\s*\d/.test(product.priceDisplay)
+      ? `R$ ${product.priceDisplay}`
+      : product.priceDisplay
+    : product.price != null
+    ? `R$ ${Number(product.price).toFixed(2)}`
+    : null
+
   // Ficha do veículo: quando o produto tem características cadastradas (Ano, Cor, Câmbio, Km...),
   // inclui na legenda uma por linha — assim todo card mostra os dados completos mesmo se a
   // descrição estiver pobre (ex: descrição = só o nome).
   const characteristics = Array.isArray(product.characteristics) ? product.characteristics : []
   const caption = [
     `📦 *${product.name}*`,
+    priceText ? `💰 ${priceText}` : '',
     buildImageCaptionText(product.description, product.shortDescription),
     characteristics.length > 0 ? characteristics.map((c) => `▪️ ${c}`).join('\n') : '',
   ]
