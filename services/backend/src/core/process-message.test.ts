@@ -284,6 +284,15 @@ describe('stripRoboticClosers', () => {
     expect(stripRoboticClosers(input)).toBe('O valor é R$ 50.900,00 pra Outlander.')
   })
 
+  it('corta o clichê "estou à disposição" mesmo no MEIO da mensagem (caso real 20:05)', () => {
+    const input =
+      'Aqui está a imagem do Lifan X60 1.8 16V VVT a gasolina. Esse SUV oferece um ótimo custo-benefício, com espaço interno confortável e uma dirigibilidade agradável. Se você tiver interesse em saber mais ou agendar uma visita, estou à disposição! Sobre a questão da restrição no nome, para financiamento, a aprovação depende de análise das financeiras parceiras. Posso te ajudar a iniciar esse processo, se desejar.'
+    const out = stripRoboticClosers(input)
+    expect(out).not.toContain('à disposição')
+    expect(out).toContain('Sobre a questão da restrição no nome')
+    expect(out).toContain('Aqui está a imagem do Lifan X60')
+  })
+
   it('mantém uma pergunta/CTA de verdade (não é clichê de fechamento)', () => {
     const input = 'Essa Strada é 2022, só 109 mil km. Quer que eu já veja um horário pra você ver de perto?'
     expect(stripRoboticClosers(input)).toBe(input)

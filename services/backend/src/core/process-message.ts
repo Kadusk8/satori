@@ -237,42 +237,42 @@ export function isPureGreeting(content: string | null | undefined): boolean {
 // resposta ("estou à disposição", "é só me avisar", "se precisar de mais informações...") — a
 // marca registrada de robô. O prompt já pede pra não fazer, mas o modelo desobedece; este
 // filtro determinístico garante que esse rodapé nunca chegue ao cliente, independente do modelo.
+// Padrões fortes o bastante pra serem removidos em QUALQUER posição da mensagem (não só no fim):
+// uma frase que bate com um destes é puro clichê de fechamento, nunca conteúdo útil.
 const ROBOTIC_CLOSER_PATTERNS: RegExp[] = [
   /(estou|fico|estamos|estarei)\s+(à|a)\s+disposi[çc][ãa]o/i,
-  /estou\s+(por\s+aqui|aqui)\b.{0,25}(ajud|dispos|qualquer|precisar|d[úu]vida)?/i,
+  /estou\s+por\s+aqui/i,
+  /estou\s+aqui\s+(pra|para)\s+(ajud|o que)/i,
   /\b[ée]\s+s[óo]\s+(me\s+)?(avisar|chamar|falar)\b/i,
   /\bs[óo]\s+(me\s+)?(chamar|avisar)\b/i,
   /qualquer\s+(coisa|d[úu]vida)[\s,].{0,45}(chama|avisar|aqui|disposi|pergunt|ajud)/i,
   /se\s+precisar.{0,70}(avisar|chamar|disposi|informa|d[úu]vida|entrar\s+em\s+contato|me\s+chama)/i,
-  /conte\s+comigo/i,
+  /conte\s+comigo\b/i,
   /n[ãa]o\s+hesite\s+em/i,
-  /estou\s+aqui\s+(pra|para)\s+(ajud|o que)/i,
 ]
 
-// Remove do FINAL do texto as frases que forem puro clichê de fechamento (e emojis/pontuação
-// que sobrarem soltos). Só age no rabo da mensagem — nunca corta conteúdo do meio. Preserva
-// decimais/preços (só quebra sentença quando há espaço após . ! ?) e nunca devolve vazio.
+// Remove as frases que forem puro clichê de fechamento ("estou à disposição", "é só me avisar",
+// "se precisar de mais informações...") de QUALQUER posição do texto — o modelo cola isso tanto
+// no fim quanto no meio da mensagem. Também tira emoji/pontuação que fica órfão ao lado de um
+// clichê removido (mas preserva emoji de final legítimo, ex: "Claro! 👇"). Preserva decimais/
+// preços (só quebra sentença quando há espaço após . ! ?) e NUNCA devolve vazio.
 export function stripRoboticClosers(text: string | null | undefined): string {
   if (!text) return text ?? ''
   const trimmed = text.trim()
   const parts = trimmed.split(/(?<=[.!?])\s+/)
   const isCloser = (s: string) => ROBOTIC_CLOSER_PATTERNS.some((re) => re.test(s))
   const isEmojiOrPunctOnly = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, ' ').trim().length === 0
-  while (parts.length > 1) {
-    const last = parts[parts.length - 1]
-    if (isCloser(last)) {
-      parts.pop()
-      continue
+
+  const closerFlags = parts.map(isCloser)
+  const remove = parts.map((_, i) => closerFlags[i])
+  // Emoji/pontuação solta só sai se um vizinho imediato for um clichê que está sendo removido
+  // (ex: "Estou à disposição! 🚗" → tira o 🚗). Emoji de final legítimo ("Claro! 👇") fica.
+  for (let i = 0; i < parts.length; i++) {
+    if (isEmojiOrPunctOnly(parts[i]) && ((i > 0 && closerFlags[i - 1]) || (i < parts.length - 1 && closerFlags[i + 1]))) {
+      remove[i] = true
     }
-    // Emoji/pontuação solta no fim só é removida se ela estiver DECORANDO um clichê logo antes
-    // (ex: "Estou à disposição! 🚗") — nunca num final legítimo curto ("Claro! 👇").
-    if (isEmojiOrPunctOnly(last) && isCloser(parts[parts.length - 2])) {
-      parts.pop()
-      continue
-    }
-    break
   }
-  const result = parts.join(' ').trim()
+  const result = parts.filter((_, i) => !remove[i]).join(' ').trim()
   return result.length > 0 ? result : trimmed
 }
 
