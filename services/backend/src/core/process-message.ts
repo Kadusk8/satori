@@ -233,6 +233,49 @@ export function isPureGreeting(content: string | null | undefined): boolean {
   return PURE_GREETING_RE.test(cleaned)
 }
 
+// Frases-clichê de fechamento que o modelo (gpt-4o principalmente) cola no FIM de quase toda
+// resposta ("estou à disposição", "é só me avisar", "se precisar de mais informações...") — a
+// marca registrada de robô. O prompt já pede pra não fazer, mas o modelo desobedece; este
+// filtro determinístico garante que esse rodapé nunca chegue ao cliente, independente do modelo.
+const ROBOTIC_CLOSER_PATTERNS: RegExp[] = [
+  /(estou|fico|estamos|estarei)\s+(à|a)\s+disposi[çc][ãa]o/i,
+  /estou\s+(por\s+aqui|aqui)\b.{0,25}(ajud|dispos|qualquer|precisar|d[úu]vida)?/i,
+  /\b[ée]\s+s[óo]\s+(me\s+)?(avisar|chamar|falar)\b/i,
+  /\bs[óo]\s+(me\s+)?(chamar|avisar)\b/i,
+  /qualquer\s+(coisa|d[úu]vida)[\s,].{0,45}(chama|avisar|aqui|disposi|pergunt|ajud)/i,
+  /se\s+precisar.{0,70}(avisar|chamar|disposi|informa|d[úu]vida|entrar\s+em\s+contato|me\s+chama)/i,
+  /conte\s+comigo/i,
+  /n[ãa]o\s+hesite\s+em/i,
+  /estou\s+aqui\s+(pra|para)\s+(ajud|o que)/i,
+]
+
+// Remove do FINAL do texto as frases que forem puro clichê de fechamento (e emojis/pontuação
+// que sobrarem soltos). Só age no rabo da mensagem — nunca corta conteúdo do meio. Preserva
+// decimais/preços (só quebra sentença quando há espaço após . ! ?) e nunca devolve vazio.
+export function stripRoboticClosers(text: string | null | undefined): string {
+  if (!text) return text ?? ''
+  const trimmed = text.trim()
+  const parts = trimmed.split(/(?<=[.!?])\s+/)
+  const isCloser = (s: string) => ROBOTIC_CLOSER_PATTERNS.some((re) => re.test(s))
+  const isEmojiOrPunctOnly = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, ' ').trim().length === 0
+  while (parts.length > 1) {
+    const last = parts[parts.length - 1]
+    if (isCloser(last)) {
+      parts.pop()
+      continue
+    }
+    // Emoji/pontuação solta no fim só é removida se ela estiver DECORANDO um clichê logo antes
+    // (ex: "Estou à disposição! 🚗") — nunca num final legítimo curto ("Claro! 👇").
+    if (isEmojiOrPunctOnly(last) && isCloser(parts[parts.length - 2])) {
+      parts.pop()
+      continue
+    }
+    break
+  }
+  const result = parts.join(' ').trim()
+  return result.length > 0 ? result : trimmed
+}
+
 // Tenta identificar QUAL produto em campanha o cliente viu, comparando o
 // título/corpo do anúncio (referral do Click-to-WhatsApp) contra os nomes dos
 // produtos marcados como "em anúncio". Match simples (substring), suficiente
@@ -753,10 +796,20 @@ como um atendimento genérico de primeiro contato.` : ''}`
       // Foi a causa confirmada da maioria dos "deu uma travada" em produção (rate limit da
       // OpenAI batendo repetidamente no mesmo agente).
       if (type === 'rate_limited') {
-        console.warn(`[process-message] Rate limit no LLM (${llmProvider}), tentando de novo em 3s...`)
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+        // Rate limit de TPM é POR MODELO (cada modelo tem seu bucket). Em vez de insistir no
+        // mesmo modelo congestionado, cai num alternativo com limite próprio. Pro OpenAI,
+        // gpt-4o-mini é rápido, barato e quase sempre passa — melhor um recado na hora (tom só
+        // um pouco mais simples nessa única msg) do que "deu uma travada". Outros provedores
+        // mantêm o retry no mesmo modelo após 3s.
+        const fallbackModel =
+          llmProvider === 'openai' && !/mini/i.test(String(llmParams.model)) ? 'gpt-4o-mini' : llmParams.model
+        const sameModel = fallbackModel === llmParams.model
+        console.warn(
+          `[process-message] Rate limit no LLM (${llmProvider}), tentando ${sameModel ? 'de novo em 3s' : `no modelo alternativo ${fallbackModel}`}...`
+        )
+        await new Promise((resolve) => setTimeout(resolve, sameModel ? 3000 : 600))
         try {
-          response = await callLLM(llmParams)
+          response = await callLLM({ ...llmParams, model: fallbackModel })
         } catch (retryErr) {
           const retryClassified = classifyLLMError(retryErr)
           await logAndSendLLMFailure(retryClassified.type, retryClassified.message)
@@ -960,6 +1013,13 @@ como um atendimento genérico de primeiro contato.` : ''}`
       // Marcador vazou — registrar flag de qualidade (WORKSTREAM B)
       await recordQualityFlag(tenantId, conversationId, 'leaked_marker')
     }
+  }
+
+  // Filtro anti-clichê: corta o rodapé de fechamento robótico ("estou à disposição", "é só me
+  // avisar", "se precisar de mais informações...") que o modelo cola no fim de quase toda
+  // resposta mesmo o prompt proibindo. Determinístico — não depende do modelo obedecer.
+  if (finalText) {
+    finalText = stripRoboticClosers(finalText)
   }
 
   // SAUDAÇÃO — garantia determinística (não confiar só no LLM/prompt): mesmo com a regra

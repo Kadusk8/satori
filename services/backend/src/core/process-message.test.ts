@@ -9,6 +9,7 @@ import {
   matchAdReferralProduct,
   normalizeMessageSequence,
   splitMessage,
+  stripRoboticClosers,
 } from './process-message.js'
 import type { LLMMessage } from '../shared/llm-client.js'
 
@@ -259,5 +260,46 @@ describe('matchAdReferralProduct', () => {
 
   it('devolve null quando o referral não tem título nem corpo', () => {
     expect(matchAdReferralProduct({ title: null, body: null }, adProducts)).toBeNull()
+  })
+})
+
+describe('stripRoboticClosers', () => {
+  it('corta o rodapé "é só me avisar" mantendo o conteúdo', () => {
+    const input = 'Olha esse Lifan X60 2014, branco, 96 mil km. Se precisar de mais informações ou quiser agendar uma visita, é só me avisar!'
+    expect(stripRoboticClosers(input)).toBe('Olha esse Lifan X60 2014, branco, 96 mil km.')
+  })
+
+  it('corta "estou à disposição" e o emoji solto que sobra', () => {
+    expect(stripRoboticClosers('Aqui está a Strada 2022. Estou à disposição! 🚗')).toBe('Aqui está a Strada 2022.')
+  })
+
+  it('corta "estou por aqui"', () => {
+    expect(stripRoboticClosers('Essa Outlander tem teto solar e câmbio automático. Estou por aqui!')).toBe(
+      'Essa Outlander tem teto solar e câmbio automático.'
+    )
+  })
+
+  it('preserva preço com decimais (não quebra em ponto de número)', () => {
+    const input = 'O valor é R$ 50.900,00 pra Outlander. Qualquer dúvida, me chama aqui!'
+    expect(stripRoboticClosers(input)).toBe('O valor é R$ 50.900,00 pra Outlander.')
+  })
+
+  it('mantém uma pergunta/CTA de verdade (não é clichê de fechamento)', () => {
+    const input = 'Essa Strada é 2022, só 109 mil km. Quer que eu já veja um horário pra você ver de perto?'
+    expect(stripRoboticClosers(input)).toBe(input)
+  })
+
+  it('nunca devolve vazio quando a mensagem inteira é um clichê', () => {
+    const input = 'Estou à disposição!'
+    expect(stripRoboticClosers(input)).toBe('Estou à disposição!')
+  })
+
+  it('preserva respostas curtas legítimas com emoji', () => {
+    expect(stripRoboticClosers('Claro! 👇')).toBe('Claro! 👇')
+  })
+
+  it('lida com texto vazio/nulo', () => {
+    expect(stripRoboticClosers('')).toBe('')
+    expect(stripRoboticClosers(null)).toBe('')
   })
 })
