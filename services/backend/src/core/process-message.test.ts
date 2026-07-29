@@ -9,6 +9,7 @@ import {
   matchAdReferralProduct,
   normalizeMessageSequence,
   splitMessage,
+  stripRedundantSpecProse,
   stripRoboticClosers,
 } from './process-message.js'
 import type { LLMMessage } from '../shared/llm-client.js'
@@ -310,5 +311,36 @@ describe('stripRoboticClosers', () => {
   it('lida com texto vazio/nulo', () => {
     expect(stripRoboticClosers('')).toBe('')
     expect(stripRoboticClosers(null)).toBe('')
+  })
+})
+
+describe('stripRedundantSpecProse', () => {
+  it('corta a partir de uma lista de bullets que restate a ficha do produto', () => {
+    const input = [
+      'Temos uma Outlander disponível!',
+      'Confira a Outlander GT 4WD 3.0 V6 Gasolina:',
+      '',
+      '- Ano: 2009/2010',
+      '- Cor: Preta',
+      '- Câmbio: Automático',
+      '- Quilometragem: 158.212 km',
+      '- Possui teto solar',
+    ].join('\n')
+    expect(stripRedundantSpecProse(input)).toBe('Temos uma Outlander disponível!')
+  })
+
+  it('corta a partir de um campo "Campo: valor" solto sem bullet', () => {
+    const input = 'Olha essa opção!\nAno: 2018\nCor: Prata'
+    expect(stripRedundantSpecProse(input)).toBe('Olha essa opção!')
+  })
+
+  it('não mexe em texto sem restatement de specs', () => {
+    const input = 'Essa aqui combina muito com o que você descreveu 👇'
+    expect(stripRedundantSpecProse(input)).toBe(input)
+  })
+
+  it('não corta uma pergunta/CTA legítima que não é bullet nem campo de ficha', () => {
+    const input = 'Olha essa opção — acabamento premium e design exclusivo 👇\nQuer que eu agende uma visita?'
+    expect(stripRedundantSpecProse(input)).toBe(input)
   })
 })

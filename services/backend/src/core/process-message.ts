@@ -46,7 +46,7 @@ const conversationsInProgress = new Set<string>()
 async function recordQualityFlag(
   tenantId: string,
   conversationId: string,
-  flagType: 'leaked_marker' | 'search_fallback_listall' | 'promised_image_no_tool' | 'escalation_stale',
+  flagType: 'leaked_marker' | 'search_fallback_listall' | 'promised_image_no_tool' | 'escalation_stale' | 'redundant_spec_prose',
   detail?: string | null
 ): Promise<void> {
   try {
@@ -274,6 +274,41 @@ export function stripRoboticClosers(text: string | null | undefined): string {
   }
   const result = parts.filter((_, i) => !remove[i]).join(' ').trim()
   return result.length > 0 ? result : trimmed
+}
+
+// Quando a foto do produto vai ser enviada com o card determinístico (nome + preço + ficha
+// ▪️ montados pelo sistema, ver toolSendProductImage), o texto da IA deve se limitar ao gancho/
+// benefício (1-2 frases curtas, conforme o prompt pede) — mas o modelo às vezes ignora essa regra
+// e escreve a ficha inteira em prosa ou lista antes do card, duplicando Ano/Cor/Câmbio/Km/Categoria
+// que o card já mostra. Corta deterministicamente a partir da primeira linha que parece restatement
+// de especificação (bullet solto ou "Campo: valor"), e também a linha de introdução da lista logo
+// antes ("Confira as specs:") já que ela só faz sentido junto do que foi cortado.
+export function stripRedundantSpecProse(text: string): string {
+  const lines = text.split('\n')
+  const specBulletPattern = /^[-•▪️*]\s/
+  const specFieldPattern = /^(ano|cor|c[âa]mbio|quilometragem|km|categoria|pre[çc]o|valor)\s*:/i
+
+  let cutIndex = -1
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (specBulletPattern.test(line) || specFieldPattern.test(line)) {
+      cutIndex = i
+      break
+    }
+  }
+  if (cutIndex === -1) return text
+
+  const kept = lines.slice(0, cutIndex)
+  while (kept.length > 0) {
+    const last = kept[kept.length - 1].trim()
+    if (last === '' || /:\s*$/.test(last)) {
+      kept.pop()
+    } else {
+      break
+    }
+  }
+
+  return kept.join('\n').trim()
 }
 
 // Tenta identificar QUAL produto em campanha o cliente viu, comparando o
@@ -1021,6 +1056,21 @@ como um atendimento genérico de primeiro contato.` : ''}`
     }
   }
 
+  // Rede de segurança: o marcador "[Imagem enviada]: <legenda>" que usamos internamente pra
+  // representar mensagens de imagem passadas no histórico que a IA recebe como contexto (ver
+  // normalização de llmMessages acima) já vazou de volta na resposta nova em produção — o LLM
+  // copia o marcador (com nome/preço do card antigo) em vez de só usá-lo como contexto. Isso
+  // duplica nome/preço/ficha quando a foto atual é anexada com o card determinístico logo
+  // abaixo. Nunca deve chegar ao cliente — cortamos do marcador até o fim, já que não há texto
+  // legítimo depois de um vazamento desses.
+  if (finalText) {
+    const beforeImgHistoryCleanup = finalText
+    finalText = finalText.replace(/\[Imagem enviada\][\s\S]*/gi, '').trim()
+    if (beforeImgHistoryCleanup !== finalText) {
+      await recordQualityFlag(tenantId, conversationId, 'leaked_marker')
+    }
+  }
+
   // Filtro anti-clichê: corta o rodapé de fechamento robótico ("estou à disposição", "é só me
   // avisar", "se precisar de mais informações...") que o modelo cola no fim de quase toda
   // resposta mesmo o prompt proibindo. Determinístico — não depende do modelo obedecer.
@@ -1071,6 +1121,17 @@ como um atendimento genérico de primeiro contato.` : ''}`
       .replace(/[^\n]*[Vv]ou (te )?(enviar|mandar|compartilhar)[^\n]*(imagem|foto)[^\n]*(\n|$)/gi, '')
       .trim()
     if (cleaned.length > 10) finalText = cleaned
+  }
+
+  // O card da foto (abaixo) já vai trazer nome + preço + ficha ▪️ montados pelo sistema — se a
+  // IA também escreveu a ficha em prosa/lista (ignorando a regra do prompt de só destacar
+  // benefício em 1-2 frases), corta essa parte redundante antes de anexar o card.
+  if (deferredImage && finalText) {
+    const beforeSpecCleanup = finalText
+    finalText = stripRedundantSpecProse(finalText)
+    if (beforeSpecCleanup !== finalText) {
+      await recordQualityFlag(tenantId, conversationId, 'redundant_spec_prose')
+    }
   }
 
   // Detecção: IA prometeu enviar foto mas não chamou send_product_image (WORKSTREAM B)

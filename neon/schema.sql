@@ -1001,7 +1001,7 @@ CREATE TABLE IF NOT EXISTS ai_quality_flags (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
-  flag_type TEXT NOT NULL CHECK (flag_type IN ('leaked_marker', 'search_fallback_listall', 'promised_image_no_tool', 'escalation_stale')),
+  flag_type TEXT NOT NULL CHECK (flag_type IN ('leaked_marker', 'search_fallback_listall', 'promised_image_no_tool', 'escalation_stale', 'redundant_spec_prose')),
   detail TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
