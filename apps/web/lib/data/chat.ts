@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { conversations, contacts, aiAgents, users, messages } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
@@ -81,8 +81,9 @@ export async function getChat(conversationId: string): Promise<{ conversation: C
       })
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
-      .orderBy(asc(messages.createdAt))
+      .orderBy(desc(messages.createdAt))
       .limit(100)
+    msgRows.reverse() // busca as 100 mais recentes (desc), exibe em ordem cronológica
 
     const rows: ChatMessageRow[] = msgRows.map((m) => ({
       ...m,
@@ -204,8 +205,9 @@ async function getMessagesInTx(tx: Parameters<Parameters<typeof withClaims>[1]>[
     })
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
-    .orderBy(asc(messages.createdAt))
+    .orderBy(desc(messages.createdAt))
     .limit(100)
+  rows.reverse() // busca as 100 mais recentes (desc), exibe em ordem cronológica
   return rows.map((m) => ({
     ...m,
     created_at: (m.created_at instanceof Date ? m.created_at : new Date(m.created_at)).toISOString(),
@@ -229,9 +231,10 @@ export async function getMessagesSince(conversationId: string): Promise<ChatMess
       })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId)))
-      .orderBy(asc(messages.createdAt))
+      .orderBy(desc(messages.createdAt))
       .limit(100)
   )
+  rows.reverse() // busca as 100 mais recentes (desc), exibe em ordem cronológica
   return rows.map((m) => ({
     ...m,
     created_at: (m.created_at instanceof Date ? m.created_at : new Date(m.created_at)).toISOString(),
