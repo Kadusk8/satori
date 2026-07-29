@@ -9,3 +9,16 @@ services:
       - '3001:3001'
     env_file:
       - ../services/backend/.env
+    # update_order: start-first — sobe o container novo (e espera ficar healthy
+    # via HEALTHCHECK do Dockerfile) ANTES de derrubar o antigo. Com só 1
+    # réplica, a ordem padrão do Swarm (stop-first) abre uma janela de downtime
+    # a cada deploy — nessa janela, a Evolution Go tenta entregar webhooks de
+    # mensagem e desiste depois de 5 tentativas/30s cada, descartando a
+    # mensagem pra sempre (não há endpoint de histórico pra recuperar depois).
+    # start-first elimina essa janela.
+    deploy:
+      replicas: 1
+      update_config:
+        order: start-first
+        failure_action: rollback
+        delay: 5s

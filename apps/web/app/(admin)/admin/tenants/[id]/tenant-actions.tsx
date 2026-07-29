@@ -37,6 +37,8 @@ interface TenantActionsProps {
     city: string | null
     state: string | null
     website: string | null
+    latitude: string | null
+    longitude: string | null
     plan: string
   }
 }
@@ -57,6 +59,8 @@ export function TenantActions({ tenant }: TenantActionsProps) {
     city: tenant.city ?? '',
     state: tenant.state ?? '',
     website: tenant.website ?? '',
+    latitude: tenant.latitude ?? '',
+    longitude: tenant.longitude ?? '',
     plan: tenant.plan,
   })
 
@@ -186,6 +190,29 @@ export function TenantActions({ tenant }: TenantActionsProps) {
             <Field label="Website">
               <Input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} />
             </Field>
+            <div className="flex gap-2">
+              <Field label="Latitude" className="flex-1">
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="-16.5055382"
+                  value={form.latitude}
+                  onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))}
+                />
+              </Field>
+              <Field label="Longitude" className="flex-1">
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="-151.7422770"
+                  value={form.longitude}
+                  onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))}
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Opcional — usado para a IA enviar um pin de localização exato pelo WhatsApp. Copie do Google Maps (clique no ponto no mapa → as coordenadas aparecem no card).
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>

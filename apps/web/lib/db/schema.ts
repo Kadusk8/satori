@@ -59,6 +59,8 @@ export const tenants = pgTable(
     city: text('city'),
     state: text('state'),
     website: text('website'),
+    latitude: numeric('latitude'),
+    longitude: numeric('longitude'),
 
     plan: text('plan').notNull().default('free'),
     status: text('status').notNull().default('onboarding'),

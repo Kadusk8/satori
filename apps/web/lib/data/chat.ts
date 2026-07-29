@@ -7,6 +7,7 @@ import { conversations, contacts, aiAgents, users, messages } from '@/lib/db/sch
 import { getDbClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
 import { triggerEvent, tenantChannel } from '@/lib/realtime/server'
+import { parseWhatsAppExport } from '@/lib/whatsapp-export-parser'
 
 export interface ChatConversation {
   id: string; status: string; priority: string
@@ -235,4 +236,58 @@ export async function getMessagesSince(conversationId: string): Promise<ChatMess
     ...m,
     created_at: (m.created_at instanceof Date ? m.created_at : new Date(m.created_at)).toISOString(),
   }))
+}
+
+// Import manual do .txt que o WhatsApp gera em "Exportar conversa" — não há
+// endpoint na Evolution Go pra buscar histórico antigo (confirmado contra a
+// doc oficial), então esse é o único jeito de trazer conversas que existiam
+// antes do número conectar no ZapAgent. `customerSenderName` é o nome (dentre
+// os encontrados no arquivo) que o operador confirmou ser o cliente — todo
+// remetente diferente vira sender_type 'human' (era a própria empresa
+// respondendo direto no celular, antes de ter IA).
+export async function importWhatsAppHistory(
+  conversationId: string,
+  fileText: string,
+  customerSenderName: string
+): Promise<{ imported: number }> {
+  const claims = await claimsOrThrow()
+
+  const parsed = parseWhatsAppExport(fileText)
+  if (parsed.length === 0) throw new Error('Nenhuma mensagem reconhecida nesse arquivo.')
+
+  const result = await withClaims(claims, async (tx) => {
+    await assertCanTouchConversation(tx, claims, conversationId)
+
+    const convRows = await tx
+      .select({ contactId: conversations.contactId, lastMessageAt: conversations.lastMessageAt })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1)
+    const conv = convRows[0]
+    if (!conv) throw new Error('Conversa não encontrada.')
+
+    await tx.insert(messages).values(
+      parsed.map((m) => ({
+        tenantId: claims.tenant_id!,
+        conversationId,
+        contactId: conv.contactId,
+        senderType: (m.senderName.trim().toLowerCase() === customerSenderName.trim().toLowerCase()
+          ? 'customer'
+          : 'human') as 'customer' | 'human',
+        content: m.content,
+        contentType: 'text' as const,
+        createdAt: m.timestamp,
+      }))
+    )
+
+    const latestImported = parsed.reduce((max, m) => (m.timestamp > max ? m.timestamp : max), parsed[0].timestamp)
+    if (!conv.lastMessageAt || latestImported > conv.lastMessageAt) {
+      await tx.update(conversations).set({ lastMessageAt: latestImported }).where(eq(conversations.id, conversationId))
+    }
+
+    return { imported: parsed.length }
+  })
+
+  revalidatePath(`/chat/${conversationId}`)
+  return result
 }

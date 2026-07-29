@@ -13,15 +13,20 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 export interface SendWhatsAppPayload {
   tenantId: string
   to: string
-  type: 'text' | 'image'
+  type: 'text' | 'image' | 'document' | 'audio' | 'location'
   text?: string
-  imageUrl?: string
+  /** URL pública da mídia (Cloudinary) — usado para image/document/audio. */
+  mediaUrl?: string
   caption?: string
+  /** Usado só para type=location. */
+  latitude?: number
+  longitude?: number
+  locationName?: string
   conversationId?: string
 }
 
 export async function sendWhatsAppMessage(payload: SendWhatsAppPayload): Promise<{ whatsappMessageId: string | null }> {
-  const { tenantId, to, type, text, imageUrl, caption, conversationId } = payload
+  const { tenantId, to, type, text, mediaUrl, caption, latitude, longitude, locationName, conversationId } = payload
 
   const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
 
@@ -29,11 +34,14 @@ export async function sendWhatsAppMessage(payload: SendWhatsAppPayload): Promise
   if (type === 'text') {
     if (!text) throw new Error('text obrigatório para type=text')
     whatsappMessageId = await evo.sendText(to, text)
-  } else if (type === 'image') {
-    if (!imageUrl) throw new Error('imageUrl obrigatório para type=image')
-    whatsappMessageId = await evo.sendMedia(to, imageUrl, caption)
+  } else if (type === 'image' || type === 'document' || type === 'audio') {
+    if (!mediaUrl) throw new Error(`mediaUrl obrigatório para type=${type}`)
+    whatsappMessageId = await evo.sendMedia(to, mediaUrl, caption, type)
+  } else if (type === 'location') {
+    if (latitude == null || longitude == null) throw new Error('latitude e longitude obrigatórios para type=location')
+    whatsappMessageId = await evo.sendLocation(to, latitude, longitude, locationName, caption)
   } else {
-    throw new Error('type deve ser text ou image')
+    throw new Error('type deve ser text, image, document, audio ou location')
   }
 
   if (conversationId) {
@@ -49,9 +57,9 @@ export async function sendWhatsAppMessage(payload: SendWhatsAppPayload): Promise
         conversationId,
         contactId: conv[0].contactId,
         senderType: 'ai',
-        content: type === 'text' ? (text ?? null) : caption ?? null,
-        contentType: type === 'text' ? 'text' : 'image',
-        mediaUrl: type === 'image' ? imageUrl ?? null : null,
+        content: type === 'text' ? (text ?? null) : type === 'location' ? `📍 ${locationName ?? caption ?? 'Localização enviada'}` : caption ?? null,
+        contentType: type,
+        mediaUrl: type === 'text' || type === 'location' ? null : mediaUrl ?? null,
         whatsappMessageId,
       })
 

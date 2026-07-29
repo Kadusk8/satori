@@ -19,8 +19,9 @@ export interface EvolutionClient {
   apiKey: string
   instanceName: string
   sendText(number: string, text: string): Promise<string | null>
-  sendMedia(number: string, mediaUrl: string, caption?: string, mediaType?: 'image' | 'video' | 'document'): Promise<string | null>
+  sendMedia(number: string, mediaUrl: string, caption?: string, mediaType?: 'image' | 'video' | 'document' | 'audio'): Promise<string | null>
   sendAudio(number: string, audioBase64: string): Promise<string | null>
+  sendLocation(number: string, latitude: number, longitude: number, name?: string, address?: string): Promise<string | null>
   sendPresence(number: string, presence: 'composing' | 'recording' | 'paused', delayMs?: number): Promise<void>
   checkConnection(): Promise<{ state: string; connected: boolean }>
   connectAndSetWebhook(webhookUrl: string): Promise<void>
@@ -78,7 +79,7 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
       return data?.data?.Info?.ID ?? null
     },
 
-    async sendMedia(number: string, mediaUrl: string, caption?: string, mediaType: 'image' | 'video' | 'document' = 'image'): Promise<string | null> {
+    async sendMedia(number: string, mediaUrl: string, caption?: string, mediaType: 'image' | 'video' | 'document' | 'audio' = 'image'): Promise<string | null> {
       const res = await fetch(`${url}/send/media`, {
         method: 'POST',
         headers: headers(),
@@ -105,6 +106,21 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
         body: form,
       })
       if (!res.ok) throw new Error(`Evolution Go send/media (audio): ${await res.text()}`)
+      const data = (await res.json()) as any
+      return data?.data?.Info?.ID ?? null
+    },
+
+    // Confirmado contra o OpenAPI oficial (Evolution-Go/send-message.yaml,
+    // schema SendLocation): POST /send/location com { number, latitude,
+    // longitude, name?, address? } — nomes/tipos exatos, sem "type" nem "url"
+    // (diferente de /send/media).
+    async sendLocation(number: string, latitude: number, longitude: number, name?: string, address?: string): Promise<string | null> {
+      const res = await fetch(`${url}/send/location`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ number, latitude, longitude, name, address }),
+      })
+      if (!res.ok) throw new Error(`Evolution Go send/location: ${await res.text()}`)
       const data = (await res.json()) as any
       return data?.data?.Info?.ID ?? null
     },

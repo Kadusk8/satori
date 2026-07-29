@@ -201,6 +201,8 @@ CREATE TABLE IF NOT EXISTS tenants (
   city                 TEXT,
   state                TEXT,
   website              TEXT,
+  latitude             NUMERIC(10,7),
+  longitude            NUMERIC(10,7),
 
   plan   TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free','starter','pro','enterprise')),
   status TEXT NOT NULL DEFAULT 'onboarding' CHECK (status IN ('onboarding','active','suspended','cancelled')),

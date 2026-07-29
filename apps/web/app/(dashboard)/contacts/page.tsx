@@ -38,6 +38,7 @@ export default async function ContactsPage() {
     name: r.customName ?? r.whatsappName ?? r.whatsappNumber,
     phone: r.whatsappNumber,
     whatsappName: r.whatsappName,
+    customName: r.customName,
     tags: r.tags ?? [],
     notes: r.notes,
     totalConversations: Number(r.totalConversations),

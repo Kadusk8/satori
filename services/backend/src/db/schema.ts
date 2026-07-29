@@ -26,6 +26,8 @@ export const tenants = pgTable('tenants', {
   city: text('city'),
   state: text('state'),
   website: text('website'),
+  latitude: numeric('latitude'),
+  longitude: numeric('longitude'),
   ownerPhone: text('owner_phone'),
   status: text('status').notNull(),
   evolutionInstanceName: text('evolution_instance_name'),

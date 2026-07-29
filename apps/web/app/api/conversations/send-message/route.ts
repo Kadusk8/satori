@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
-import { conversations, contacts, messages } from '@/lib/db/schema'
+import { conversations, contacts, tenants, messages } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
 import { triggerEvent, tenantChannel, conversationChannel } from '@/lib/realtime/server'
 
@@ -17,9 +17,18 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { conversationId, text } = body
-  if (!conversationId || !text?.trim()) {
-    return NextResponse.json({ error: 'conversationId e text são obrigatórios' }, { status: 400 })
+  const { conversationId, text, mediaUrl, contentType, fileName, sendLocation } = body as {
+    conversationId?: string
+    text?: string
+    mediaUrl?: string
+    contentType?: 'image' | 'audio' | 'document'
+    fileName?: string
+    sendLocation?: boolean
+  }
+
+  const isMedia = Boolean(mediaUrl && contentType)
+  if (!conversationId || (!isMedia && !sendLocation && !text?.trim())) {
+    return NextResponse.json({ error: 'conversationId e (text, mediaUrl+contentType ou sendLocation) são obrigatórios' }, { status: 400 })
   }
 
   const result = await withClaims(claims, async (tx) => {
@@ -30,14 +39,27 @@ export async function POST(request: NextRequest) {
         tenantId: conversations.tenantId,
         contactId: conversations.contactId,
         whatsappNumber: contacts.whatsappNumber,
+        tenantName: tenants.name,
+        tenantLatitude: tenants.latitude,
+        tenantLongitude: tenants.longitude,
+        tenantAddress: tenants.address,
+        tenantCity: tenants.city,
+        tenantState: tenants.state,
       })
       .from(conversations)
       .innerJoin(contacts, eq(contacts.id, conversations.contactId))
+      .innerJoin(tenants, eq(tenants.id, conversations.tenantId))
       .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, claims.tenant_id!)))
       .limit(1)
 
     if (!conv[0]) return { error: 'Conversa não encontrada', status: 404 as const }
     if (conv[0].status === 'closed') return { error: 'Conversa encerrada', status: 400 as const }
+
+    if (sendLocation && (!conv[0].tenantLatitude || !conv[0].tenantLongitude)) {
+      return { error: 'Localização do estabelecimento não configurada — peça a um admin pra cadastrar em Configurações.', status: 400 as const }
+    }
+
+    const locationAddress = [conv[0].tenantAddress, conv[0].tenantCity, conv[0].tenantState].filter(Boolean).join(', ')
 
     const inserted = await tx
       .insert(messages)
@@ -47,8 +69,13 @@ export async function POST(request: NextRequest) {
         contactId: conv[0].contactId,
         senderType: 'human',
         senderId: claims.sub,
-        content: text.trim(),
-        contentType: 'text',
+        content: sendLocation
+          ? `📍 ${locationAddress || 'Localização enviada'}`
+          : isMedia
+          ? (fileName ?? null)
+          : text!.trim(),
+        contentType: sendLocation ? 'location' : isMedia ? contentType! : 'text',
+        mediaUrl: isMedia ? mediaUrl : null,
       })
       .returning({
         id: messages.id,
@@ -68,6 +95,10 @@ export async function POST(request: NextRequest) {
     return {
       tenantId: conv[0].tenantId,
       whatsappNumber: conv[0].whatsappNumber,
+      tenantName: conv[0].tenantName,
+      tenantLatitude: conv[0].tenantLatitude,
+      tenantLongitude: conv[0].tenantLongitude,
+      locationAddress,
       message: { ...inserted[0], created_at: inserted[0].created_at.toISOString() },
     }
   })
@@ -88,12 +119,27 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
           ...(BACKEND_TOKEN ? { Authorization: `Bearer ${BACKEND_TOKEN}` } : {}),
         },
-        body: JSON.stringify({
-          tenantId: result.tenantId,
-          to: result.whatsappNumber,
-          type: 'text',
-          text: text.trim(),
-        }),
+        body: JSON.stringify(
+          sendLocation
+            ? {
+                tenantId: result.tenantId,
+                to: result.whatsappNumber,
+                type: 'location',
+                latitude: Number(result.tenantLatitude),
+                longitude: Number(result.tenantLongitude),
+                locationName: result.tenantName,
+                caption: result.locationAddress || undefined,
+              }
+            : isMedia
+            ? {
+                tenantId: result.tenantId,
+                to: result.whatsappNumber,
+                type: contentType,
+                mediaUrl,
+                caption: contentType === 'document' ? fileName : undefined,
+              }
+            : { tenantId: result.tenantId, to: result.whatsappNumber, type: 'text', text: text!.trim() }
+        ),
       })
     } catch (err) {
       console.error('[send-message] falha ao enviar WhatsApp:', err)

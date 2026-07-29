@@ -1,13 +1,13 @@
 'use client'
 
-import { Bot, User, UserCheck } from 'lucide-react'
+import { Bot, FileText, MapPin, User, UserCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface ChatMessage {
   id: string
   senderType: 'customer' | 'ai' | 'human' | 'system'
   content: string | null
-  contentType: 'text' | 'image' | 'audio' | 'document'
+  contentType: 'text' | 'image' | 'audio' | 'document' | 'location'
   mediaUrl?: string | null
   createdAt: string
   senderName?: string
@@ -79,6 +79,35 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 {message.content}
               </div>
             )}
+          </div>
+        ) : message.contentType === 'audio' && message.mediaUrl ? (
+          <div className={cn('rounded-2xl px-3 py-2', isCustomer ? 'bg-muted' : 'bg-primary/10')}>
+            <audio controls src={message.mediaUrl} className="max-w-[240px] h-10" />
+          </div>
+        ) : message.contentType === 'document' && message.mediaUrl ? (
+          <a
+            href={message.mediaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              'flex items-center gap-2 rounded-2xl px-3 py-2 text-sm underline-offset-2 hover:underline',
+              isCustomer
+                ? 'bg-muted text-foreground rounded-bl-sm'
+                : 'bg-primary text-primary-foreground rounded-br-sm'
+            )}
+          >
+            <FileText className="h-4 w-4 shrink-0" />
+            {message.content || 'Documento'}
+          </a>
+        ) : message.contentType === 'location' ? (
+          <div
+            className={cn(
+              'flex items-center gap-2 rounded-2xl px-3 py-2 text-sm',
+              isCustomer ? 'bg-muted text-foreground rounded-bl-sm' : 'bg-primary text-primary-foreground rounded-br-sm'
+            )}
+          >
+            <MapPin className="h-4 w-4 shrink-0" />
+            {message.content || 'Localização enviada'}
           </div>
         ) : (
           <div

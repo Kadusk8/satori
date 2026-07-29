@@ -25,6 +25,8 @@ export async function updateTenant(tenantId: string, data: {
   city?: string
   state?: string
   website?: string
+  latitude?: string
+  longitude?: string
   plan?: string
   max_messages_month?: number
   max_products?: number
@@ -40,6 +42,8 @@ export async function updateTenant(tenantId: string, data: {
     city: data.city,
     state: data.state,
     website: data.website,
+    latitude: data.latitude === undefined ? undefined : data.latitude.trim() || null,
+    longitude: data.longitude === undefined ? undefined : data.longitude.trim() || null,
     plan: data.plan,
     maxMessagesMonth: data.max_messages_month,
     maxProducts: data.max_products,

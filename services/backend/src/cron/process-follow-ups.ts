@@ -8,6 +8,7 @@ import { getTenantLlmKeys, getAgentLlmKey, pool } from '../db/index.js'
 import { callLLM, type LLMProvider } from '../shared/llm-client.js'
 import { sendWhatsAppMessage } from '../core/send-whatsapp.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
+import { isWithinBusinessHours, type BusinessHours } from '../core/process-message.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -35,6 +36,8 @@ interface FollowUpRow {
   tenant_anthropic_key: string | null
   tenant_openai_key: string | null
   tenant_gemini_key: string | null
+  tenant_business_hours: BusinessHours
+  tenant_timezone: string
 }
 
 async function generateFollowUpMessage(row: FollowUpRow, llmKeys: { anthropic_api_key: string | null; openai_api_key: string | null; gemini_api_key: string | null; openrouter_api_key: string | null }): Promise<string> {
@@ -110,6 +113,14 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
     return
   }
 
+  // Fora do horário comercial do tenant: não manda agora. Empurra 1h (mesma
+  // cadência do cron horário) sem incrementar attempt_number nem mudar status —
+  // a próxima execução reavalia. Evita follow-up chegando de madrugada.
+  if (!isWithinBusinessHours(row.tenant_business_hours, row.tenant_timezone)) {
+    await pool.query(`update follow_ups set scheduled_at = now() + interval '1 hour' where id = $1`, [row.id])
+    return
+  }
+
   const llmKeysRaw = await getTenantLlmKeys(row.tenant_id, ENCRYPTION_KEY)
   const agentLlmKey = await getAgentLlmKey(row.ai_agent_id, ENCRYPTION_KEY)
   const provider = row.agent_llm_provider ?? 'anthropic'
@@ -169,7 +180,8 @@ export async function runProcessFollowUps(): Promise<{ processed: number; failed
             ag.follow_up_message_template as agent_follow_up_message_template,
             ag.llm_provider as agent_llm_provider,
             t.name as tenant_name, t.anthropic_api_key as tenant_anthropic_key,
-            t.openai_api_key as tenant_openai_key, t.gemini_api_key as tenant_gemini_key
+            t.openai_api_key as tenant_openai_key, t.gemini_api_key as tenant_gemini_key,
+            t.business_hours as tenant_business_hours, t.timezone as tenant_timezone
      from follow_ups f
      join contacts c on c.id = f.contact_id
      join ai_agents ag on ag.id = f.ai_agent_id

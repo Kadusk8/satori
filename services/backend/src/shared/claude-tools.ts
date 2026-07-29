@@ -103,6 +103,12 @@ export const AI_TOOLS: Tool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'send_location',
+    description:
+      'Envia a localização exata do estabelecimento pelo WhatsApp (pin de mapa). Use quando o cliente pedir a localização, quiser ajuda pra chegar até o endereço, ou perguntar "manda a localização" — complementa get_business_info, que só dá o endereço em texto.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'schedule_follow_up',
     description:
       'Agenda um follow-up automático para entrar em contato com o cliente depois de um período sem resposta. Use quando o cliente demonstra interesse mas não finaliza a conversa, ou quando combinar de retornar depois.',

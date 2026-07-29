@@ -18,7 +18,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MessageBubble } from '@/components/chat/message-bubble'
-import { ChatInput } from '@/components/chat/chat-input'
+import { ChatInput, type MediaAttachment } from '@/components/chat/chat-input'
+import { ImportHistoryDialog } from '@/components/chat/import-history-dialog'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { cn } from '@/lib/utils'
 import { getChat, getMessagesSince, assumeConversation, closeConversation } from '@/lib/data/chat'
@@ -95,29 +96,32 @@ export default function ChatPage() {
 
   // ── Carrega conversa e mensagens ────────────────────────────────────────
 
+  const loadChat = useCallback(async () => {
+    try {
+      const res = await getChat(conversationId)
+      if (!res) {
+        toast.error('Conversa não encontrada')
+        router.push('/conversations')
+        return
+      }
+      setConversation(res.conversation as unknown as DBConversation)
+      contactIdRef.current = res.conversation.contacts.id
+      setMessages(res.messages.map((m) => mapMessage(m as unknown as DBMessage)))
+    } catch {
+      toast.error('Erro ao carregar a conversa')
+      router.push('/conversations')
+    }
+  }, [conversationId, router])
+
   useEffect(() => {
     async function load() {
       setIsLoading(true)
-      try {
-        const res = await getChat(conversationId)
-        if (!res) {
-          toast.error('Conversa não encontrada')
-          router.push('/conversations')
-          return
-        }
-        setConversation(res.conversation as unknown as DBConversation)
-        contactIdRef.current = res.conversation.contacts.id
-        setMessages(res.messages.map((m) => mapMessage(m as unknown as DBMessage)))
-      } catch {
-        toast.error('Erro ao carregar a conversa')
-        router.push('/conversations')
-      } finally {
-        setIsLoading(false)
-      }
+      await loadChat()
+      setIsLoading(false)
     }
 
     load()
-  }, [conversationId, router])
+  }, [loadChat])
 
   // ── Scroll automático ────────────────────────────────────────────────────
 
@@ -196,6 +200,88 @@ export default function ChatPage() {
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao enviar mensagem')
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+    } finally {
+      setIsSending(false)
+    }
+  }, [conversation, conversationId])
+
+  // ── Enviar mídia (operador humano) ──────────────────────────────────────
+
+  const handleSendMedia = useCallback(async (attachment: MediaAttachment) => {
+    if (!conversation) return
+
+    const tempId = `temp-${Date.now()}`
+    const optimistic: ChatMessage = {
+      id: tempId,
+      senderType: 'human',
+      content: attachment.fileName,
+      contentType: attachment.contentType,
+      mediaUrl: attachment.url,
+      createdAt: new Date().toISOString(),
+      senderName: 'Você',
+    }
+    setMessages((prev) => [...prev, optimistic])
+    setIsSending(true)
+
+    try {
+      const res = await fetch('/api/conversations/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          mediaUrl: attachment.url,
+          contentType: attachment.contentType,
+          fileName: attachment.fileName,
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error ?? 'Erro ao enviar arquivo')
+      }
+
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo')
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+    } finally {
+      setIsSending(false)
+    }
+  }, [conversation, conversationId])
+
+  // ── Enviar localização do estabelecimento (operador humano) ─────────────
+
+  const handleSendLocation = useCallback(async () => {
+    if (!conversation) return
+
+    const tempId = `temp-${Date.now()}`
+    const optimistic: ChatMessage = {
+      id: tempId,
+      senderType: 'human',
+      content: '📍 Enviando localização...',
+      contentType: 'location',
+      createdAt: new Date().toISOString(),
+      senderName: 'Você',
+    }
+    setMessages((prev) => [...prev, optimistic])
+    setIsSending(true)
+
+    try {
+      const res = await fetch('/api/conversations/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, sendLocation: true }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error ?? 'Erro ao enviar localização')
+      }
+
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao enviar localização')
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
     } finally {
       setIsSending(false)
@@ -300,6 +386,8 @@ export default function ChatPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <ImportHistoryDialog conversationId={conversationId} contactName={contactName} onImported={loadChat} />
+
           <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
             <Tag className="h-3.5 w-3.5" />
             Etiquetar
@@ -366,6 +454,8 @@ export default function ChatPage() {
       {/* Input */}
       <ChatInput
         onSend={handleSend}
+        onSendMedia={handleSendMedia}
+        onSendLocation={handleSendLocation}
         disabled={!canSend || isSending}
       />
 

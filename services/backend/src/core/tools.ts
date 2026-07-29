@@ -657,6 +657,59 @@ export async function toolGetBusinessInfo(tenantId: string): Promise<string> {
     .join('\n')
 }
 
+export async function toolSendLocation(
+  tenantId: string,
+  conversationId: string,
+  contactId: string,
+  contactNumber: string,
+  encryptionKey: string | null
+): Promise<string> {
+  const rows = await pool.query<{
+    name: string
+    address: string | null
+    city: string | null
+    state: string | null
+    latitude: string | null
+    longitude: string | null
+  }>(`select name, address, city, state, latitude, longitude from tenants where id = $1`, [tenantId])
+  const tenant = rows.rows[0]
+  if (!tenant) return 'Informações do negócio não encontradas.'
+  if (!tenant.latitude || !tenant.longitude) {
+    return 'Localização exata não configurada pelo estabelecimento — use get_business_info para informar o endereço em texto.'
+  }
+
+  const address = [tenant.address, tenant.city, tenant.state].filter(Boolean).join(', ')
+
+  try {
+    const evo = await getEvolutionClient(tenantId, encryptionKey)
+    await evo.sendLocation(contactNumber, Number(tenant.latitude), Number(tenant.longitude), tenant.name, address || undefined)
+  } catch (err) {
+    console.error('[toolSendLocation] Erro ao enviar localização:', err)
+    return 'Erro ao enviar a localização.'
+  }
+
+  const content = `📍 Localização enviada${address ? `: ${address}` : ''}`
+  const savedRes = await pool.query<{ id: string; created_at: Date }>(
+    `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type)
+     values ($1, $2, $3, 'ai', $4, 'location') returning id, created_at`,
+    [tenantId, conversationId, contactId, content]
+  )
+  const savedRow = savedRes.rows[0]
+  if (savedRow) {
+    await triggerEvent(conversationChannel(conversationId), 'message:new', {
+      id: savedRow.id,
+      sender_type: 'ai',
+      content,
+      content_type: 'location',
+      media_url: null,
+      created_at: savedRow.created_at.toISOString(),
+      contact_id: contactId,
+    })
+  }
+
+  return 'Localização enviada com sucesso.'
+}
+
 export interface ToolContext {
   tenantId: string
   conversationId: string
@@ -703,6 +756,9 @@ export async function executeTool(
       break
     case 'get_business_info':
       result = await toolGetBusinessInfo(ctx.tenantId)
+      break
+    case 'send_location':
+      result = await toolSendLocation(ctx.tenantId, ctx.conversationId, ctx.contactId, ctx.contactNumber, ctx.encryptionKey)
       break
     case 'schedule_follow_up':
       result = await toolScheduleFollowUp(

@@ -55,6 +55,7 @@ interface AdminTenantRow {
   business_segment: string | null; business_description: string | null
   owner_name: string | null; owner_email: string | null; owner_phone: string | null
   city: string | null; state: string | null; website: string | null
+  latitude: string | null; longitude: string | null
   whatsapp_number: string | null; whatsapp_connected: boolean | null
   evolution_api_url: string | null; evolution_instance_name: string | null
   webhook_secret: string
@@ -142,6 +143,8 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
           city: tenant.city,
           state: tenant.state,
           website: tenant.website,
+          latitude: tenant.latitude,
+          longitude: tenant.longitude,
           plan: tenant.plan,
         }} />
       </div>
@@ -165,6 +168,9 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
               <DetailRow label="Cidade" value={`${tenant.city}${tenant.state ? `/${tenant.state}` : ''}`} />
             )}
             {tenant.website && <DetailRow label="Website" value={tenant.website} />}
+            {tenant.latitude && tenant.longitude && (
+              <DetailRow label="Coordenadas" value={`${tenant.latitude}, ${tenant.longitude}`} />
+            )}
           </CardContent>
         </Card>
 

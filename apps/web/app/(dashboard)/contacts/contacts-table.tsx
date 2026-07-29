@@ -31,13 +31,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
+import { updateContactName, updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 
 export interface Contact {
   id: string
   name: string
   phone: string
   whatsappName: string | null
+  customName: string | null
   tags: string[]
   notes: string | null
   totalConversations: number
@@ -252,6 +253,7 @@ function ContactEditDialog({
   onOpenChange: (open: boolean) => void
   onSaved: (updated: Contact) => void
 }) {
+  const [name, setName] = useState(contact?.name ?? '')
   const [tags, setTags] = useState<string[]>(contact?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
   const [notes, setNotes] = useState(contact?.notes ?? '')
@@ -274,13 +276,19 @@ function ContactEditDialog({
 
   async function handleSave() {
     if (!contact) return
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      toast.error('O nome não pode ficar em branco')
+      return
+    }
     setSaving(true)
     try {
       await Promise.all([
+        updateContactName(contact.id, trimmedName),
         updateContactTags(contact.id, tags),
         updateContactNotes(contact.id, notes),
       ])
-      onSaved({ ...contact, tags, notes: notes.trim() || null })
+      onSaved({ ...contact, name: trimmedName, customName: trimmedName, tags, notes: notes.trim() || null })
       toast.success('Contato atualizado')
       onOpenChange(false)
     } catch (err) {
@@ -298,9 +306,22 @@ function ContactEditDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{contact?.name}</DialogTitle>
+          <DialogTitle>Editar contato</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Nome</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nome do contato"
+              className="h-9 text-sm"
+            />
+            {contact?.whatsappName && contact.whatsappName !== name && (
+              <p className="text-xs text-muted-foreground">Nome no WhatsApp: {contact.whatsappName}</p>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Etiquetas</label>
             <div className="flex flex-wrap gap-1">

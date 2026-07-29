@@ -60,7 +60,7 @@ async function recordQualityFlag(
   }
 }
 
-interface BusinessHours {
+export interface BusinessHours {
   [day: string]: { enabled: boolean; start: string; end: string } | undefined
 }
 
@@ -149,6 +149,8 @@ interface ConversationRow {
   gemini_api_key: string | null
   anthropic_api_key: string | null
   elevenlabs_api_key: string | null
+  latitude: string | null
+  longitude: string | null
 }
 
 interface AgentRow {
@@ -404,7 +406,8 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
                and wla.jid in (ct.whatsapp_lid, ct.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
             t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
-            t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key
+            t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key,
+            t.latitude, t.longitude
      from conversations c
      join contacts ct on ct.id = c.contact_id
      join tenants t on t.id = c.tenant_id
@@ -756,6 +759,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
     if ((tool.name === 'check_availability' || tool.name === 'book_appointment' || tool.name === 'cancel_appointment') && !agent.can_book_appointments) return false
     if (tool.name === 'escalate_to_human' && !agent.can_escalate) return false
     if (tool.name === 'schedule_follow_up' && !agentFollowUpEnabled) return false
+    if (tool.name === 'send_location' && (!conv.latitude || !conv.longitude)) return false
     return true
   })
 
