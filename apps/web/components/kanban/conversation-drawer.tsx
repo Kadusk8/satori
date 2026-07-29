@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar, UserCog, StickyNote } from 'lucide-react'
+import { X, ExternalLink, Bot, User, Phone, Clock, Tag, Calendar, UserCog, StickyNote, UserCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { MessageBubble } from '@/components/chat/message-bubble'
 import type { ChatMessage } from '@/components/chat/message-bubble'
-import { getConversationDrawer } from '@/lib/data/chat'
+import { getConversationDrawer, assumeConversation } from '@/lib/data/chat'
 import { listVendors, reassignConversation } from '@/lib/data/conversations'
 import { updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 import { cn } from '@/lib/utils'
@@ -119,6 +119,8 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
   const [isLoading, setIsLoading] = useState(false)
   const [vendors, setVendors] = useState<Array<{ id: string; fullName: string; isAvailable: boolean }>>([])
   const [isReassigning, setIsReassigning] = useState(false)
+  const [localStatus, setLocalStatus] = useState<string | null>(null)
+  const [isAssuming, setIsAssuming] = useState(false)
   const [notesDraft, setNotesDraft] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
   const [tagInput, setTagInput] = useState('')
@@ -133,6 +135,7 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
       return
     }
 
+    setLocalStatus(conversation.status)
     let cancelled = false
 
     async function load() {
@@ -178,6 +181,20 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
     listVendors().then((v) => { if (!cancelled) setVendors(v) }).catch(() => {})
     return () => { cancelled = true }
   }, [conversation, isManager])
+
+  async function handleAssume() {
+    if (!conversation) return
+    setIsAssuming(true)
+    try {
+      await assumeConversation(conversation.id)
+      toast.success('Conversa assumida. Você está no controle.')
+      setLocalStatus('human_handling')
+    } catch (err) {
+      toast.error('Erro ao assumir conversa: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setIsAssuming(false)
+    }
+  }
 
   async function handleReassign(userId: string | null) {
     if (!conversation) return
@@ -275,11 +292,22 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
                   <span className="font-semibold text-sm truncate">{conversation.contact.name}</span>
                   <span className="text-xs text-muted-foreground">{conversation.contact.phone}</span>
                 </div>
-                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium shrink-0', statusClass[conversation.status] ?? 'bg-muted text-muted-foreground')}>
-                  {statusLabel[conversation.status] ?? conversation.status}
+                <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium shrink-0', statusClass[localStatus ?? conversation.status] ?? 'bg-muted text-muted-foreground')}>
+                  {statusLabel[localStatus ?? conversation.status] ?? conversation.status}
                 </span>
               </div>
               <div className="flex items-center gap-1 shrink-0 ml-2">
+                {(localStatus ?? conversation.status) !== 'human_handling' && (localStatus ?? conversation.status) !== 'closed' && (
+                  <Button
+                    size="sm"
+                    className="gap-1 text-xs h-7"
+                    onClick={handleAssume}
+                    disabled={isAssuming}
+                  >
+                    <UserCheck className="h-3 w-3" />
+                    {isAssuming ? 'Assumindo...' : 'Assumir'}
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
