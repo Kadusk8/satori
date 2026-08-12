@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   extractCustomerKeywords,
   extractFocusProductCandidate,
+  isAcknowledgment,
+  isAllRoboticClosers,
   isMoreImagesIntent,
   isPureGreeting,
   isReturningAfterGap,
@@ -9,6 +11,7 @@ import {
   matchAdReferralProduct,
   normalizeMessageSequence,
   splitMessage,
+  stripChecklistDump,
   stripRedundantSpecProse,
   stripRoboticClosers,
 } from './process-message.js'
@@ -154,8 +157,17 @@ describe('isMoreImagesIntent', () => {
 
 describe('isPureGreeting', () => {
   it('detecta saudações puras, sem mais nada na mensagem', () => {
-    for (const msg of ['boa noite', 'Boa noite!', 'oi', 'Oi!', 'olá', 'ola', 'e aí', 'eae', 'bom dia', 'boa tarde', 'tudo bem?', 'blz', 'beleza', 'opa']) {
+    for (const msg of ['boa noite', 'Boa noite!', 'oi', 'Oi!', 'olá', 'ola', 'e aí', 'eae', 'bom dia', 'boa tarde', 'tudo bem?', 'opa']) {
       expect(isPureGreeting(msg), msg).toBe(true)
+    }
+  })
+
+  // "blz"/"beleza" NÃO são saudação — são confirmação (ver isAcknowledgment). Tratá-las como
+  // saudação fazia a IA responder um "Blz" do cliente no meio da conversa com "Oi, tudo bem?
+  // Conta pra mim o que rolou" — reclamação real de cliente em produção.
+  it('não trata confirmação ("blz", "beleza") como saudação', () => {
+    for (const msg of ['blz', 'Blz', 'beleza', 'Beleza!']) {
+      expect(isPureGreeting(msg), msg).toBe(false)
     }
   })
 
@@ -170,6 +182,46 @@ describe('isPureGreeting', () => {
     ]) {
       expect(isPureGreeting(msg), String(msg)).toBe(false)
     }
+  })
+})
+
+describe('isAcknowledgment', () => {
+  it('detecta confirmação/encerramento puro', () => {
+    for (const msg of ['ok', 'Ok!', 'blz', 'beleza', 'certo', 'tá bom', 'show', 'perfeito', 'valeu', 'obrigado', 'obrigada', 'vlw', 'sim', '👍']) {
+      expect(isAcknowledgment(msg), msg).toBe(true)
+    }
+  })
+
+  it('não dispara quando há pedido junto', () => {
+    for (const msg of ['ok, mas qual o preço?', 'blz, quero ver outro carro', null, '']) {
+      expect(isAcknowledgment(msg), String(msg)).toBe(false)
+    }
+  })
+})
+
+describe('isAllRoboticClosers', () => {
+  it('detecta resposta que é 100% clichê de fechamento', () => {
+    expect(isAllRoboticClosers('Se precisar de mais alguma informação ou quiser agendar uma visita, é só me avisar!')).toBe(true)
+    expect(isAllRoboticClosers('Estou à disposição!')).toBe(true)
+  })
+
+  it('não dispara quando há conteúdo real além do clichê', () => {
+    expect(isAllRoboticClosers('Esse Fox é 2018, único dono. Se precisar de mais informações, é só avisar!')).toBe(false)
+    expect(isAllRoboticClosers(null)).toBe(false)
+    expect(isAllRoboticClosers('')).toBe(false)
+  })
+})
+
+describe('stripChecklistDump', () => {
+  it('remove despejo de checklist de avaliação de troca', () => {
+    const text = 'Legal! Aceitamos seu carro na troca. Aqui está o que precisamos:\n✅ Fotos e vídeo\n✅ Placa\n✅ Veículo foi batido?\n✅ IPVA pago?'
+    const result = stripChecklistDump(text)
+    expect(result).not.toContain('✅')
+  })
+
+  it('não mexe em 1-2 checkmarks soltos (uso legítimo de emoji)', () => {
+    const text = 'Já revisado ✅ e com garantia ✅ — pode vir ver!'
+    expect(stripChecklistDump(text)).toBe(text)
   })
 })
 

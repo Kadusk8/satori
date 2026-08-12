@@ -227,12 +227,24 @@ export function isMoreImagesIntent(content: string | null | undefined): boolean 
 // Usado pra forçar uma resposta determinística nesses casos: o LLM, mesmo com a regra de
 // prompt "SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO", às vezes reabre um produto antigo (indisponível
 // ou não) só porque ele domina o histórico da conversa — aqui não confiamos nisso.
-const PURE_GREETING_RE = /^(oi+|ol[áa]|opa|e\s*a[íi]|eae|bom\s*dia|boa\s*tarde|boa\s*noite|tudo\s*bem|blz|beleza)$/i
+const PURE_GREETING_RE = /^(oi+|ol[áa]|opa|e\s*a[íi]|eae|bom\s*dia|boa\s*tarde|boa\s*noite|tudo\s*bem|tudo\s*bom)$/i
 
 export function isPureGreeting(content: string | null | undefined): boolean {
   if (!content) return false
   const cleaned = content.trim().replace(/[!?.,]+$/g, '').trim()
   return PURE_GREETING_RE.test(cleaned)
+}
+
+// Confirmação/encerramento puro ("ok", "blz", "valeu", "tá bom", "👍") — NÃO é saudação.
+// "blz"/"beleza" estavam em PURE_GREETING_RE e por isso a IA respondia um "Blz" do cliente NO MEIO
+// da conversa com uma saudação-pergunta ("Oi, tudo bem? Conta pra mim o que rolou") — reclamação
+// real de cliente em produção: resposta sem sentido pra quem só concordou com a última mensagem.
+const ACK_RE = /^(ok(ay|ei)?|blz|beleza|bele|certo|t[áa](\s*bom|\s*certo|\s*bem)?|isso|isso\s*mesmo|show|perfeito|entendi|entendido|combinado|fechou|fechado|obrigad[oa]|obg|vlw|valeu|grato|de\s*nada|sim|uhum|👍+|🙏+|👌+|😀+|😊+)$/i
+
+export function isAcknowledgment(content: string | null | undefined): boolean {
+  if (!content) return false
+  const cleaned = content.trim().replace(/[!?.,]+$/g, '').trim()
+  return ACK_RE.test(cleaned)
 }
 
 // Frases-clichê de fechamento que o modelo (gpt-4o principalmente) cola no FIM de quase toda
@@ -276,6 +288,38 @@ export function stripRoboticClosers(text: string | null | undefined): string {
   }
   const result = parts.filter((_, i) => !remove[i]).join(' ').trim()
   return result.length > 0 ? result : trimmed
+}
+
+// A resposta INTEIRA é clichê de fechamento? (ex: "Se precisar de mais alguma informação ou quiser
+// agendar uma visita, é só me avisar!"). stripRoboticClosers nunca devolve vazio, então nesse caso
+// ele preserva o clichê e a mensagem inútil chega ao cliente — visto em produção logo depois de um
+// "Ok" dele. O chamador usa isso pra simplesmente NÃO responder, que é o que um vendedor faria.
+export function isAllRoboticClosers(text: string | null | undefined): boolean {
+  if (!text) return false
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  const parts = trimmed
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => s.replace(/[^\p{L}\p{N}]/gu, ' ').trim().length > 0)
+  if (parts.length === 0) return false
+  return parts.every((s) => ROBOTIC_CLOSER_PATTERNS.some((re) => re.test(s)))
+}
+
+// Despejo de formulário: o modelo responde "tenho um carro na troca" com uma lista de checkboxes
+// ("✅ Fotos e vídeo ✅ Placa ✅ Veículo foi batido? ✅ IPVA pago?..."), mesmo com a regra
+// "AVALIAÇÃO DE TROCA — SEM FORMULÁRIO" no prompt. Visto em produção: entrega na hora que é robô.
+// Remove deterministicamente as linhas de checklist; o chamador repõe um pedido natural se sobrar
+// pouco texto. Só age a partir de 3 marcadores — 1 ou 2 ✅ soltos são uso legítimo de emoji.
+export function stripChecklistDump(text: string): string {
+  const marker = /[✅☑✔]/u
+  const total = (text.match(/[✅☑✔]/gu) ?? []).length
+  if (total < 3) return text
+  return text
+    .split('\n')
+    .filter((line) => !marker.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 // Quando a foto do produto vai ser enviada com o card determinístico (nome + preço + ficha
@@ -632,6 +676,9 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
 
   const focusCandidate = extractFocusProductCandidate(history)
   let focusProduct: { id: string; name: string; priceText: string | null } | null = null
+  // O foco veio do anúncio que o cliente clicou (não do histórico da conversa) — usado pela
+  // âncora de busca do primeiro turno, mais abaixo.
+  let focusFromAdReferral = false
   if (focusCandidate) {
     const focusRows = await db
       .select({ name: products.name, price: products.price, priceDisplay: products.priceDisplay })
@@ -656,7 +703,10 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     adProducts = adRows.map((p) => ({ id: p.id, name: p.name, price_display: p.priceDisplay, price: p.price }))
     if (!focusProduct && adProducts.length > 0) {
       const matched = matchAdReferralProduct(adReferral, adProducts)
-      if (matched) focusProduct = matched
+      if (matched) {
+        focusProduct = matched
+        focusFromAdReferral = true
+      }
     }
   }
 
@@ -956,6 +1006,37 @@ como um atendimento genérico de primeiro contato.` : ''}`
         }
         const imgMatches = [...result.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
         lastSearchProductsWithImages = imgMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
+
+        // ÂNCORA DO ANÚNCIO (primeiro turno) — garantia determinística. O lead que vem de um
+        // Click-to-WhatsApp já está falando do carro do anúncio, e muitas vezes pergunta só por uma
+        // característica dele ("gostaria de mais informações sobre a cabine simples!"). A IA busca
+        // essa característica solta, ela casa na descrição de OUTRO carro (tier 3 do
+        // toolSearchProducts bate em description/characteristics) e o cliente recebe a foto do carro
+        // errado já na primeira resposta — visto em produção: anúncio da Strada Endurance, cliente
+        // perguntou da cabine simples, chegou a foto de um Courier. Se a query da IA não menciona
+        // nem o carro anunciado nem o nome de nenhum dos produtos que a busca devolveu (ou seja: o
+        // cliente NÃO pediu outro carro, só descreveu algo), refazemos a busca ancorada no carro do
+        // anúncio.
+        const adFocus = focusProduct
+        if (isFirstAiResponse && focusFromAdReferral && adFocus) {
+          const q = String(searchInput.query ?? '').toLowerCase()
+          const significantTokens = (name: string) => name.toLowerCase().split(/\s+/).filter((w) => w.length > 2)
+          const queryMentionsFocus = significantTokens(adFocus.name).some((t) => q.includes(t))
+          const resultHasFocus = lastSearchProductsWithImages.some((p) => p.id === adFocus.id)
+          const queryMentionsResultName = lastSearchProductsWithImages.some((p) => significantTokens(p.name).some((t) => q.includes(t)))
+          if (q && !queryMentionsFocus && !resultHasFocus && !queryMentionsResultName) {
+            const anchored = await toolSearchProducts(tenantId, { ...searchInput, query: adFocus.name }, conversationId)
+            const anchoredMatches = [...anchored.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
+            const anchoredProducts = anchoredMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
+            if (anchoredProducts.some((p) => p.id === adFocus.id)) {
+              console.log(`[process-message] Busca ancorada no produto do anúncio: query "${q}" → "${adFocus.name}" (conv ${conversationId})`)
+              result =
+                `[SISTEMA: o cliente veio do anúncio de "${adFocus.name}" e está perguntando sobre ESTE veículo (a mensagem dele descreve uma característica dele, não outro carro). Apresente somente este produto e responda ao que ele perguntou sobre ele. NÃO ofereça outro veículo.]\n\n` +
+                anchored
+              lastSearchProductsWithImages = anchoredProducts
+            }
+          }
+        }
       } else {
         const toolResult = await executeTool(ctx, tu.name, tu.input)
         result = toolResult.result
@@ -1082,6 +1163,27 @@ como um atendimento genérico de primeiro contato.` : ''}`
     finalText = stripRoboticClosers(finalText)
   }
 
+  // Resposta que era 100% clichê de fechamento: stripRoboticClosers preserva o texto (nunca
+  // devolve vazio), então ela chegaria inteira ao cliente — uma mensagem que não informa nada e
+  // só denuncia robô. Melhor não responder. Exceções: primeira resposta da conversa, escalação,
+  // ou quando há foto pra enviar (a legenda precisa de texto).
+  if (finalText && !isFirstAiResponse && !wasEscalated && !deferredImage && isAllRoboticClosers(finalText)) {
+    console.log(`[process-message] Resposta 100% clichê de fechamento suprimida (conv ${conversationId}): "${finalText.slice(0, 120)}"`)
+    finalText = ''
+  }
+
+  // Formulário de avaliação de troca despejado em checkboxes — corta e repõe um pedido natural.
+  if (finalText) {
+    const beforeChecklist = finalText
+    finalText = stripChecklistDump(finalText)
+    if (finalText !== beforeChecklist) {
+      console.log(`[process-message] Checklist de troca removido da resposta (conv ${conversationId})`)
+      if (finalText.replace(/[^\p{L}\p{N}]/gu, '').length < 20) {
+        finalText = 'Boa! Me conta o modelo, o ano e a quilometragem dele — e se puder mandar umas fotos, já consigo adiantar a avaliação 🙂'
+      }
+    }
+  }
+
   // SAUDAÇÃO — garantia determinística (não confiar só no LLM/prompt): mesmo com a regra
   // "SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO" no prompt, o modelo às vezes reabre um produto antigo
   // (às vezes até indisponível) numa resposta a um simples "boa noite", quando o histórico da
@@ -1089,9 +1191,40 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // reforçar o prompt. Quando a mensagem do cliente é saudação pura, ignoramos o texto do LLM
   // e respondemos com uma saudação curta e variada — nunca há motivo pra mencionar produto.
   if (isPureGreeting(lastCustomerMsg?.content) && !isFirstAiResponse && finalText && !wasEscalated) {
-    const greetingReplies = ['Oi! Me conta o que você tá procurando 🙂', 'Opa, tudo certo? Fala aí o que você precisa', 'Olá! Manda ver, o que você tá buscando?', 'Oi, tudo bem? Conta pra mim o que rolou', 'Opa! Pode falar, no que posso dar uma força?']
-    finalText = greetingReplies[Math.floor(Math.random() * greetingReplies.length)]
+    if (focusProduct) {
+      // Com produto em foco, a saudação genérica ("fala aí o que você precisa") joga fora o
+      // contexto e obriga o cliente a repetir tudo — ele acabou de voltar justamente por causa
+      // desse carro. Retoma citando o produto, sem re-mandar foto nem re-descrever a ficha.
+      const resumeReplies = [
+        `Oi! Tudo bem? Você tava vendo o ${focusProduct.name} — quer seguir com ele?`,
+        `Opa! Tudo certo? Ficou alguma dúvida sobre o ${focusProduct.name}?`,
+        `Oi! Você tinha olhado o ${focusProduct.name} — ainda tem interesse nele ou quer ver outra opção?`,
+      ]
+      finalText = resumeReplies[Math.floor(Math.random() * resumeReplies.length)]
+    } else {
+      const greetingReplies = ['Oi! Me conta o que você tá procurando 🙂', 'Opa, tudo certo? Fala aí o que você precisa', 'Olá! Manda ver, o que você tá buscando?', 'Opa! Pode falar, no que posso dar uma força?']
+      finalText = greetingReplies[Math.floor(Math.random() * greetingReplies.length)]
+    }
     deferredImage = null
+  }
+
+  // CONFIRMAÇÃO/ENCERRAMENTO ("ok", "blz", "valeu", "tá bom", "👍") — garantia determinística.
+  // Quando o cliente só concorda ou encerra e NÃO havia pergunta nossa pendente, não existe nada
+  // pra responder: qualquer texto novo vira pergunta genérica sem sentido ("Oi, tudo bem? Conta
+  // pra mim o que rolou") ou rodapé robótico ("se precisar, é só me avisar") — as duas coisas
+  // chegaram ao cliente em produção e geraram reclamação. Um vendedor de verdade não responde
+  // "ok" com nada. Se a nossa última mensagem TINHA pergunta, o "ok"/"sim" é a resposta dela —
+  // aí o texto do LLM é legítimo e passa direto.
+  const customerAck = !isPureGreeting(lastCustomerMsg?.content) && isAcknowledgment(lastCustomerMsg?.content)
+  if (customerAck && !isFirstAiResponse && finalText && !wasEscalated) {
+    const lastOurMsg = [...history].reverse().find((m) => m.sender_type === 'ai' || m.sender_type === 'human')
+    const weAskedSomething = (lastOurMsg?.content ?? '').includes('?')
+    if (!weAskedSomething) {
+      console.log(`[process-message] Ack do cliente ("${lastCustomerMsg?.content}") sem pergunta pendente — resposta suprimida (conv ${conversationId})`)
+      finalText = ''
+      deferredImage = null
+      deferredImageProductId = null
+    }
   }
 
   // "Mais fotos" — resposta enxuta como humano. Quando o cliente só pede mais fotos de um
@@ -1322,13 +1455,19 @@ como um atendimento genérico de primeiro contato.` : ''}`
           `select id from follow_ups where conversation_id = $1 and status = 'pending' limit 1`,
           [conversationId]
         )
+        // Contexto com o produto em foco: sem ele o follow-up sai genérico ("ainda tem interesse
+        // em nossos carros?") três dias seguidos, o que o cliente lê como spam. Com o nome do
+        // carro a mensagem tem motivo pra existir.
+        const followUpContext = focusProduct
+          ? `Cliente estava vendo "${focusProduct.name}" e parou de responder`
+          : 'Follow-up automático — sem resposta do cliente'
         if (existingRes.rows[0]) {
-          await pool.query(`update follow_ups set scheduled_at = $1 where id = $2`, [scheduledAt.toISOString(), existingRes.rows[0].id])
+          await pool.query(`update follow_ups set scheduled_at = $1, context = $2 where id = $3`, [scheduledAt.toISOString(), followUpContext, existingRes.rows[0].id])
         } else {
           await pool.query(
             `insert into follow_ups (tenant_id, contact_id, conversation_id, ai_agent_id, scheduled_at, attempt_number, status, context)
-             values ($1, $2, $3, $4, $5, $6, 'pending', 'Follow-up automático — sem resposta do cliente')`,
-            [tenantId, contactId, conversationId, agent.id, scheduledAt.toISOString(), attemptNumber]
+             values ($1, $2, $3, $4, $5, $6, 'pending', $7)`,
+            [tenantId, contactId, conversationId, agent.id, scheduledAt.toISOString(), attemptNumber, followUpContext]
           )
         }
       }

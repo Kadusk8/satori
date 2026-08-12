@@ -50,18 +50,39 @@ async function generateFollowUpMessage(row: FollowUpRow, llmKeys: { anthropic_ap
       .replace('{tentativa}', String(row.attempt_number))
   }
 
+  // Follow-ups já enviados nesta conversa. Sem isso o LLM gerava três mensagens quase idênticas
+  // em dias seguidos ("Olá, {nome}! Espero que esteja bem. Gostaria de saber se ainda tem
+  // interesse...") — o cliente lê como spam automático, e foi exatamente essa a reclamação.
+  const previousRes = await pool.query<{ message_content: string | null }>(
+    `select message_content from follow_ups
+     where conversation_id = $1 and message_content is not null and sent_at is not null
+     order by sent_at asc limit 5`,
+    [row.conversation_id]
+  )
+  const previousMessages = previousRes.rows.map((r) => r.message_content).filter((m): m is string => !!m)
+
   const systemPrompt = `${row.agent_system_prompt}
 
 ## Tarefa específica
 Você está enviando uma mensagem de follow-up para um cliente que não respondeu.
 A mensagem deve ser:
-- Curta (máx 3 linhas)
+- Curta (máx 2 linhas)
 - Simpática e não invasiva
-- Mencionar brevemente o contexto anterior se disponível
+- Mencionar o contexto anterior (o produto que ele estava vendo) se disponível — é o motivo do contato
 - Não deve parecer uma mensagem automática/robô
 - Não usar listas ou formatação complexa — apenas texto natural
 - Terminar com uma pergunta aberta simples
 
+PROIBIDO: abrir com "Espero que esteja bem" / "Espero que esteja tudo bem com você", usar
+"Gostaria de saber se..." ou qualquer fórmula de e-mail formal. Escreva como um vendedor
+digitando rápido no WhatsApp.
+${previousMessages.length > 0 ? `
+## Follow-ups que você JÁ mandou para este cliente (ele não respondeu a nenhum)
+${previousMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}
+
+A nova mensagem tem que ser CLARAMENTE diferente dessas — outra abertura, outro ângulo, mais
+curta que as anteriores. Repetir a mesma pergunta de novo só reforça que é um robô.
+` : ''}
 Esta é a tentativa número ${row.attempt_number}. Ajuste o tom conforme necessário
 (tentativa 1: descontraído; tentativa 2: mais breve; tentativa 3: apenas perguntar se ainda há interesse).`
 
@@ -90,7 +111,10 @@ Esta é a tentativa número ${row.attempt_number}. Ajuste o tom conforme necess�
 }
 
 async function processFollowUp(row: FollowUpRow): Promise<void> {
-  const convRes = await pool.query<{ status: string }>(`select status from conversations where id = $1`, [row.conversation_id])
+  const convRes = await pool.query<{ status: string; last_message_at: Date | null }>(
+    `select status, last_message_at from conversations where id = $1`,
+    [row.conversation_id]
+  )
   const convStatus = convRes.rows[0]?.status
   if (convStatus === 'closed') {
     await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
@@ -111,6 +135,23 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
   if (isContactBlockedByTags(row.blocked_labels, row.contact_tags, row.whatsapp_label_names)) {
     await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
     return
+  }
+
+  // Conversa com movimento recente: o cliente voltou a falar (ou nós falamos com ele) depois de
+  // este follow-up ter sido agendado. Mandar "ainda posso te ajudar?" em cima de uma conversa
+  // viva é o que mais irrita o cliente — e acontecia porque o cancelamento por resposta pode
+  // falhar/correr em paralelo com o cron. Reagenda pro delay cheio contado da última mensagem,
+  // sem gastar tentativa. O silêncio real de `delayHours` é o único gatilho válido.
+  const delayHoursGuard = row.agent_follow_up_delay_hours ?? 24
+  const lastMessageAt = convRes.rows[0]?.last_message_at
+  if (lastMessageAt) {
+    const silentMs = Date.now() - new Date(lastMessageAt).getTime()
+    if (silentMs < delayHoursGuard * 60 * 60 * 1000) {
+      const nextAt = new Date(new Date(lastMessageAt).getTime() + delayHoursGuard * 60 * 60 * 1000)
+      await pool.query(`update follow_ups set scheduled_at = $1 where id = $2`, [nextAt.toISOString(), row.id])
+      console.log(`[process-follow-ups] Conversa ${row.conversation_id} teve mensagem há ${Math.round(silentMs / 60000)}min — follow-up ${row.id} reagendado para ${nextAt.toISOString()}`)
+      return
+    }
   }
 
   // Fora do horário comercial do tenant: não manda agora. Empurra 1h (mesma
