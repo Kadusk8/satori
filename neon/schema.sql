@@ -279,6 +279,15 @@ COMMENT ON COLUMN tenants.meta_dataset_id IS 'Meta Conversions API dataset ID �
 COMMENT ON COLUMN tenants.meta_access_token IS 'Meta Conversions API access token — criptografado com pgp_sym_encrypt. Ler via get_decrypted_meta_token().';
 COMMENT ON COLUMN tenants.meta_capi_enabled IS 'Flag para ativar/desativar envio de eventos ao Meta (default: false).';
 
+-- ================================================================
+-- Bloqueio de IA por etiqueta (WORKSTREAM D) — adicionado via ALTER
+-- Estava presente em produção (Neon) e no código, mas faltava aqui —
+-- corrigido em 2026-08-27 durante a migração pro Coolify.
+-- ================================================================
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS blocked_labels TEXT[] NOT NULL DEFAULT '{}';
+
+COMMENT ON COLUMN tenants.blocked_labels IS 'Etiquetas (CRM ou nativas do WhatsApp, lowercase) que travam a IA — contato com qualquer uma delas nunca recebe resposta automática nem tem o card de kanban movido.';
+
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "tenant_isolation_select" ON tenants
