@@ -1,4 +1,10 @@
 import Link from 'next/link'
+import { SiteHeader } from '@/components/landing/site-header'
+import { AnimatedChat } from '@/components/landing/animated-chat'
+import { CtaButton } from '@/components/landing/cta-button'
+import { ImpactStrip } from '@/components/landing/impact-strip'
+import { SegmentCard } from '@/components/landing/segment-card'
+import { Reveal, RevealGroup, RevealItem } from '@/components/landing/reveal'
 
 const WHATSAPP_NUMBER = '5562999350398'
 const waHref = (msg: string) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`
@@ -108,169 +114,123 @@ function WordMark({ className = '' }: { className?: string }) {
   )
 }
 
-function ChatBubbles({ from, to }: { from: string; to: string }) {
-  return (
-    <div className="mt-4 flex flex-col gap-1.5 text-[12px] leading-snug">
-      <div className="max-w-[85%] self-start rounded-xl rounded-tl-sm bg-white/[0.06] px-3 py-2 text-foreground/80">
-        {from}
-      </div>
-      <div className="max-w-[85%] self-end rounded-xl rounded-tr-sm bg-[#22d3ee]/[0.14] px-3 py-2 text-foreground">
-        {to}
-      </div>
-    </div>
-  )
-}
-
-function ChatMock() {
-  return (
-    <div className="relative w-full max-w-[380px] rounded-2xl border border-white/10 bg-[#0b0e14] p-4 shadow-[0_40px_120px_-40px_rgba(34,211,238,0.25)]">
-      <div className="mb-4 flex items-center gap-2 border-b border-white/5 pb-3">
-        <span className="h-2 w-2 rounded-full bg-[#22d3ee]" />
-        <span className="text-[11px] font-medium tracking-wide text-muted-foreground">
-          Atendimento · Satori IA
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-2.5 text-[13px] leading-snug">
-        <div className="max-w-[78%] self-start rounded-2xl rounded-tl-sm bg-white/[0.06] px-3.5 py-2.5 text-foreground/90">
-          Oi, vocês têm esse modelo em azul?
-        </div>
-        <div className="max-w-[85%] self-end rounded-2xl rounded-tr-sm bg-[#22d3ee]/[0.14] px-3.5 py-2.5 text-foreground">
-          Temos sim! Essa aqui é a opção em azul, com garantia de 90 dias.
-          <span className="mt-1 block text-[11px] text-[#22d3ee]">📷 foto enviada · R$ 3.290</span>
-        </div>
-        <div className="max-w-[78%] self-start rounded-2xl rounded-tl-sm bg-white/[0.06] px-3.5 py-2.5 text-foreground/90">
-          Consigo ver amanhã de manhã?
-        </div>
-        <div className="max-w-[85%] self-end rounded-2xl rounded-tr-sm bg-[#22d3ee]/[0.14] px-3.5 py-2.5 text-foreground">
-          Consigo te encaixar às 9h ou 10h30 — qual fica melhor?
-          <span className="mt-1 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
-            09:41 <span className="text-[#22d3ee]">✓✓</span>
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function Home() {
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background text-foreground">
-      {/* glow de fundo, sutil */}
+      {/* glow de fundo, respirando */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-40 left-1/2 h-[560px] w-[900px] -translate-x-1/2 rounded-full bg-[#22d3ee]/[0.07] blur-[140px]"
+        className="landing-glow pointer-events-none absolute -top-40 left-1/2 h-[560px] w-[900px] rounded-full bg-[#22d3ee]/[0.07] blur-[140px]"
       />
 
-      {/* NAV */}
-      <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6 sm:px-10">
-        <WordMark />
-        <Link
-          href="/login"
-          className="rounded-full border border-white/15 px-5 py-2 text-[13px] font-medium text-foreground/90 transition-colors hover:border-[#22d3ee]/60 hover:text-[#22d3ee]"
-        >
-          Entrar
-        </Link>
-      </header>
+      <SiteHeader />
 
       {/* HERO */}
       <section className="relative z-10 mx-auto grid w-full max-w-6xl items-center gap-16 px-6 py-16 sm:px-10 lg:grid-cols-[1.1fr_0.9fr] lg:py-20">
         <div>
-          <p className="mb-6 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
-            <span className="h-1 w-1 rounded-full bg-[#22d3ee]" />
-            Atendimento com IA no WhatsApp
-          </p>
+          <Reveal>
+            <p className="mb-6 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+              <span className="h-1 w-1 rounded-full bg-[#22d3ee]" />
+              Atendimento com IA no WhatsApp
+            </p>
+          </Reveal>
 
-          <h1 className="max-w-xl text-[2.5rem] font-medium leading-[1.08] tracking-tight sm:text-5xl">
-            O vendedor que <span className="font-light italic text-muted-foreground">nunca</span> perde uma
-            mensagem.
-          </h1>
+          <Reveal delay={0.05}>
+            <h1 className="max-w-xl text-[2.5rem] font-medium leading-[1.08] tracking-tight sm:text-5xl">
+              O vendedor que <span className="font-light italic text-muted-foreground">nunca</span> perde uma
+              mensagem.
+            </h1>
+          </Reveal>
 
-          <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
-            O Satori atende no WhatsApp da sua empresa como o seu melhor vendedor: entende o que o
-            cliente quer, manda foto do produto, fecha horário na agenda — e só te chama quando for
-            pra fechar negócio de verdade.
-          </p>
+          <Reveal delay={0.1}>
+            <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
+              O Satori atende no WhatsApp da sua empresa como o seu melhor vendedor: entende o que o
+              cliente quer, manda foto do produto, fecha horário na agenda — e só te chama quando for
+              pra fechar negócio de verdade.
+            </p>
+          </Reveal>
 
-          <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <a
-              href="#demo"
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-foreground/90 transition-colors hover:border-[#22d3ee]/60 hover:text-[#22d3ee]"
+          <Reveal delay={0.16}>
+            <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3">
+              <CtaButton href="#demo" variant="secondary">
+                Ver o Satori atendendo
+              </CtaButton>
+              <CtaButton href={CTA_ESPECIALISTA}>
+                Falar com um especialista
+                <span aria-hidden>↗</span>
+              </CtaButton>
+            </div>
+            <Link
+              href="/login"
+              className="mt-4 inline-block text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
             >
-              Ver o Satori atendendo
-            </a>
-            <a
-              href={CTA_ESPECIALISTA}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-full bg-[#22d3ee] px-6 py-3 text-sm font-semibold text-black transition-transform hover:scale-[1.03] active:scale-[0.98]"
-            >
-              Falar com um especialista
-              <span aria-hidden>↗</span>
-            </a>
-          </div>
-          <Link
-            href="/login"
-            className="mt-4 inline-block text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-          >
-            Já tenho conta — entrar
-          </Link>
+              Já tenho conta — entrar
+            </Link>
+          </Reveal>
         </div>
 
-        <div className="flex justify-center lg:justify-end">
-          <ChatMock />
-        </div>
+        <Reveal delay={0.1} className="flex justify-center lg:justify-end">
+          <AnimatedChat />
+        </Reveal>
       </section>
 
       {/* POR QUE SATORI */}
       <section className="relative z-10 border-y border-white/[0.06]">
-        <div className="mx-auto grid w-full max-w-6xl gap-8 px-6 py-10 sm:px-10 sm:grid-cols-3">
+        <RevealGroup className="mx-auto grid w-full max-w-6xl gap-8 px-6 py-10 sm:px-10 sm:grid-cols-3">
           {VALUE_POINTS.map((v) => (
-            <div key={v.title}>
+            <RevealItem key={v.title}>
               <h3 className="text-sm font-semibold text-foreground">{v.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{v.body}</p>
-            </div>
+            </RevealItem>
           ))}
-        </div>
+        </RevealGroup>
+      </section>
+
+      {/* IMPACTO NO NEGÓCIO */}
+      <section className="relative z-10 mx-auto w-full max-w-6xl px-6 py-24 sm:px-10">
+        <Reveal>
+          <h2 className="mb-14 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">
+            O que muda no seu negócio.
+          </h2>
+        </Reveal>
+        <ImpactStrip />
       </section>
 
       {/* SEGMENTOS */}
       <section id="demo" className="relative z-10 mx-auto w-full max-w-6xl scroll-mt-8 px-6 py-24 sm:px-10">
-        <h2 className="mb-14 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">
-          Feito pro seu tipo de negócio.
-        </h2>
+        <Reveal>
+          <h2 className="mb-14 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">
+            Feito pro seu tipo de negócio.
+          </h2>
+        </Reveal>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {SEGMENTS.map((s) => (
-            <div key={s.label} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-              <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-[#22d3ee]">
-                {s.label}
-              </span>
-              <p className="mt-2 text-sm leading-relaxed text-foreground/90">{s.body}</p>
-              <ChatBubbles from={s.from} to={s.to} />
-            </div>
+            <SegmentCard key={s.label} {...s} />
           ))}
         </div>
       </section>
 
       {/* COMO FUNCIONA */}
       <section className="relative z-10 mx-auto w-full max-w-6xl px-6 py-24 sm:px-10">
-        <h2 className="mb-14 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">
-          Do zero ao primeiro atendimento em um dia.
-        </h2>
-        <div className="grid gap-10 sm:grid-cols-3">
+        <Reveal>
+          <h2 className="mb-14 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">
+            Do zero ao primeiro atendimento em um dia.
+          </h2>
+        </Reveal>
+        <RevealGroup className="grid gap-10 sm:grid-cols-3">
           {STEPS.map((step) => (
-            <div key={step.n} className="border-t border-white/10 pt-5">
+            <RevealItem key={step.n} className="border-t border-white/10 pt-5">
               <span className="font-mono text-[13px] text-[#22d3ee]">{step.n}</span>
               <h3 className="mt-3 text-lg font-medium">{step.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
-            </div>
+            </RevealItem>
           ))}
-        </div>
+        </RevealGroup>
       </section>
 
       {/* INVESTIMENTO */}
       <section className="relative z-10 border-y border-white/[0.06] bg-white/[0.02]">
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-6 px-6 py-16 sm:px-10 lg:flex-row lg:items-center">
+        <Reveal className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-6 px-6 py-16 sm:px-10 lg:flex-row lg:items-center">
           <div>
             <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
               Investimento
@@ -283,22 +243,19 @@ export default function Home() {
               volume de atendimento.
             </p>
           </div>
-          <a
-            href={CTA_PLANOS}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/15 px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-[#22d3ee]/60 hover:text-[#22d3ee]"
-          >
+          <CtaButton href={CTA_PLANOS} variant="secondary" className="shrink-0">
             Ver planos
             <span aria-hidden>↗</span>
-          </a>
-        </div>
+          </CtaButton>
+        </Reveal>
       </section>
 
       {/* FAQ */}
       <section className="relative z-10 mx-auto w-full max-w-6xl px-6 py-24 sm:px-10">
-        <h2 className="mb-10 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">Perguntas frequentes</h2>
-        <div className="mx-auto max-w-2xl divide-y divide-white/10 border-t border-white/10">
+        <Reveal>
+          <h2 className="mb-10 max-w-lg text-3xl font-medium tracking-tight sm:text-4xl">Perguntas frequentes</h2>
+        </Reveal>
+        <Reveal delay={0.1} className="mx-auto max-w-2xl divide-y divide-white/10 border-t border-white/10">
           {FAQ.map((item) => (
             <details key={item.q} className="group py-5">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium text-foreground marker:content-none">
@@ -310,12 +267,12 @@ export default function Home() {
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{item.a}</p>
             </details>
           ))}
-        </div>
+        </Reveal>
       </section>
 
       {/* CTA FINAL */}
       <section className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-24 sm:px-10">
-        <div className="flex flex-col items-start justify-between gap-8 rounded-3xl border border-white/10 bg-white/[0.03] px-8 py-12 sm:px-14 sm:py-16 lg:flex-row lg:items-center">
+        <Reveal className="flex flex-col items-start justify-between gap-8 rounded-3xl border border-white/10 bg-white/[0.03] px-8 py-12 sm:px-14 sm:py-16 lg:flex-row lg:items-center">
           <div>
             <h2 className="max-w-md text-2xl font-medium tracking-tight sm:text-3xl">
               Bora colocar sua IA pra atender ainda essa semana?
@@ -324,16 +281,11 @@ export default function Home() {
               Resposta em minutos, direto no WhatsApp.
             </p>
           </div>
-          <a
-            href={CTA_ESPECIALISTA}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#22d3ee] px-7 py-3.5 text-sm font-semibold text-black transition-transform hover:scale-[1.03] active:scale-[0.98]"
-          >
+          <CtaButton href={CTA_ESPECIALISTA} className="shrink-0">
             Falar com um especialista
             <span aria-hidden>↗</span>
-          </a>
-        </div>
+          </CtaButton>
+        </Reveal>
       </section>
 
       {/* FOOTER */}
