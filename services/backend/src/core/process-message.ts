@@ -29,7 +29,7 @@ import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
 
-const LLM_FALLBACK_TEXT = 'Opa, deu uma travada aqui do meu lado 😅 me dá só um minutinho que já te respondo!'
+const LLM_FALLBACK_TEXT = 'Opa, já te respondo.'
 const LLM_FALLBACK_COOLDOWN_MS = 60_000
 // Timestamp do último envio do fallback de erro de LLM, por conversa — evita mandar a mesma
 // mensagem de novo em sequência quando o provedor fica instável/rate-limited por um tempo.
@@ -245,6 +245,20 @@ export function isAcknowledgment(content: string | null | undefined): boolean {
   if (!content) return false
   const cleaned = content.trim().replace(/[!?.,]+$/g, '').trim()
   return ACK_RE.test(cleaned)
+}
+
+// Encerramento explícito da conversa pelo cliente — ele está se despedindo ou adiando a decisão,
+// não pedindo nada. Diferente de isAcknowledgment (concordância seca): aqui há intenção clara de
+// PARAR o papo agora ("vou aguardar", "depois eu vejo", "qualquer coisa te chamo"). Usado pra
+// não armar follow-up automático em cima de quem já disse que não quer ser incomodado — foi
+// reclamação real da HotCar: cliente disse "vou aguardar, agradeço" e a IA seguiu mandando
+// follow-up dias seguidos.
+const CONVERSATION_CLOSING_RE =
+  /(vou aguardar|aguard(o|ar) (um pouco|mais|mais um pouco)|depois (eu )?(vejo|penso|decido|te (chamo|falo|retorno|aviso))|qualquer coisa (eu )?(te )?(chamo|falo|aviso|retorno|procuro)|quando (eu )?(decidir|puder|tiver|precisar)|s[óo] isso( por enquanto)?|por enquanto (s[óo] isso|é s[óo] isso|nada mais|obrigad)|era s[óo] isso|n[ãa]o,?\s*(obrigad|precisa|preciso de mais)|deixa (pra|para) depois|mais tarde eu (vejo|volto|retorno)|fico no aguardo|agradeço,? (vou|por enquanto)|obrigad[oa] (por enquanto|pela aten[çc][ãa]o|mesmo assim))/i
+
+export function isConversationClosing(content: string | null | undefined): boolean {
+  if (!content) return false
+  return CONVERSATION_CLOSING_RE.test(content.trim())
 }
 
 // Frases-clichê de fechamento que o modelo (gpt-4o principalmente) cola no FIM de quase toda
@@ -840,6 +854,10 @@ como um atendimento genérico de primeiro contato.` : ''}`
   let deferredImageProductId: string | null = null
   let deferredImageIsExplicit = false
   let lastSearchProductsWithImages: Array<{ name: string; id: string }> = []
+  // A última busca de produtos caiu no tier 4 ("lista tudo" aleatório) — não casou com nada
+  // específico. Nesse caso o fallback de auto-imagem NUNCA deve disparar: mandaria a foto de
+  // um carro aleatório sem relação com o pedido do cliente.
+  let lastSearchUsedRandomFallback = false
   let staleQueryTerm: string | null = null
 
   // Loga o erro e manda o fallback fixo pro cliente — mas só se não mandou essa mesma
@@ -859,12 +877,33 @@ como um atendimento genérico de primeiro contato.` : ''}`
     }
     const lastSent = llmFallbackLastSentAt.get(conversationId) ?? 0
     if (Date.now() - lastSent < LLM_FALLBACK_COOLDOWN_MS) return
-    try {
-      const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
-      await evo.sendText(contactNumber, LLM_FALLBACK_TEXT)
-      llmFallbackLastSentAt.set(conversationId, Date.now())
-    } catch (sendErr) {
-      console.error('[process-message] Erro ao enviar fallback de erro de LLM:', sendErr)
+    // O envio em si pode falhar (instabilidade da Evolution/Baileys) — sem retry, o cliente
+    // fica sem NENHUMA resposta (nem a real, nem o aviso de fallback) e isso não deixava
+    // nenhum rastro fora do console.error do container. Tenta 1x mais antes de desistir e,
+    // se ainda assim falhar, grava em ai_error_logs pra ficar visível numa query.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
+        await evo.sendText(contactNumber, LLM_FALLBACK_TEXT)
+        llmFallbackLastSentAt.set(conversationId, Date.now())
+        return
+      } catch (sendErr) {
+        console.error(`[process-message] Erro ao enviar fallback de erro de LLM (tentativa ${attempt + 1}/2):`, sendErr)
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+          continue
+        }
+        const sendErrMessage = sendErr instanceof Error ? sendErr.message : String(sendErr)
+        try {
+          await pool.query(
+            `insert into ai_error_logs (tenant_id, ai_agent_id, conversation_id, provider, error_type, message)
+             values ($1, $2, $3, $4, $5, $6)`,
+            [tenantId, agent.id, conversationId, llmProvider, 'fallback_send_failed', sendErrMessage.slice(0, 2000)]
+          )
+        } catch (logErr) {
+          console.error('[process-message] Erro ao registrar ai_error_logs (fallback_send_failed):', logErr)
+        }
+      }
     }
   }
 
@@ -996,13 +1035,18 @@ como um atendimento genérico de primeiro contato.` : ''}`
           const correctedResult = await toolSearchProducts(tenantId, searchInput, conversationId, correctionMeta)
           if (!correctionMeta.usedFallback) {
             result = `[SISTEMA: Apresente os produtos abaixo normalmente como resultados disponíveis. NÃO mencione que houve troca de palavras. NÃO escreva "não encontrei" — há produtos no catálogo.]\n\n` + correctedResult
+            lastSearchUsedRandomFallback = false
           } else {
-            result = await toolSearchProducts(tenantId, tu.input, conversationId)
+            const revertMeta: { usedFallback?: boolean } = {}
+            result = await toolSearchProducts(tenantId, tu.input, conversationId, revertMeta)
+            lastSearchUsedRandomFallback = !!revertMeta.usedFallback
             queryCorrected = false
             staleQueryTerm = null
           }
         } else {
-          result = await toolSearchProducts(tenantId, searchInput, conversationId)
+          const searchMeta: { usedFallback?: boolean } = {}
+          result = await toolSearchProducts(tenantId, searchInput, conversationId, searchMeta)
+          lastSearchUsedRandomFallback = !!searchMeta.usedFallback
         }
         const imgMatches = [...result.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
         lastSearchProductsWithImages = imgMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
@@ -1034,6 +1078,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
                 `[SISTEMA: o cliente veio do anúncio de "${adFocus.name}" e está perguntando sobre ESTE veículo (a mensagem dele descreve uma característica dele, não outro carro). Apresente somente este produto e responda ao que ele perguntou sobre ele. NÃO ofereça outro veículo.]\n\n` +
                 anchored
               lastSearchProductsWithImages = anchoredProducts
+              lastSearchUsedRandomFallback = false
             }
           }
         }
@@ -1092,32 +1137,53 @@ como um atendimento genérico de primeiro contato.` : ''}`
     }
   }
 
-  // Auto-imagem: fallback quando o LLM não chamou send_product_image
-  if (!deferredImage && finalText && lastSearchProductsWithImages.length > 0) {
+  // Auto-imagem: fallback quando o LLM não chamou send_product_image. Só dispara quando dá pra
+  // ter CERTEZA de qual produto — senão manda a foto do carro errado. Reclamação real da HotCar:
+  // cliente pediu um carro, a busca não casou com nada (caiu no tier aleatório), a IA escreveu
+  // um texto sobre outro modelo, e o fallback antigo mandava a foto de um carro qualquer só
+  // porque era o único resultado. Regras: (1) nunca disparar em cima de busca do tier aleatório;
+  // (2) só disparar se EXATAMENTE UM produto da busca for citado de forma inequívoca no texto.
+  if (
+    !deferredImage &&
+    finalText &&
+    lastSearchProductsWithImages.length > 0 &&
+    !lastSearchUsedRandomFallback
+  ) {
     const finalTextLower = finalText.toLowerCase()
-    let matched = false
 
-    for (const { name, id } of lastSearchProductsWithImages) {
-      const nameParts = name.split(/\s+/).filter((w) => w.length > 3)
-      const matchCount = nameParts.filter((p) => finalTextLower.includes(p.toLowerCase())).length
-      if (matchCount >= 2) {
-        const imageData = await resolveProductImageData(tenantId, id)
-        if (imageData) {
-          deferredImage = imageData
-          deferredImageProductId = id
-          matched = true
-          break
-        }
-      }
-    }
+    // Tokens que NÃO identificam um carro (marca, categoria, câmbio, genéricos) — "kia",
+    // "sedan", "flex", "manual" batem em qualquer texto. Só tokens distintivos do modelo
+    // ("sportage", "ecosport", "corolla") contam pra casar o produto.
+    const GENERIC_NAME_TOKENS = new Set([
+      'kia', 'ford', 'fiat', 'volkswagen', 'chevrolet', 'hyundai', 'honda', 'toyota', 'renault',
+      'peugeot', 'citroen', 'citroën', 'nissan', 'jeep', 'mitsubishi', 'bmw', 'audi', 'mercedes',
+      'caoa', 'chery', 'dodge', 'land', 'rover', 'volvo', 'kombi',
+      'motors', 'automatico', 'automático', 'manual', 'flex', 'gasolina', 'diesel', 'turbo',
+      'sedan', 'hatch', 'hatchback', 'suv', 'picape', 'pickup', 'completo', 'unico', 'único', 'dono',
+    ])
+    const distinctiveTokens = (name: string) =>
+      name
+        .toLowerCase()
+        .split(/[\s/\-,]+/)
+        .filter((w) => w.length > 3 && /[a-zà-ÿ]/.test(w) && !GENERIC_NAME_TOKENS.has(w))
 
-    if (!matched && lastSearchProductsWithImages.length === 1) {
-      const { id } = lastSearchProductsWithImages[0]
-      const imageData = await resolveProductImageData(tenantId, id)
+    const candidates = lastSearchProductsWithImages.filter(({ name }) => {
+      const toks = distinctiveTokens(name)
+      if (toks.length === 0) return false
+      const hits = toks.filter((t) => finalTextLower.includes(t)).length
+      return hits >= Math.min(2, toks.length)
+    })
+
+    if (candidates.length === 1) {
+      const imageData = await resolveProductImageData(tenantId, candidates[0].id)
       if (imageData) {
         deferredImage = imageData
-        deferredImageProductId = id
+        deferredImageProductId = candidates[0].id
       }
+    } else if (candidates.length > 1) {
+      console.log(
+        `[process-message] Auto-imagem abortada — texto cita ${candidates.length} produtos da busca, ambíguo (conv ${conversationId})`
+      )
     }
   }
 
@@ -1216,14 +1282,37 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // "ok" com nada. Se a nossa última mensagem TINHA pergunta, o "ok"/"sim" é a resposta dela —
   // aí o texto do LLM é legítimo e passa direto.
   const customerAck = !isPureGreeting(lastCustomerMsg?.content) && isAcknowledgment(lastCustomerMsg?.content)
-  if (customerAck && !isFirstAiResponse && finalText && !wasEscalated) {
-    const lastOurMsg = [...history].reverse().find((m) => m.sender_type === 'ai' || m.sender_type === 'human')
-    const weAskedSomething = (lastOurMsg?.content ?? '').includes('?')
-    if (!weAskedSomething) {
-      console.log(`[process-message] Ack do cliente ("${lastCustomerMsg?.content}") sem pergunta pendente — resposta suprimida (conv ${conversationId})`)
-      finalText = ''
-      deferredImage = null
-      deferredImageProductId = null
+  const lastOurMsgBeforeReply = [...history].reverse().find((m) => m.sender_type === 'ai' || m.sender_type === 'human')
+  const weAskedSomething = (lastOurMsgBeforeReply?.content ?? '').includes('?')
+  if (customerAck && !isFirstAiResponse && finalText && !wasEscalated && !weAskedSomething) {
+    console.log(`[process-message] Ack do cliente ("${lastCustomerMsg?.content}") sem pergunta pendente — resposta suprimida (conv ${conversationId})`)
+    finalText = ''
+    deferredImage = null
+    deferredImageProductId = null
+  }
+
+  // Cliente encerrando o papo: concordância seca sem pergunta nossa pendente, OU despedida/
+  // adiamento explícito ("vou aguardar", "depois te chamo"). Não é gatilho de follow-up — e
+  // cancela os follow-ups pendentes que já existirem. Reclamação real da HotCar: cliente disse
+  // "vou aguardar, agradeço" e a IA seguiu mandando follow-up dias seguidos.
+  const customerEndedConversation =
+    !isFirstAiResponse &&
+    !wasEscalated &&
+    ((customerAck && !weAskedSomething) || isConversationClosing(lastCustomerMsg?.content))
+
+  if (customerEndedConversation) {
+    try {
+      const cancelled = await pool.query(
+        `update follow_ups set status = 'cancelled' where conversation_id = $1 and status = 'pending'`,
+        [conversationId]
+      )
+      if ((cancelled.rowCount ?? 0) > 0) {
+        console.log(
+          `[process-message] Cliente encerrou a conversa ("${lastCustomerMsg?.content?.slice(0, 40)}") — ${cancelled.rowCount} follow-up(s) pendente(s) cancelado(s) (conv ${conversationId})`
+        )
+      }
+    } catch (fuErr) {
+      console.error('[process-message] Erro ao cancelar follow-ups no encerramento da conversa:', fuErr)
     }
   }
 
@@ -1440,9 +1529,11 @@ como um atendimento genérico de primeiro contato.` : ''}`
     }
   }
 
-  // Auto follow-up
+  // Auto follow-up — não rearma quando o cliente encerrou o papo (despedida/adiamento explícito
+  // ou "ok/valeu" sem pergunta nossa pendente); esses follow-ups pendentes já foram cancelados
+  // acima.
   const aiScheduledFollowUp = allToolCalls.some((c) => c.name === 'schedule_follow_up')
-  if (agentFollowUpEnabled && !wasEscalated && finalText && !aiScheduledFollowUp) {
+  if (agentFollowUpEnabled && !wasEscalated && finalText && !aiScheduledFollowUp && !customerEndedConversation) {
     try {
       const countRes = await pool.query<{ count: string }>(
         `select count(*) from follow_ups where conversation_id = $1 and status not in ('cancelled','max_reached')`,

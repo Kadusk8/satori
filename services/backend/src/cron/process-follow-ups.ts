@@ -8,7 +8,7 @@ import { getTenantLlmKeys, getAgentLlmKey, pool } from '../db/index.js'
 import { callLLM, type LLMProvider } from '../shared/llm-client.js'
 import { sendWhatsAppMessage } from '../core/send-whatsapp.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
-import { isWithinBusinessHours, type BusinessHours } from '../core/process-message.js'
+import { isWithinBusinessHours, isConversationClosing, type BusinessHours } from '../core/process-message.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -134,6 +134,22 @@ async function processFollowUp(row: FollowUpRow): Promise<void> {
   // nunca recebe follow-up automático.
   if (isContactBlockedByTags(row.blocked_labels, row.contact_tags, row.whatsapp_label_names)) {
     await pool.query(`update follow_ups set status = 'cancelled' where id = $1`, [row.id])
+    return
+  }
+
+  // Cliente encerrou explicitamente o papo na última mensagem dele ("vou aguardar", "depois te
+  // chamo", "obrigado por enquanto") — cancela todos os follow-ups pendentes da conversa. Rede
+  // de segurança pro caso do cancelamento no process-message ter falhado ou o encerramento ter
+  // vindo por um canal que não passou por lá.
+  const lastCustomerRes = await pool.query<{ content: string | null }>(
+    `select content from messages
+     where conversation_id = $1 and sender_type = 'customer' and content is not null
+     order by created_at desc limit 1`,
+    [row.conversation_id]
+  )
+  if (isConversationClosing(lastCustomerRes.rows[0]?.content)) {
+    await pool.query(`update follow_ups set status = 'cancelled' where conversation_id = $1 and status = 'pending'`, [row.conversation_id])
+    console.log(`[process-follow-ups] Cliente encerrou a conversa ${row.conversation_id} ("${lastCustomerRes.rows[0]?.content?.slice(0, 40)}") — follow-ups pendentes cancelados`)
     return
   }
 
