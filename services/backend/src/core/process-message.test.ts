@@ -4,6 +4,7 @@ import {
   extractFocusProductCandidate,
   isAcknowledgment,
   isAllRoboticClosers,
+  isConversationClosing,
   isMoreImagesIntent,
   isPureGreeting,
   isReturningAfterGap,
@@ -195,6 +196,37 @@ describe('isAcknowledgment', () => {
   it('não dispara quando há pedido junto', () => {
     for (const msg of ['ok, mas qual o preço?', 'blz, quero ver outro carro', null, '']) {
       expect(isAcknowledgment(msg), String(msg)).toBe(false)
+    }
+  })
+})
+
+describe('isConversationClosing', () => {
+  it('detecta encerramento/adiamento explícito do cliente', () => {
+    for (const msg of [
+      'Bom dia! Vou aguardar um pouco mais, agradeço!',
+      'depois eu vejo com calma',
+      'qualquer coisa te chamo',
+      'quando eu decidir eu te falo',
+      'por enquanto é só isso, obrigado',
+      'era só isso mesmo',
+      'não, obrigado',
+      'deixa pra depois',
+      'fico no aguardo então',
+    ]) {
+      expect(isConversationClosing(msg), msg).toBe(true)
+    }
+  })
+
+  it('não dispara em mensagens que ainda pedem algo', () => {
+    for (const msg of [
+      'não quero esse, tem outro modelo?',
+      'quanto fica esse?',
+      'quero agendar uma visita',
+      'me manda mais fotos',
+      null,
+      '',
+    ]) {
+      expect(isConversationClosing(msg), String(msg)).toBe(false)
     }
   })
 })
