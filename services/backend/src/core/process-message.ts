@@ -534,10 +534,13 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     }
   }
 
-  // A IA atende 24/7 — business_hours só é usado como informação de contexto
-  // no prompt (ex: pra agendamento), nunca pra bloquear a resposta.
+  // A IA atende 24/7 — business_hours nunca bloqueia a resposta, só informa o status real
+  // pra ela não afirmar que a loja está aberta fora do horário. Bug real em produção
+  // (HotCar): o prompt cravava "DENTRO do horário de atendimento" sempre, então num sábado
+  // (horário cadastrado Seg-Sex 8h-18h) a IA garantiu ao cliente que a loja estava aberta.
   const businessHours = conv.business_hours
   const timezone = conv.timezone ?? 'America/Sao_Paulo'
+  const withinBusinessHours = isWithinBusinessHours(businessHours, timezone)
 
   // Histórico (últimas 40 mensagens). ORDER BY DESC + LIMIT pega as mais
   // recentes; sem o DESC aqui, LIMIT pegaria as 40 MAIS ANTIGAS da conversa
@@ -783,7 +786,7 @@ conduza ativamente para o fechamento (forma de pagamento, confirmação do pedid
 ## Contexto atual
 - Data/hora: ${now}
 - Horário de atendimento: ${formatBusinessHours(businessHours)}
-- Status: DENTRO do horário de atendimento
+- Status: ${withinBusinessHours ? 'DENTRO' : 'FORA'} do horário de atendimento${!withinBusinessHours ? ' — a loja está FECHADA agora. Você (IA) continua atendendo normalmente, mas NUNCA diga que a loja está aberta ou que alguém pode ir até lá agora. Se perguntarem se está aberto, responda a verdade (fechado, com o horário de funcionamento) e ofereça seguir por aqui mesmo (tirar dúvidas, agendar pra quando abrir) sem tentar transferir pra humano só por isso.' : ''}
 ${isReturning ? `
 ## Cliente retomando o contato
 O cliente ficou um tempo sem falar e está voltando agora. Todo o histórico acima é sua MEMÓRIA da relação
