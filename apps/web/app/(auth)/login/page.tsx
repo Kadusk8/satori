@@ -1,14 +1,10 @@
 'use client'
 
-import { useState, useTransition, Suspense } from 'react'
+import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 import { login } from '../actions'
 
 function LoginForm() {
-  const searchParams = useSearchParams()
-  const registered = searchParams.get('registered')
-
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -393,13 +389,6 @@ function LoginForm() {
           <h1 className="auth-card-title">Bem-vindo de volta</h1>
           <p className="auth-card-subtitle">Entre na sua conta para continuar</p>
 
-          {registered && (
-            <div className="auth-success-banner">
-              <span>✓</span>
-              Conta criada com sucesso! Faça login para continuar.
-            </div>
-          )}
-
           {error && (
             <div className="auth-error-banner">
               <span>✕</span>
@@ -456,11 +445,6 @@ function LoginForm() {
           </form>
         </div>
 
-        <div className="auth-footer">
-          Não tem uma conta?{' '}
-          <Link href="/register">Criar conta</Link>
-        </div>
-
         <div className="auth-badge">
           <span className="auth-badge-dot" />
           Protegido com Supabase Auth
@@ -471,9 +455,5 @@ function LoginForm() {
 }
 
 export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
-  )
+  return <LoginForm />
 }
