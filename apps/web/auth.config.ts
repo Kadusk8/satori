@@ -4,7 +4,9 @@ import type { NextAuthConfig } from 'next-auth'
 // verifica o JWT, sem tocar em banco/bcrypt) e o auth.ts completo (Node).
 // NÃO importe pg/bcrypt aqui.
 
-const PUBLIC_PATHS = ['/', '/login', '/register']
+// Sem '/register': criação de conta é exclusiva do super admin (onboarding
+// de tenant) ou de convite de operador — nunca self-service.
+const PUBLIC_PATHS = ['/', '/login']
 
 export const authConfig = {
   pages: { signIn: '/login' },
