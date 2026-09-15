@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   extractCustomerKeywords,
   extractFocusProductCandidate,
+  extractRejectedProductIds,
   isAcknowledgment,
   isAllRoboticClosers,
   isConversationClosing,
   isMoreImagesIntent,
+  isProductRejection,
   isPureGreeting,
   isReturningAfterGap,
   isWithinBusinessHours,
@@ -254,6 +256,67 @@ describe('stripChecklistDump', () => {
   it('não mexe em 1-2 checkmarks soltos (uso legítimo de emoji)', () => {
     const text = 'Já revisado ✅ e com garantia ✅ — pode vir ver!'
     expect(stripChecklistDump(text)).toBe(text)
+  })
+})
+
+describe('isProductRejection', () => {
+  it('detecta recusa explícita de um produto já mostrado', () => {
+    for (const msg of [
+      'esse não',
+      'não é esse',
+      'não gostei desse',
+      'não quero esse',
+      'não curti',
+      'quero outro modelo',
+      'não serve',
+    ]) {
+      expect(isProductRejection(msg), msg).toBe(true)
+    }
+  })
+
+  it('não dispara em mensagens neutras', () => {
+    for (const msg of ['quanto custa?', 'tem mais fotos?', 'gostei muito', null, '']) {
+      expect(isProductRejection(msg), String(msg)).toBe(false)
+    }
+  })
+})
+
+describe('extractRejectedProductIds', () => {
+  const baseMsg = {
+    id: '1',
+    sender_type: 'ai',
+    content: 'texto',
+    content_type: 'text',
+    media_url: null,
+    created_at: new Date(),
+  }
+
+  it('marca como recusado o produto mostrado logo antes de uma recusa do cliente', () => {
+    const history = [
+      {
+        ...baseMsg,
+        id: '1',
+        ai_tool_calls: [
+          { name: 'send_product_image', input: { product_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }, result: 'ok' },
+        ],
+      },
+      { ...baseMsg, id: '2', sender_type: 'customer', ai_tool_calls: null, content: 'esse não, quero outro' },
+    ]
+    expect(extractRejectedProductIds(history)).toEqual(new Set(['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']))
+  })
+
+  it('não marca como recusado quando o cliente responde bem', () => {
+    const history = [
+      {
+        ...baseMsg,
+        id: '1',
+        ai_tool_calls: [
+          { name: 'send_product_image', input: { product_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }, result: 'ok' },
+        ],
+      },
+      { ...baseMsg, id: '2', sender_type: 'customer', ai_tool_calls: null, content: 'gostei, quanto custa?' },
+    ]
+    expect(extractRejectedProductIds(history)).toEqual(new Set())
   })
 })
 

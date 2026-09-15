@@ -416,6 +416,39 @@ export function isReturningAfterGap(history: MessageRow[], gapMs: number): boole
   return last.created_at.getTime() - prev.created_at.getTime() > gapMs
 }
 
+// Recusa explícita de um produto específico já mostrado ("esse não", "não é esse", "não gostei
+// desse", "quero outro modelo") — usado pra NUNCA insistir na mesma sugestão que o cliente já
+// recusou. Reclamação real (HotCar): cliente pediu Corolla 2016, não tínhamos; a IA mandou um
+// Corolla 2024 como alternativa, o cliente recusou, e ela mandou o MESMO 2024 de novo — três
+// vezes seguidas — porque a regra antiga ("nunca diga que não tem, sempre apresente o resultado
+// da busca") forçava repetir a mesma sugestão a cada turno.
+const PRODUCT_REJECTION_RE =
+  /(esse n[ãa]o\b|n[ãa]o [ée] esse|n[ãa]o gostei( desse| dessa)?|n[ãa]o quero esse|n[ãa]o curti|diferente desse|outro (modelo|carro|op[çc][ãa]o|produto)|n[ãa]o serve|n[ãa]o [ée] esse (modelo|carro))/i
+
+export function isProductRejection(content: string | null | undefined): boolean {
+  if (!content) return false
+  return PRODUCT_REJECTION_RE.test(content)
+}
+
+// IDs de produtos que já foram mostrados (send_product_image/send_more_product_images) e, logo
+// em seguida, recusados pelo cliente na mensagem seguinte. Usado pelos fallbacks determinísticos
+// abaixo pra nunca reoferecer a mesma foto que o cliente já disse que não quer.
+export function extractRejectedProductIds(history: MessageRow[]): Set<string> {
+  const rejected = new Set<string>()
+  for (let i = 0; i < history.length - 1; i++) {
+    const msg = history[i]
+    if (msg.sender_type !== 'ai' || !Array.isArray(msg.ai_tool_calls)) continue
+    const next = history[i + 1]
+    if (next?.sender_type !== 'customer' || !isProductRejection(next.content)) continue
+    for (const call of msg.ai_tool_calls) {
+      if (call.name !== 'send_product_image' && call.name !== 'send_more_product_images') continue
+      const id = String(call.input?.product_id ?? '')
+      if (id) rejected.add(id)
+    }
+  }
+  return rejected
+}
+
 export function extractFocusProductCandidate(history: MessageRow[]): { id: string; name?: string } | null {
   const window = history.slice(-FOCUS_LOOKBACK_MESSAGES)
   let searchFallback: { id: string; name?: string } | null = null
@@ -692,6 +725,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   }
 
   const focusCandidate = extractFocusProductCandidate(history)
+  const rejectedProductIds = extractRejectedProductIds(history)
   let focusProduct: { id: string; name: string; priceText: string | null } | null = null
   // O foco veio do anúncio que o cliente clicou (não do histórico da conversa) — usado pela
   // âncora de busca do primeiro turno, mais abaixo.
@@ -746,11 +780,13 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 - RECOMENDE 1 produto: apresente o mais adequado ao que o cliente descreveu. Não liste todos — escolha um e recomende com convicção. Se o cliente quiser ver mais, ele pede.
 - APRESENTAÇÃO: quando o produto tiver "[tem imagem]", chame send_product_image — a foto vai com o preço e a ficha do produto já na legenda (montados automaticamente pelo sistema). Seu texto deve destacar 1-2 BENEFÍCIOS ou diferenciais do produto (material, qualidade, design, conforto, exclusividade) em 1-2 frases curtas. Ex: "Olha essa opção — acabamento premium e design exclusivo 👇" ou "Esse aqui combina muito com o que você descreveu 👇". Se o produto NÃO tem imagem, inclua nome, benefícios e o preço no texto.
 - PREÇO — dado fixo, aparece sempre: o preço é uma informação FIXA do produto e o sistema já o mostra automaticamente no card da foto — não é segredo e não precisa ser "conquistado". Você NÃO precisa cravar o preço logo na primeira frase da apresentação (prefira abrir com o benefício), mas fale dele com naturalidade e responda na HORA se o cliente perguntar ("quanto custa?", "qual o valor?") — nunca desconverse nem enrole sobre preço. REGRA INVIOLÁVEL: use SEMPRE o preço exato cadastrado do produto — NUNCA invente, estime ou dê um valor/desconto diferente do que está no card.
+- PROCEDÊNCIA/HISTÓRICO (leilão, batida, sinistro, multa etc.) — REGRA INVIOLÁVEL: se o cliente perguntar sobre passagem por leilão, batida, sinistro ou qualquer histórico do veículo/produto, responda SOMENTE com base no campo "🔧 Características" (ou na descrição) do produto nos resultados de search_products. Se lá constar algo como "Veículos com passagem por Leilão" ou equivalente, informe a verdade ao cliente — NUNCA diga "não tem" nem negue uma característica que está cadastrada, mesmo que isso pareça atrapalhar a venda; venda com honestidade, destacando outros benefícios reais. Se a característica não estiver listada, diga que não tem essa informação à mão agora e ofereça confirmar com a equipe — NUNCA garanta ausência de problema que você não pode verificar no cadastro.
 - FOTOS — REGRA ABSOLUTA: se o produto tem "[tem imagem — use send_product_image com id: ...]" nos resultados da busca, você DEVE chamar a ferramenta send_product_image — nunca escreva sobre a imagem, CHAME A FERRAMENTA. Se o produto NÃO tem esse indicador, significa que não há foto disponível — NUNCA escreva "vou enviar a imagem", "vou te mandar a foto", "vou compartilhar" ou qualquer variação. Escrever isso sem chamar a ferramenta não envia NADA — é uma promessa falsa que frustra o cliente.
 - MAIS FOTOS — REGRA ABSOLUTA: send_product_image manda só a foto de destaque (a principal). Se DEPOIS disso o cliente pedir mais fotos de QUALQUER forma (ex: "tem mais fotos?", "manda mais", "manda todas", "quero ver mais", "quero ver o interior/por dentro", "tem outros ângulos?", "quero ver melhor"), você DEVE chamar send_more_product_images — ela já envia TODAS as fotos restantes cadastradas de uma vez, não é preciso (nem deve) chamar de novo pra cada foto. NUNCA chame send_product_image de novo pra atender esse pedido (ela só reenviaria a mesma foto de destaque) e NUNCA diga que só tem 1 foto sem antes checar chamando a ferramenta — o resultado dela informa se há mais fotos ou não. Normalmente chame as duas em respostas separadas — primeiro a de destaque, send_more_product_images só depois, quando pedirem. EXCEÇÃO: se a própria mensagem do cliente já pedir "mais fotos"/"todas as fotos"/"fotos dele" ANTES de você ter mostrado qualquer foto (ou seja, ele já quer várias de cara, não só a de destaque), chame send_product_image E send_more_product_images NA MESMA resposta — não faça ele pedir de novo pra receber o que já pediu. TEXTO ENXUTO NAS FOTOS: quando o cliente só pede mais fotos, NÃO re-descreva o produto (ano, cor, câmbio, km, preço, etc — ele já viu isso). Responda com no MÁXIMO uma frase bem curta e natural ("Claro! 👇", "Olha só 👇") e deixe as fotos falarem. Repetir a ficha inteira do produto a cada pedido de foto denuncia que você é um robô — seja breve como um vendedor de verdade no WhatsApp.
 - ERRO EM FOTO: se send_product_image ou send_more_product_images retornar "Produto não encontrado" (ou "sem imagem cadastrada"), isso NÃO significa que o produto não existe — normalmente é um ID desatualizado. Antes de dizer qualquer coisa ao cliente, chame search_products com o nome do produto mencionado pra recuperar o ID correto e tente de novo. Só diga que não tem esse produto/foto depois de tentar essa busca e ela também não encontrar nada.
 - 1 PRODUTO SOMENTE — INVIOLÁVEL: mesmo que search_products retorne 2 ou 3 resultados, você deve apresentar APENAS 1 — o mais relevante. Nunca descreva ou mencione mais de 1 produto em uma mesma mensagem. Isso não é negociável.
-- NUNCA DIGA "não encontrei" / "não consigo encontrar" / "não temos esse produto": search_products SEMPRE retorna produtos do catálogo real. Se há um produto no resultado, ele EXISTE e está disponível — apresente-o diretamente. NUNCA explique que buscou por outra palavra ou que o produto não é exato.
+- SEM O MODELO/VARIANTE EXATA QUE O CLIENTE PEDIU — PERGUNTE ANTES DE SUBSTITUIR: se o cliente pediu algo específico (ex: "Corolla 2016", "colchão queen branco") e os resultados da busca não trazem ESSE item — só coisas bem diferentes ou a lista genérica do estoque —, diga a verdade em 1 frase curta ("não temos esse [modelo/ano/variante] especificamente") e PERGUNTE o que ele aceitaria como alternativa (outro modelo/tipo, ano, faixa de preço, cor) ANTES de sugerir qualquer substituto concreto. NUNCA insista oferecendo de novo um produto que ele já recusou ("esse não", "não é esse", "não gostei") — se ele recusar, pergunte o que exatamente ele quer mudar, nunca repita a mesma foto/produto. Isso é diferente de quando a busca acha um produto de verdade relacionado ao pedido — nesse caso apresente normalmente, sem hedging. Quando o cliente responder com uma preferência nova (outro modelo, faixa de preço, cor etc.), busque de novo com essas palavras e aí sim apresente a opção mais próxima.
+- NUNCA diga "não encontrei" / "não consigo encontrar" de forma vaga e sem seguimento — se realmente não tem o que ele pediu, siga a regra acima (admita + pergunte a preferência), nunca deixe a conversa morta num "não encontrei" seco.
 - NUNCA REPITA PERGUNTAS: se o cliente já disse o tamanho, preferência ou nome, use essa informação. Nunca peça de novo.
 - MENSAGENS CURTAS: máximo 2-3 frases por mensagem. WhatsApp não é e-mail.
 - LINKS E IMAGENS NO TEXTO — PROIBIDO: nunca escreva URLs, nunca escreva sintaxe markdown de imagem tipo "![nome](url)" ou qualquer variação disso, mesmo como placeholder ou exemplo. Isso NUNCA vira imagem de verdade pro cliente — aparece como texto quebrado. A ÚNICA forma de o cliente receber uma foto é você chamar send_product_image ou send_more_product_images.
@@ -1114,8 +1150,13 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // a instrução [SISTEMA]). Nesse ponto o problema não é mais a busca, é o texto do LLM — descarta
   // e monta uma resposta determinística com o primeiro resultado real que a busca encontrou.
   if (staleQueryTerm && finalText && finalText.toLowerCase().includes(staleQueryTerm) && lastSearchProductsWithImages.length > 0) {
-    const { name } = lastSearchProductsWithImages[0]
-    finalText = `Não temos essa opção específica no momento, mas dá uma olhada nessa aqui: *${name}* 👇`
+    // Nunca reoferece um produto que o cliente já recusou explicitamente — só o próximo da lista
+    // que ainda não foi rejeitado. Se todos já foram recusados, admite e pergunta a preferência
+    // dele em vez de insistir de novo na mesma foto (ver extractRejectedProductIds).
+    const candidate = lastSearchProductsWithImages.find((p) => !rejectedProductIds.has(p.id)) ?? null
+    finalText = candidate
+      ? `Não temos essa opção específica no momento, mas dá uma olhada nessa aqui: *${candidate.name}* 👇`
+      : 'Não temos exatamente essa opção, e as alternativas que eu tinha eu já te mostrei. Tem outro modelo, ano, faixa de preço ou cor que você aceitaria? Já procuro algo mais parecido pra você.'
   }
 
   // Alucinação SEM tool call nenhuma: às vezes a IA nem chega a chamar search_products — só
@@ -1130,14 +1171,40 @@ como um atendimento genérico de primeiro contato.` : ''}`
   if (!wasEscalated && finalText && allToolCalls.length === 0 && agent.can_search_products && /n[ãa]o temos\b/i.test(finalText)) {
     const currentKeywords = extractCustomerKeywords(lastCustomerMsg?.content)
     const forcedQuery = currentKeywords.slice(0, 3).join(' ')
-    const forcedResult = await toolSearchProducts(tenantId, { query: forcedQuery }, conversationId)
+    const forcedMeta: { usedFallback?: boolean } = {}
+    const forcedResult = await toolSearchProducts(tenantId, { query: forcedQuery }, conversationId, forcedMeta)
     const imgMatches = [...forcedResult.matchAll(/📦 \*([^*]+)\*[\s\S]*?use send_product_image com id: ([a-f0-9-]{36})/g)]
     const forced = imgMatches.map(([, name, id]) => ({ name: name.trim(), id: id.trim() }))
     allToolCalls.push({ name: 'search_products', input: { query: forcedQuery }, result: forcedResult })
-    if (forced.length > 0) {
+    const forcedCandidate = forced.find((p) => !rejectedProductIds.has(p.id)) ?? null
+    if (forcedCandidate && !forcedMeta.usedFallback) {
       lastSearchProductsWithImages = forced
-      finalText = `Deixa eu te mostrar uma opção: *${forced[0].name}* 👇`
+      finalText = `Deixa eu te mostrar uma opção: *${forcedCandidate.name}* 👇`
+    } else if (forced.length > 0) {
+      // A busca real achou produtos, mas ou caiu no tier aleatório (nada bate de verdade com o
+      // pedido) ou o único candidato já foi recusado antes — não finge que é o que o cliente
+      // pediu: admite e pergunta a preferência antes de sugerir qualquer coisa (reclamação real
+      // HotCar: Corolla 2016 pedido, IA insistindo no mesmo Corolla 2024 já recusado 3x).
+      lastSearchProductsWithImages = []
+      finalText = 'Não temos essa opção específica agora. Tem outro modelo, ano, faixa de preço ou cor que você aceitaria? Já busco algo mais parecido pra você.'
     }
+  }
+
+  // Segurança determinística pro fluxo "sem essa opção específica": se a IA buscou de verdade
+  // (allToolCalls não vazio, então não é o caso de alucinação sem busca tratado acima) e disse
+  // que não tem, mas não perguntou a preferência do cliente, completa com a pergunta — sem isso
+  // a conversa morre num "não temos" seco, sem abrir caminho pra vender outra coisa. Exclui menções
+  // a horário/agenda pra não confundir com "não temos horário disponível" (agendamento).
+  if (
+    !wasEscalated &&
+    finalText &&
+    allToolCalls.length > 0 &&
+    agent.can_search_products &&
+    /n[ãa]o temos\b/i.test(finalText) &&
+    !/hor[áa]rio|agenda|disponibilidade/i.test(finalText) &&
+    !finalText.trim().endsWith('?')
+  ) {
+    finalText = `${finalText.trim()} Tem outra preferência (outro modelo/tipo, faixa de preço, cor) que eu possa usar pra te mostrar algo parecido?`
   }
 
   // Auto-imagem: fallback quando o LLM não chamou send_product_image. Só dispara quando dá pra
@@ -1170,7 +1237,8 @@ como um atendimento genérico de primeiro contato.` : ''}`
         .split(/[\s/\-,]+/)
         .filter((w) => w.length > 3 && /[a-zà-ÿ]/.test(w) && !GENERIC_NAME_TOKENS.has(w))
 
-    const candidates = lastSearchProductsWithImages.filter(({ name }) => {
+    const candidates = lastSearchProductsWithImages.filter(({ name, id }) => {
+      if (rejectedProductIds.has(id)) return false
       const toks = distinctiveTokens(name)
       if (toks.length === 0) return false
       const hits = toks.filter((t) => finalTextLower.includes(t)).length
