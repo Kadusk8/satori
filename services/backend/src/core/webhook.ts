@@ -205,13 +205,41 @@ async function handleOwnOutgoingMessage(tenant: TenantRow, envelope: NonNullable
       contactId = (await pool.query<{ id: string }>(`select id from contacts where tenant_id = $1 and whatsapp_number = $2 limit 1`, [tenant.id, normalized])).rows[0]?.id
     }
   }
-  if (!contactId) return
 
-  const conv = (await pool.query<{ id: string; status: string }>(
+  // Dono abriu a conversa com um lead novo (sem contato cadastrado): cria o contato
+  // pra a mensagem não se perder e a IA ter o contexto quando o lead responder.
+  if (!contactId) {
+    if (!text && contentType !== 'image' && contentType !== 'audio') return
+    const createdContact = await pool.query<{ id: string }>(
+      `insert into contacts (tenant_id, whatsapp_number, last_contact_at) values ($1, $2, now()) returning id`,
+      [tenant.id, phoneNumber]
+    )
+    contactId = createdContact.rows[0].id
+  }
+
+  let conv = (await pool.query<{ id: string; status: string }>(
     `select id, status from conversations where tenant_id = $1 and contact_id = $2 and status <> 'closed' order by created_at desc limit 1`,
     [tenant.id, contactId]
   )).rows[0]
-  if (!conv) return
+
+  // Sem conversa aberta: o dono está iniciando o contato. Cria já em ai_handling —
+  // a IA fica ativa e continua a conversa quando o lead responder, com a abordagem
+  // do dono no histórico.
+  let startedByOwner = false
+  if (!conv) {
+    startedByOwner = true
+    const agentRes = await pool.query<{ id: string }>(
+      `select id from ai_agents where tenant_id = $1 and is_default = true and is_active = true limit 1`,
+      [tenant.id]
+    )
+    const stageRes = await pool.query<{ id: string }>(`select id from kanban_stages where tenant_id = $1 and slug = 'novo_lead' limit 1`, [tenant.id])
+    conv = (await pool.query<{ id: string; status: string }>(
+      `insert into conversations (tenant_id, contact_id, ai_agent_id, kanban_stage_id, status, priority, metadata, last_message_at, created_at)
+       values ($1, $2, $3, $4, 'ai_handling', 'normal', '{"source":"owner_outbound"}'::jsonb, now(), now())
+       returning id, status`,
+      [tenant.id, contactId, agentRes.rows[0]?.id ?? null, stageRes.rows[0]?.id ?? null]
+    )).rows[0]
+  }
 
   // Salva a mensagem do humano pra aparecer no painel.
   await pool.query(
@@ -221,7 +249,7 @@ async function handleOwnOutgoingMessage(tenant: TenantRow, envelope: NonNullable
   )
 
   // Se a IA ainda estava no comando, passa pra atendimento humano e para os follow-ups.
-  if (conv.status === 'ai_handling') {
+  if (conv.status === 'ai_handling' && !startedByOwner) {
     await pool.query(`update conversations set status = 'human_handling', autonomous_mode = false, last_message_at = now() where id = $1`, [conv.id])
     await pool.query(`update follow_ups set status = 'cancelled' where conversation_id = $1 and status = 'pending'`, [conv.id])
   } else {
