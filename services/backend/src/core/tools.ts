@@ -10,6 +10,17 @@ import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors } from './lead-routing.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 
+// Palavras genéricas de pedido (não são nome de modelo/produto) — usadas só pra decidir se a
+// query tem uma palavra ESPECÍFICA sobrando além da categoria já casada (ver tier 1 de busca
+// abaixo). Subconjunto do STOP_WORDS de process-message.ts; duplicado aqui pra não criar import
+// circular entre os dois módulos.
+const GENERIC_QUERY_WORDS = new Set([
+  'quero', 'para', 'favor', 'você', 'voces', 'vocês', 'como', 'tenho', 'esse', 'essa', 'aqui', 'mais',
+  'qual', 'quer', 'com', 'por', 'uma', 'que', 'tem', 'têm', 'ver', 'gostaria', 'preciso', 'pode',
+  'mostrar', 'produto', 'coisa', 'algo', 'isso', 'isto', 'aquilo', 'este', 'esta', 'algum', 'alguma',
+  'disponivel', 'disponível', 'estoque', 'loja', 'ai', 'aí',
+])
+
 interface ProductRow {
   id: string
   name: string
@@ -60,11 +71,32 @@ export async function toolSearchProducts(
   const queryLower = query.toLowerCase()
   const matchedCategory = categoryParam ?? uniqueCategories.find((cat) => queryLower.includes(cat.toLowerCase())) ?? null
 
-  // 1ª tentativa: categoria (ilike) + limite
+  // 1ª tentativa: categoria (ilike) + limite. Só aceita esse resultado se a query não tiver
+  // palavra específica de modelo/nome sobrando que nenhum item da categoria bate — senão um
+  // pedido tipo "Corolla sedan" hijacka pra categoria (Sedan) e devolve os primeiros N sedans
+  // SEM nenhuma ordenação por relevância; se o Corolla pedido não estiver nessa fatia arbitrária
+  // (mas existir no estoque), a IA nunca vê o carro certo e diz que não tem — reclamação real:
+  // cliente perguntou por um veículo que estava disponível e a IA respondeu que não tinha.
   if (matchedCategory) {
     const params: unknown[] = priceMax ? [tenantId, priceMax, matchedCategory] : [tenantId, matchedCategory]
     const catIdx = priceMax ? 3 : 2
-    data = await queryProducts(`${priceSql} and category ilike $${catIdx}`, params, `limit ${maxResults}`)
+    const categoryResult = await queryProducts(`${priceSql} and category ilike $${catIdx}`, params, `limit ${maxResults}`)
+
+    const remainingTokens = queryLower
+      .split(matchedCategory.toLowerCase())
+      .join(' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !GENERIC_QUERY_WORDS.has(w))
+    const hasSpecificToken = remainingTokens.length > 0
+    const matchesSomeResult = categoryResult.some((p) => remainingTokens.some((t) => p.name.toLowerCase().includes(t)))
+
+    // Sem palavra extra (query é só a categoria, ex: "sedan"): aceita a listagem normal.
+    // Com palavra extra que bate em algum resultado: aceita, já achou o modelo certo.
+    // Com palavra extra que NÃO bate em nenhum resultado: não aceita — cai pras tentativas
+    // 2/3 abaixo, que buscam pelo nome específico em vez de só pela categoria.
+    if (!hasSpecificToken || matchesSomeResult) {
+      data = categoryResult
+    }
   }
 
   // 2ª tentativa: full-text search (stemming português), termos combinados com OR — uma
