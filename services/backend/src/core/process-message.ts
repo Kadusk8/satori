@@ -12,6 +12,7 @@ import { conversations, kanbanStages, messages, products } from '../db/schema.js
 import { db } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { callLLM, classifyLLMError, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
+import { recordLLMUsage } from '../shared/llm-usage.js'
 import { AI_TOOLS } from '../shared/claude-tools.js'
 import { transcribeAudio } from '../shared/whisper-client.js'
 import { textToSpeech, audioToBase64 } from '../shared/elevenlabs-client.js'
@@ -993,6 +994,15 @@ como um atendimento genérico de primeiro contato.` : ''}`
         return { success: false, skipped: `Erro de LLM (${type})` }
       }
     }
+
+    await recordLLMUsage({
+      tenantId,
+      aiAgentId: agent.id,
+      conversationId,
+      provider: llmProvider,
+      source: 'message',
+      usage: response.usage,
+    })
 
     if (response.stopReason !== 'tool_use') {
       const trimmed = response.text?.trim() ?? ''

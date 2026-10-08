@@ -1,6 +1,6 @@
 // Slugs usados por código do backend (webhook, process-message, tools) e pelo
 // trigger sync_conversation_status_to_kanban pra mover cards automaticamente
-// (ver neon/schema.sql). Excluir uma dessas quebraria essa automação, então
+// (ver db/schema.sql). Excluir uma dessas quebraria essa automação, então
 // ficam protegidas contra exclusão — só podem ser renomeadas/recoloridas.
 //
 // Arquivo sem 'use server' de propósito: precisa ser importável tanto pela

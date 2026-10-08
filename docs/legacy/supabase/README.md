@@ -3,10 +3,13 @@
 Este diretório é o código e as migrations do backend original em Supabase
 (Postgres + Auth + Storage + Realtime + Edge Functions), mantido só como
 referência histórica após a migração completa pro Neon (Postgres puro).
+_(O Neon em si foi depois substituído por um Postgres self-hosted no Coolify
+— ver [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) — mas isso não reabre
+nada da migração do Supabase documentada aqui.)_
 
 **Nada aqui está em uso.** O estado atual do backend é:
 
-- Banco: `neon/schema.sql` (na raiz do repo)
+- Banco: `db/schema.sql` (na raiz do repo)
 - Auth: `apps/web/auth.ts` (Auth.js/NextAuth v5)
 - Acesso a dados do app: `apps/web/lib/data/*` e `apps/web/lib/db/*` (Drizzle)
 - Realtime: `apps/web/lib/realtime/*` (Pusher)

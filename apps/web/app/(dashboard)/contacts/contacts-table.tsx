@@ -30,7 +30,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import Link from 'next/link'
+import { cn, formatBRL } from '@/lib/utils'
+import { CLIENT_STATUS_LABEL, type ClientStatus } from '@/lib/client-score'
 import { updateContactName, updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 
 export interface Contact {
@@ -43,6 +45,22 @@ export interface Contact {
   notes: string | null
   totalConversations: number
   lastContactAt: string
+  visits: number
+  totalSpent: number
+  lastVisit: string | null
+  score: number
+  tier: string | null
+  status: ClientStatus
+}
+
+const STATUS_CLASS: Record<ClientStatus, string> = {
+  novo: 'bg-muted text-muted-foreground',
+  ativo: 'bg-green-500/10 text-green-600',
+  inativo: 'bg-orange-500/10 text-orange-600',
+}
+
+function formatVisitDate(date: string) {
+  return new Date(date + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
 const TAG_PALETTE = [
@@ -73,11 +91,13 @@ function formatLastContact(dateStr: string) {
   return `${days} dias atrás`
 }
 
-export function ContactsTable({ initialContacts }: { initialContacts: Contact[] }) {
+export function ContactsTable({ initialContacts, tiers }: { initialContacts: Contact[]; tiers: string[] }) {
   const router = useRouter()
   const [contactList, setContactList] = useState(initialContacts)
   const [search, setSearch] = useState('')
   const [activeTags, setActiveTags] = useState<string[]>([])
+  const [statusFilter, setStatusFilter] = useState<ClientStatus | ''>('')
+  const [tierFilter, setTierFilter] = useState('')
   const [editing, setEditing] = useState<Contact | null>(null)
 
   const allTags = useMemo(() => {
@@ -90,7 +110,9 @@ export function ContactsTable({ initialContacts }: { initialContacts: Contact[] 
     const matchesSearch =
       c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
     const matchesTags = activeTags.length === 0 || activeTags.every((t) => c.tags.includes(t))
-    return matchesSearch && matchesTags
+    const matchesStatus = !statusFilter || c.status === statusFilter
+    const matchesTier = !tierFilter || c.tier === tierFilter
+    return matchesSearch && matchesTags && matchesStatus && matchesTier
   })
 
   function toggleTagFilter(tag: string) {
@@ -105,7 +127,7 @@ export function ContactsTable({ initialContacts }: { initialContacts: Contact[] 
   return (
     <>
       {/* Filtros */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -139,17 +161,43 @@ export function ContactsTable({ initialContacts }: { initialContacts: Contact[] 
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as ClientStatus | '')}
+          className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm"
+        >
+          <option value="">Todos os status</option>
+          {(Object.keys(CLIENT_STATUS_LABEL) as ClientStatus[]).map((s) => (
+            <option key={s} value={s}>{CLIENT_STATUS_LABEL[s]}</option>
+          ))}
+        </select>
+        {tiers.length > 0 && (
+          <select
+            value={tierFilter}
+            onChange={(e) => setTierFilter(e.target.value)}
+            className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">Todas as faixas</option>
+            {tiers.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Tabela */}
-      <div className="rounded-lg border bg-background overflow-hidden mt-4">
+      <div className="rounded-lg border bg-background overflow-x-auto mt-4">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/30">
               <th className="text-left font-medium text-muted-foreground px-4 py-3">Contato</th>
               <th className="text-left font-medium text-muted-foreground px-4 py-3">Telefone</th>
               <th className="text-left font-medium text-muted-foreground px-4 py-3">Etiquetas</th>
-              <th className="text-left font-medium text-muted-foreground px-4 py-3">Conversas</th>
+              <th className="text-left font-medium text-muted-foreground px-4 py-3">Visitas</th>
+              <th className="text-left font-medium text-muted-foreground px-4 py-3">Total gasto</th>
+              <th className="text-left font-medium text-muted-foreground px-4 py-3">Última visita</th>
+              <th className="text-left font-medium text-muted-foreground px-4 py-3">Score</th>
+              <th className="text-left font-medium text-muted-foreground px-4 py-3">Status</th>
               <th className="text-left font-medium text-muted-foreground px-4 py-3">Último contato</th>
               <th className="px-4 py-3" />
             </tr>
@@ -166,7 +214,9 @@ export function ContactsTable({ initialContacts }: { initialContacts: Contact[] 
                     </div>
                     <div>
                       <p className="font-medium flex items-center gap-1.5">
-                        {contact.name}
+                        <Link href={`/contacts/${contact.id}`} className="hover:underline">
+                          {contact.name}
+                        </Link>
                         {contact.notes && (
                           <span title={contact.notes}>
                             <StickyNote className="h-3 w-3 text-amber-500" />
@@ -203,8 +253,23 @@ export function ContactsTable({ initialContacts }: { initialContacts: Contact[] 
                 </td>
                 <td className="px-4 py-3">
                   <Badge variant="secondary" className="text-xs">
-                    {contact.totalConversations}
+                    {contact.visits}
                   </Badge>
+                </td>
+                <td className="px-4 py-3 text-xs tabular-nums">
+                  {contact.totalSpent > 0 ? formatBRL(contact.totalSpent) : '—'}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground text-xs">
+                  {contact.lastVisit ? formatVisitDate(contact.lastVisit) : '—'}
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  <span className="font-semibold tabular-nums">{contact.score}</span>
+                  {contact.tier && <span className="ml-1.5 text-muted-foreground">{contact.tier}</span>}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', STATUS_CLASS[contact.status])}>
+                    {CLIENT_STATUS_LABEL[contact.status]}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground text-xs">
                   {formatLastContact(contact.lastContactAt)}

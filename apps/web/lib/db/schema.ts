@@ -1,4 +1,4 @@
-// Schema Drizzle espelhando neon/schema.sql (12 tabelas do domínio Satori).
+// Schema Drizzle espelhando db/schema.sql (12 tabelas do domínio Satori).
 // Escrito à mão porque o Neon ainda não foi provisionado (introspecção via
 // `drizzle-kit pull` fica pra quando o banco estiver de pé). Mantém os mesmos
 // nomes de coluna snake_case do SQL — o Drizzle expõe camelCase no TS.
@@ -94,7 +94,7 @@ export const tenants = pgTable(
     // Ponteiro de rotação do round-robin de leads entre vendedores online.
     // Sem `.references()` aqui de propósito: `users` referencia `tenants`, e o
     // outro sentido criaria ciclo de inferência de tipo no Drizzle. A FK real
-    // já é garantida no banco (neon/schema.sql, tenants_last_lead_assigned_to_fkey).
+    // já é garantida no banco (db/schema.sql, tenants_last_lead_assigned_to_fkey).
     lastLeadAssignedTo: uuid('last_lead_assigned_to'),
 
     openaiApiKey: text('openai_api_key'),
@@ -158,6 +158,9 @@ export const contacts = pgTable(
     phone: text('phone'),
     notes: text('notes'),
     tags: text('tags').array().notNull().default([]),
+    birthDate: date('birth_date'),
+    document: text('document'),
+    address: text('address'),
     metadata: jsonb('metadata').notNull().default({}),
     firstContactAt: timestamp('first_contact_at', { withTimezone: true }).notNull().defaultNow(),
     lastContactAt: timestamp('last_contact_at', { withTimezone: true }).notNull().defaultNow(),
@@ -424,6 +427,45 @@ export const appointments = pgTable(
   ]
 )
 
+// Serviços realizados num atendimento concluído (nome/preço congelados do catálogo).
+export const appointmentServices = pgTable(
+  'appointment_services',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    appointmentId: uuid('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    serviceName: text('service_name').notNull(),
+    price: numeric('price').notNull().default('0'),
+    professionalId: uuid('professional_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_appointment_services_tenant_id').on(t.tenantId),
+    index('idx_appointment_services_appointment_id').on(t.appointmentId),
+  ]
+)
+
+// Regras de pontuação de clientes, uma linha por tenant.
+export const clientScoreRules = pgTable('client_score_rules', {
+  tenantId: uuid('tenant_id')
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  pointsPerVisit: integer('points_per_visit').notNull().default(10),
+  spendStep: numeric('spend_step').notNull().default('10'),
+  pointsPerSpendStep: integer('points_per_spend_step').notNull().default(1),
+  noShowPenalty: integer('no_show_penalty').notNull().default(5),
+  windowMonths: integer('window_months'),
+  inactiveAfterDays: integer('inactive_after_days').notNull().default(90),
+  serviceBonuses: jsonb('service_bonuses').notNull().default([]),
+  tiers: jsonb('tiers').notNull().default([]),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const followUps = pgTable(
   'follow_ups',
   {
@@ -517,6 +559,8 @@ export type Conversation = typeof conversations.$inferSelect
 export type Message = typeof messages.$inferSelect
 export type Product = typeof products.$inferSelect
 export type Appointment = typeof appointments.$inferSelect
+export type AppointmentService = typeof appointmentServices.$inferSelect
+export type ClientScoreRules = typeof clientScoreRules.$inferSelect
 export type FollowUp = typeof followUps.$inferSelect
 export type SuperAdmin = typeof superAdmins.$inferSelect
 export type AuthUser = typeof authUsers.$inferSelect

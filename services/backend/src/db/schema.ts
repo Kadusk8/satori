@@ -1,4 +1,4 @@
-// Schema Drizzle — subconjunto de neon/schema.sql usado pelo serviço backend
+// Schema Drizzle — subconjunto de db/schema.sql usado pelo serviço backend
 // (webhook, IA, cron). Mantido separado do schema de apps/web de propósito:
 // este serviço é implantado independentemente (Portainer) e não deve puxar
 // as dependências do Next.js. Mesmos nomes de coluna/tabela do SQL.
@@ -180,6 +180,20 @@ export const aiErrorLogs = pgTable('ai_error_logs', {
   provider: text('provider').notNull(),
   errorType: text('error_type').notNull().default('other'),
   message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const aiUsageLogs = pgTable('ai_usage_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  aiAgentId: uuid('ai_agent_id'),
+  conversationId: uuid('conversation_id'),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  source: text('source').notNull().default('message'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cachedInputTokens: integer('cached_input_tokens').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

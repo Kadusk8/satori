@@ -6,6 +6,7 @@
 
 import { getTenantLlmKeys, getAgentLlmKey, pool } from '../db/index.js'
 import { callLLM, type LLMProvider } from '../shared/llm-client.js'
+import { recordLLMUsage } from '../shared/llm-usage.js'
 import { sendWhatsAppMessage } from '../core/send-whatsapp.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { isWithinBusinessHours, isConversationClosing, type BusinessHours } from '../core/process-message.js'
@@ -102,6 +103,14 @@ Esta é a tentativa número ${row.attempt_number}. Ajuste o tom conforme necess�
       openaiApiKey: llmKeys.openai_api_key ?? undefined,
       geminiApiKey: llmKeys.gemini_api_key ?? undefined,
       openrouterApiKey: llmKeys.openrouter_api_key ?? undefined,
+    })
+    await recordLLMUsage({
+      tenantId: row.tenant_id,
+      aiAgentId: row.ai_agent_id,
+      conversationId: row.conversation_id,
+      provider: row.agent_llm_provider ?? 'anthropic',
+      source: 'follow_up',
+      usage: response.usage,
     })
     return response.text || `Oi ${contactName}! Tudo bem? Precisou de algo? 😊`
   } catch (err) {

@@ -20,7 +20,7 @@ if (!connectionString) {
 types.setTypeParser(1082, (val) => val)
 
 // Garante BYPASSRLS pra toda query desta conexão — o usuário do pool já é
-// membro de service_role (ver neon/schema.sql), só falta assumir o role.
+// membro de service_role (ver db/schema.sql), só falta assumir o role.
 // Feito dentro do próprio connect() (não via evento 'connect' do Pool, que
 // não é aguardado — o client entraria disponível no pool antes do SET ROLE
 // terminar, deixando a 1ª query de cada conexão nova correr com o role errado).
