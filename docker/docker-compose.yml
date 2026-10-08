@@ -1,5 +1,5 @@
 # Serviço backend (webhook + IA + cron), pra deploy no Portainer.
-# O app Next.js roda separadamente no Vercel — ver docs/ARCHITECTURE.md.
+# O app Next.js roda separadamente no Coolify — ver docs/ARCHITECTURE.md.
 services:
   backend:
     build:

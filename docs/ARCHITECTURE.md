@@ -1,17 +1,19 @@
-# Arquitetura — ZapAgent
+# Arquitetura — Satori
 
 Visão geral de como as peças se conectam. Para o modelo de dados completo e convenções de código, ver [`CLAUDE.md`](../CLAUDE.md).
 
 O backend rodou originalmente sobre Supabase; foi migrado por completo pro Neon
-(Postgres puro) — ver [`docs/legacy/supabase/README.md`](./legacy/supabase/README.md)
-pro mapeamento de onde cada peça antiga foi parar.
+(Postgres puro) e, depois, do Neon pra um Postgres self-hosted no Coolify — ver
+[`docs/legacy/supabase/README.md`](./legacy/supabase/README.md) pro mapeamento
+de onde cada peça antiga foi parar. Nessa mesma leva o produto foi renomeado
+de ZapAgent pra **Satori**.
 
 ## Componentes
 
-- **`apps/web`** (Next.js 15, App Router) — painéis `/admin` (super admin) e `/dashboard` (tenant/operador). Deploy: Vercel.
-- **Neon** (Postgres puro) — banco único, com RLS via GUC (`request.jwt.claims`) emulando o comportamento do Supabase. Schema em [`neon/schema.sql`](../neon/schema.sql).
+- **`apps/web`** (Next.js 15, App Router) — painéis `/admin` (super admin) e `/dashboard` (tenant/operador). Deploy: Coolify (`satori-frontend`, domínio `satori.ia.br`).
+- **Postgres self-hosted (Coolify)** — banco único (`satori-postgres`), com RLS via GUC (`request.jwt.claims`) emulando o comportamento do Supabase. Schema em [`db/schema.sql`](../db/schema.sql) (não houve troca de driver na saída do Neon — `pg`/`drizzle-orm/node-postgres` continuam iguais). Migrations incrementais pra bancos já existentes em `db/migrations/`.
 - **Auth.js (NextAuth v5)** — autenticação por credenciais (email/senha, bcrypt), sessão JWT com claims `{sub, tenant_id, user_role, is_super_admin}` embutidos via `get_session_claims()` (função SQL).
-- **`services/backend`** (Node/Fastify) — serviço sempre-ligado que recebe o webhook do WhatsApp, roda a IA (function calling) e os crons de lembrete/follow-up/reset mensal de mensagens. Deploy: Portainer/Docker (fora do Vercel, que tem timeout de função serverless).
+- **`services/backend`** (Node/Fastify) — serviço sempre-ligado que recebe o webhook do WhatsApp, roda a IA (function calling) e os crons de lembrete/follow-up/reset mensal de mensagens. Deploy: Portainer/Docker, num VPS separado do Coolify (não é uma função serverless — por isso fica num processo à parte).
 - **Pusher** — realtime (kanban, chat, agenda, sidebar), com fallback gracioso (polling ou refresh manual) quando não configurado.
 - **Resend** — email transacional (reset de senha, convite de operador), via token HMAC assinado (`apps/web/lib/auth/tokens.ts`) — sem tabela de tokens, sem dependência de Auth provider externo.
 - **Evolution Go** — gateway de WhatsApp. Cada tenant conecta sua **própria instância externa** (bring-your-own-instance): o super admin cadastra URL, token e nome da instância no onboarding; a plataforma não cria nem hospeda instâncias.
@@ -88,8 +90,8 @@ objeto de sessão bruto.
 
 ## RLS (Row Level Security)
 
-O Neon é Postgres puro — sem o `auth.jwt()`/`auth.uid()` nativos do Supabase.
-`neon/schema.sql` recria esse comportamento com um shim (schema `auth`) que lê
+É Postgres puro (self-hosted no Coolify) — sem o `auth.jwt()`/`auth.uid()` nativos do Supabase.
+`db/schema.sql` recria esse comportamento com um shim (schema `auth`) que lê
 a GUC `request.jwt.claims` (`SELECT set_config('request.jwt.claims', <json>, true)`),
 mais os roles `service_role`/`authenticated`/`anon`.
 

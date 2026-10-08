@@ -47,7 +47,7 @@ cron.schedule('0 * * * *', () => {
 
 // Reset do contador mensal de mensagens: meia-noite do dia 1 de cada mês
 // (equivalente ao job pg_cron 'reset-monthly-message-counts', comentado em
-// neon/schema.sql por depender de pg_net/pg_cron indisponíveis no Neon).
+// db/schema.sql por depender de pg_net/pg_cron indisponíveis no Neon).
 cron.schedule('0 0 1 * *', () => {
   runResetMonthlyMessageCounts().catch((err) => app.log.error({ err }, '[cron] reset-monthly-counts falhou'))
 })

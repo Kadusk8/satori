@@ -1,6 +1,6 @@
 // Zera messages_used_month de todos os tenants ativos no início de cada mês —
 // porta do job pg_cron 'reset-monthly-message-counts' (comentado em
-// neon/schema.sql porque pg_net/pg_cron não são portáveis pro Neon). Sem
+// db/schema.sql porque pg_net/pg_cron não são portáveis pro Neon). Sem
 // isso, um tenant que bate max_messages_month fica bloqueado pra sempre.
 
 import { pool } from '../db/index.js'

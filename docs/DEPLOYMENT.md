@@ -1,28 +1,31 @@
-# Guia de Deploy — ZapAgent (Neon + Vercel + Portainer)
+# Guia de Deploy — Satori (Coolify + Portainer)
 
 Checklist de provisionamento e deploy da plataforma no estado atual (pós
-migração do Supabase pro Neon — ver [`ARCHITECTURE.md`](./ARCHITECTURE.md)).
-Greenfield: não há passo de migração de dados porque não há dados de produção
-no Supabase a preservar.
+migração do Supabase pro Neon e, depois, do Neon pro Coolify — ver
+[`ARCHITECTURE.md`](./ARCHITECTURE.md)). Produto renomeado de ZapAgent pra
+Satori nessa última leva.
 
 ## Visão geral
 
 ```
-apps/web (Next.js)         →  Vercel
-services/backend (Fastify) →  Portainer/Docker, sempre-ligado
-Banco                       →  Neon (Postgres)
+apps/web (Next.js)         →  Coolify (satori-frontend, satori.ia.br)
+services/backend (Fastify) →  Portainer/Docker, sempre-ligado (VPS separado)
+Banco                       →  Coolify (satori-postgres, Postgres self-hosted)
 Realtime                    →  Pusher
 Email transacional          →  Resend
 Imagens + áudio             →  Cloudinary
 ```
 
-## 1. Neon (banco)
+## 1. Postgres self-hosted (Coolify)
 
-1. Criar um projeto no [Neon](https://neon.tech).
+1. Criar um recurso de banco (`standalone-postgresql`) num projeto do
+   Coolify — ex: `satori-postgres`.
 2. Rodar o schema completo:
    ```bash
-   psql "$NEON_CONNECTION_STRING" -f neon/schema.sql
+   psql "$DATABASE_URL" -f db/schema.sql
    ```
+   (o schema é agnóstico de provedor, é Postgres puro). Num banco que já
+   existe, aplique só os arquivos novos de `db/migrations/`.
 3. Configurar a chave de criptografia usada pelas colunas sensíveis
    (`evolution_api_key`, chaves de LLM/ElevenLabs por tenant):
    ```sql
@@ -36,32 +39,37 @@ Imagens + áudio             →  Cloudinary
    (`DATABASE_URL`) quanto pro `services/backend` (`DATABASE_URL`) — o app usa
    `SET LOCAL ROLE authenticated` por request (RLS) e o serviço backend usa
    `SET ROLE service_role` (BYPASSRLS) por conexão.
-5. Guardar a connection string do endpoint **pooled** do Neon (`-pooler` no
-   host) — necessário pro Vercel (serverless) não estourar conexões.
+5. Não é necessário um endpoint "pooled" específico (isso era uma
+   particularidade do Neon serverless) — `apps/web` e `services/backend` já
+   conectam via `pg`/`drizzle-orm/node-postgres` com pool próprio, funciona
+   igual num Postgres self-hosted comum.
 
-## 2. Vercel (`apps/web`)
+## 2. Coolify (`apps/web`)
 
 Variáveis de ambiente (ver `.env.example` na raiz):
 
 | Variável | Observação |
 |---|---|
-| `DATABASE_URL` | connection string pooled do Neon |
+| `DATABASE_URL` | connection string do Postgres no Coolify |
 | `ENCRYPTION_KEY` | mesma chave configurada no passo 1.3 |
 | `AUTH_SECRET` | gerar com `openssl rand -base64 32` |
-| `NEXT_PUBLIC_APP_URL` | URL pública do app no Vercel |
+| `NEXT_PUBLIC_APP_URL` | URL pública do app (`satori.ia.br`) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | conta no [Resend](https://resend.com) |
 | `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER`, `PUSHER_APP_ID`, `PUSHER_SECRET` | conta no [Pusher Channels](https://pusher.com/channels) |
 | `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`, `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET` | upload de imagem de produto direto do browser (unsigned preset) |
 | `BACKEND_URL`, `BACKEND_PUBLIC_URL`, `BACKEND_TOKEN` | URL(s) do `services/backend` no Portainer + token compartilhado |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` | fallback global (BYOK por tenant tem prioridade) |
 
-Deploy: conectar o repo no Vercel com **root directory = `apps/web`** — a Vercel detecta Next.js automaticamente, sem `vercel.json`.
+Deploy: conectar o repo no Coolify como uma Application (Nixpacks detecta
+Next.js automaticamente), **root directory = `apps/web`**; porta exposta
+`3000` (padrão do Next.js), com proxy reverso/HTTPS via Traefik (já vem
+junto do Coolify).
 
 ## 3. Portainer/Docker (`services/backend`)
 
 1. Variáveis de ambiente — ver `services/backend/.env.example`:
    `DATABASE_URL`, `ENCRYPTION_KEY` (mesmas do passo 1), `PORT`,
-   `BACKEND_TOKEN` (deve bater com o do Vercel), `CLOUDINARY_CLOUD_NAME` +
+   `BACKEND_TOKEN` (deve bater com o do Coolify), `CLOUDINARY_CLOUD_NAME` +
    `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` (upload assinado, diferente
    do preset unsigned do frontend), `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`.
 2. Build e sobe via `docker/docker-compose.yml`:
@@ -71,7 +79,7 @@ Deploy: conectar o repo no Vercel com **root directory = `apps/web`** — a Verc
    ```
 3. Expor a porta `3001` publicamente (proxy reverso/HTTPS na frente — ex.
    Traefik/Nginx no próprio Portainer) — essa é a URL que vira
-   `BACKEND_URL`/`BACKEND_PUBLIC_URL` no Vercel.
+   `BACKEND_URL`/`BACKEND_PUBLIC_URL` no Coolify.
 4. Healthcheck: `GET /health` deve responder `{"ok":true}`.
 
 ## 4. Evolution Go (por tenant)
@@ -83,10 +91,10 @@ webhook (`{BACKEND_PUBLIC_URL}/webhook-evolution?ts=<segredo>`) automaticamente.
 
 ## 5. Checklist de verificação pós-deploy
 
-- [ ] `neon/schema.sql` aplicado, `app.encryption_key` configurada
+- [ ] `db/schema.sql` aplicado, `app.encryption_key` configurada
 - [ ] Login funciona (`/login`) e leva ao painel certo (`/admin` vs `/dashboard`)
 - [ ] `services/backend` respondendo em `GET /health`
-- [ ] `BACKEND_TOKEN` configurado (Vercel e Portainer, com o mesmo valor) — sem
+- [ ] `BACKEND_TOKEN` configurado (Coolify e Portainer, com o mesmo valor) — sem
       ele, `POST /send-whatsapp` fica aberto pra qualquer um que descubra a URL
       (o serviço loga um warning no startup se estiver ausente)
 - [ ] Onboarding de um tenant de teste completa sem erro (todos os 7 passos do wizard)

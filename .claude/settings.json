@@ -49,7 +49,11 @@
       "Bash(git fetch *)",
       "Bash(vercel --version)",
       "Bash(vercel ls *)",
-      "Bash(vercel inspect *)"
+      "Bash(vercel inspect *)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps root@77.237.244.254 \"docker service logs zapagent_backend --since 48h 2>&1 | grep -o 'LabelAssociationChat recebido:.*' | head -5\")",
+      "Bash(rsync -az --delete --exclude node_modules --exclude dist --exclude .env -e \"ssh -i ~/.ssh/zapagent_vps -o StrictHostKeyChecking=no\" services/backend/ root@77.237.244.254:/opt/zapagent-backend/)",
+      "Bash(ssh -i ~/.ssh/zapagent_vps -o StrictHostKeyChecking=no root@77.237.244.254 \"grep -c 'usedFallback' /opt/zapagent-backend/src/core/tools.ts /opt/zapagent-backend/src/core/process-message.ts && grep -c 'characteristics' /opt/zapagent-backend/src/db/schema.ts\")",
+      "Bash(ssh -i ~/.ssh/zapagent_vps -o BatchMode=yes root@77.237.244.254 \"docker service logs --tail 400 zapagent_backend 2>&1 | grep 'nsnocslgnskb'\")"
     ]
   }
 }

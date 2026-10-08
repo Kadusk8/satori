@@ -1,6 +1,6 @@
 // Verificação do modelo de acesso RLS (Fases 1/2 da migração pro Neon).
 // Não é um teste unitário do app — é um script que sobe/usa um Postgres com o
-// neon/schema.sql aplicado e prova o isolamento por tenant end-to-end.
+// db/schema.sql aplicado e prova o isolamento por tenant end-to-end.
 //
 // Como rodar (a partir de apps/web, com um Postgres já com o schema + o role
 // app_user membro de authenticated/service_role):
