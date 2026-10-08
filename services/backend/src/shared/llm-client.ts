@@ -31,6 +31,17 @@ export interface LLMResponse {
   content: LLMContentBlock[]
   toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
   stopReason: 'end_turn' | 'tool_use'
+  usage: LLMUsage
+}
+
+// Consumo reportado pelo provedor. inputTokens já inclui os tokens em cache
+// (cachedInputTokens é um subconjunto dele), como no CSV de usage da OpenAI.
+export interface LLMUsage {
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  // Modelo que de fato respondeu (o provedor pode devolver uma versão datada)
+  model: string
 }
 
 export type LLMProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter'
@@ -78,6 +89,13 @@ interface AnthropicTool {
 interface AnthropicResponse {
   content: AnthropicContentBlock[]
   stop_reason: 'end_turn' | 'tool_use'
+  model?: string
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
 }
 
 async function callAnthropic(params: {
@@ -145,6 +163,12 @@ interface OpenAIResponse {
     }
     finish_reason: 'stop' | 'tool_calls' | 'length'
   }>
+  model?: string
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number }
+  }
 }
 
 async function callOpenAI(params: {
@@ -157,7 +181,7 @@ async function callOpenAI(params: {
   apiKey: string
   baseUrl?: string
   envVarName?: string
-}): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>; finishReason: 'stop' | 'tool_calls' }> {
+}): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>; finishReason: 'stop' | 'tool_calls'; usage: LLMUsage }> {
   const apiKey = params.apiKey || process.env[params.envVarName ?? 'OPENAI_API_KEY']
   if (!apiKey) throw new Error(`${params.envVarName ?? 'OPENAI_API_KEY'} not configured`)
 
@@ -200,6 +224,12 @@ async function callOpenAI(params: {
     content: message.content ?? '',
     toolCalls,
     finishReason: choice.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop',
+    usage: {
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+      cachedInputTokens: data.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+      model: data.model ?? params.model,
+    },
   }
 }
 
@@ -222,6 +252,7 @@ interface GeminiTool {
 
 interface GeminiResponse {
   candidates: Array<{ content: { parts: GeminiPart[] }; finishReason: string }>
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; cachedContentTokenCount?: number }
 }
 
 async function callGemini(params: {
@@ -232,7 +263,7 @@ async function callGemini(params: {
   maxTokens?: number
   temperature?: number
   apiKey: string
-}): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>; finishReason: 'stop' | 'tool_calls' }> {
+}): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>; finishReason: 'stop' | 'tool_calls'; usage: LLMUsage }> {
   const apiKey = params.apiKey || process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY not configured')
 
@@ -274,7 +305,17 @@ async function callGemini(params: {
     }
   }
 
-  return { content: textContent, toolCalls, finishReason: hasToolCall ? 'tool_calls' : 'stop' }
+  return {
+    content: textContent,
+    toolCalls,
+    finishReason: hasToolCall ? 'tool_calls' : 'stop',
+    usage: {
+      inputTokens: data.usageMetadata?.promptTokenCount ?? 0,
+      outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+      cachedInputTokens: data.usageMetadata?.cachedContentTokenCount ?? 0,
+      model: params.model,
+    },
+  }
 }
 
 // ── Classificação de erros ───────────────────────────────────────────────────
@@ -339,6 +380,16 @@ export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
       content: response.content,
       toolUses,
       stopReason: response.stop_reason === 'tool_use' ? 'tool_use' : 'end_turn',
+      usage: {
+        // Na Anthropic input_tokens exclui cache; soma pra ficar igual à convenção da OpenAI
+        inputTokens:
+          (response.usage?.input_tokens ?? 0) +
+          (response.usage?.cache_read_input_tokens ?? 0) +
+          (response.usage?.cache_creation_input_tokens ?? 0),
+        outputTokens: response.usage?.output_tokens ?? 0,
+        cachedInputTokens: response.usage?.cache_read_input_tokens ?? 0,
+        model: response.model ?? params.model,
+      },
     }
   }
 
@@ -406,6 +457,7 @@ export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
       content,
       toolUses: result.toolCalls,
       stopReason: result.finishReason === 'tool_calls' ? 'tool_use' : 'end_turn',
+      usage: result.usage,
     }
   }
 
@@ -449,6 +501,7 @@ export async function callLLM(params: LLMCallParams): Promise<LLMResponse> {
       content,
       toolUses: result.toolCalls,
       stopReason: result.finishReason === 'tool_calls' ? 'tool_use' : 'end_turn',
+      usage: result.usage,
     }
   }
 
