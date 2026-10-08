@@ -4,6 +4,7 @@ import { desc, eq, sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { contacts } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { getClientSummaries, summaryOrEmpty } from '@/lib/data/client-history'
 import { ContactsTable } from './contacts-table'
 
 export default async function ContactsPage() {
@@ -33,7 +34,11 @@ export default async function ContactsPage() {
       .orderBy(desc(contacts.lastContactAt))
   )
 
-  const initialContacts = rows.map((r) => ({
+  const { rules, summaries } = await getClientSummaries(claims)
+
+  const initialContacts = rows.map((r) => {
+    const summary = summaryOrEmpty(summaries.get(r.id), rules)
+    return {
     id: r.id,
     name: r.customName ?? r.whatsappName ?? r.whatsappNumber,
     phone: r.whatsappNumber,
@@ -43,7 +48,14 @@ export default async function ContactsPage() {
     notes: r.notes,
     totalConversations: Number(r.totalConversations),
     lastContactAt: (r.lastContactAt instanceof Date ? r.lastContactAt : new Date(r.lastContactAt)).toISOString(),
-  }))
+    visits: summary.visits,
+    totalSpent: summary.totalSpent,
+    lastVisit: summary.lastVisit,
+    score: summary.score,
+    tier: summary.tier?.name ?? null,
+    status: summary.status,
+    }
+  })
 
   return (
     <div className="p-8 space-y-6">
@@ -54,7 +66,7 @@ export default async function ContactsPage() {
         </p>
       </div>
 
-      <ContactsTable initialContacts={initialContacts} />
+      <ContactsTable initialContacts={initialContacts} tiers={rules.tiers.map((t) => t.name)} />
     </div>
   )
 }

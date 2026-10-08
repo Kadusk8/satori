@@ -40,6 +40,7 @@ interface DBAppointment {
     custom_name: string | null
     whatsapp_number: string
   }
+  services: { productId: string; professionalId: string | null }[]
 }
 
 
@@ -58,6 +59,7 @@ function mapAppointment(row: DBAppointment): Appointment {
     endTime: row.end_time,
     status: row.status,
     assignedTo: row.assigned_to ?? undefined,
+    services: row.services,
   }
 }
 
@@ -228,6 +230,7 @@ export default function AppointmentsPage() {
         startTime: data.startTime,
         endTime: data.endTime,
         status: data.status,
+        services: data.services,
       })
       toast.success(data.id ? 'Agendamento atualizado.' : 'Agendamento criado.')
       await loadData()

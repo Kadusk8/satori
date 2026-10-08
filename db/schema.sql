@@ -1,8 +1,8 @@
 -- ================================================================
--- ZapAgent — schema consolidado para Neon (Postgres puro)
+-- Satori — schema consolidado (Postgres puro, hoje no Coolify)
 -- Gerado a partir de supabase/migrations/001..026, adaptado para
 -- rodar fora do Supabase. Rode este arquivo inteiro, uma vez, num
--- banco Neon vazio: psql "$NEON_DATABASE_URL" -f neon/schema.sql
+-- banco vazio: psql "$DATABASE_URL" -f db/schema.sql
 --
 -- O QUE MUDOU EM RELAÇÃO ÀS MIGRATIONS ORIGINAIS (leia antes de rodar):
 --
@@ -1004,6 +1004,42 @@ CREATE POLICY "super_admin_full_access" ON ai_error_logs
   FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN = true);
 
 -- ================================================================
+-- TABELA: ai_usage_logs
+-- ================================================================
+-- Consumo de tokens do LLM por chamada (mensagem e follow-up). input_tokens
+-- inclui cached_input_tokens. Não distingue token gratuito de pago: essa
+-- separação (service_tier) só existe no painel/CSV da OpenAI.
+CREATE TABLE IF NOT EXISTS ai_usage_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  ai_agent_id UUID REFERENCES ai_agents(id) ON DELETE SET NULL,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'message' CHECK (source IN ('message', 'follow_up')),
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE ai_usage_logs IS 'Tokens consumidos por chamada de LLM — base pra acompanhar custo por tenant/dia.';
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_tenant_created ON ai_usage_logs (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_created ON ai_usage_logs (created_at DESC);
+
+ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON ai_usage_logs
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+CREATE POLICY "service_role_full_access" ON ai_usage_logs
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "super_admin_full_access" ON ai_usage_logs
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN = true);
+
+-- ================================================================
 -- TABELA: ai_quality_flags (WORKSTREAM B)
 -- ================================================================
 -- Registra sinais de qualidade da IA: vazamento de marcador interno,
@@ -1420,6 +1456,87 @@ $$;
 
 COMMENT ON FUNCTION public.get_session_claims IS
   'Substitui o custom_access_token_hook do Supabase. Chame após autenticar o usuário no seu novo sistema de auth para montar o JSON de request.jwt.claims usado pelas RLS policies.';
+
+
+-- ================================================================
+-- HISTÓRICO DO CLIENTE (2026-10-08)
+-- Cadastro estendido do contato, serviços realizados em cada
+-- atendimento concluído (com profissional e preço congelado do
+-- catálogo) e regras de pontuação configuráveis por tenant.
+-- Também em db/migrations/2026-10-08-historico-cliente.sql pra
+-- aplicar num banco já existente.
+-- ================================================================
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS birth_date DATE;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS document   TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS address    TEXT;
+
+CREATE TABLE IF NOT EXISTS appointment_services (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  appointment_id  UUID NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+  product_id      UUID REFERENCES products(id) ON DELETE SET NULL,
+  -- Nome e preço copiados do catálogo no momento da conclusão: o histórico
+  -- não muda se o produto for renomeado, reajustado ou excluído depois.
+  service_name    TEXT NOT NULL,
+  price           NUMERIC(12,2) NOT NULL DEFAULT 0,
+  professional_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE appointment_services IS 'Serviços realizados num atendimento concluído — base do histórico do cliente (visitas, valores, quem atendeu).';
+
+CREATE INDEX IF NOT EXISTS idx_appointment_services_tenant_id      ON appointment_services (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_services_appointment_id ON appointment_services (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_services_professional   ON appointment_services (professional_id);
+
+ALTER TABLE appointment_services ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "tenant_isolation" ON appointment_services;
+CREATE POLICY "tenant_isolation" ON appointment_services
+  FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+DROP POLICY IF EXISTS "super_admin_full_access" ON appointment_services;
+CREATE POLICY "super_admin_full_access" ON appointment_services
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+
+DROP POLICY IF EXISTS "service_role_full_access" ON appointment_services;
+CREATE POLICY "service_role_full_access" ON appointment_services
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- Uma linha por tenant; sem linha = valores padrão (ver lib/client-score.ts).
+CREATE TABLE IF NOT EXISTS client_score_rules (
+  tenant_id            UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  points_per_visit     INTEGER       NOT NULL DEFAULT 10,
+  -- "N pontos a cada R$ X gastos"
+  spend_step           NUMERIC(12,2) NOT NULL DEFAULT 10 CHECK (spend_step > 0),
+  points_per_spend_step INTEGER      NOT NULL DEFAULT 1,
+  no_show_penalty      INTEGER       NOT NULL DEFAULT 5,
+  -- Só conta atendimentos dos últimos N meses (NULL = histórico inteiro).
+  window_months        INTEGER CHECK (window_months IS NULL OR window_months > 0),
+  -- Sem visita há mais de N dias = cliente inativo.
+  inactive_after_days  INTEGER       NOT NULL DEFAULT 90 CHECK (inactive_after_days > 0),
+  -- [{ "product_id": uuid, "points": int }] — pontos extras por serviço feito
+  service_bonuses      JSONB NOT NULL DEFAULT '[]',
+  -- [{ "name": text, "min_points": int }] — faixas de classificação
+  tiers                JSONB NOT NULL DEFAULT '[{"name":"Bronze","min_points":0},{"name":"Prata","min_points":100},{"name":"Ouro","min_points":300},{"name":"Diamante","min_points":600}]',
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE client_score_rules IS 'Regras de pontuação de clientes (score pra promoções), definidas pelo próprio tenant.';
+
+ALTER TABLE client_score_rules ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "tenant_isolation" ON client_score_rules;
+CREATE POLICY "tenant_isolation" ON client_score_rules
+  FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+
+DROP POLICY IF EXISTS "super_admin_full_access" ON client_score_rules;
+CREATE POLICY "super_admin_full_access" ON client_score_rules
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+
+DROP POLICY IF EXISTS "service_role_full_access" ON client_score_rules;
+CREATE POLICY "service_role_full_access" ON client_score_rules
+  FOR ALL USING (auth.role() = 'service_role');
 
 
 -- ================================================================
