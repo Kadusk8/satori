@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   slug        TEXT    NOT NULL UNIQUE,
 
   business_segment     TEXT CHECK (business_segment IN ('clinica','loja','servicos','restaurante','outro')),
-  business_model       TEXT NOT NULL DEFAULT 'product' CHECK (business_model IN ('product','service')),
+  business_model       TEXT NOT NULL DEFAULT 'product' CHECK (business_model IN ('product','fashion','service')),
   business_description TEXT,
   owner_name           TEXT,
   owner_email          TEXT,
@@ -307,8 +307,8 @@ CREATE POLICY "service_role_full_access" ON tenants
 CREATE TABLE IF NOT EXISTS tenant_business_model_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  from_model TEXT NOT NULL CHECK (from_model IN ('product', 'service')),
-  to_model TEXT NOT NULL CHECK (to_model IN ('product', 'service')),
+  from_model TEXT NOT NULL CHECK (from_model IN ('product', 'fashion', 'service')),
+  to_model TEXT NOT NULL CHECK (to_model IN ('product', 'fashion', 'service')),
   changed_by UUID REFERENCES super_admins(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -794,6 +794,9 @@ CREATE TABLE IF NOT EXISTS products (
   currency          TEXT NOT NULL DEFAULT 'BRL',
   category          TEXT,
   subcategory       TEXT,
+  brand             TEXT,
+  audience          TEXT CHECK (audience IS NULL OR audience IN ('female','male','kids','unisex')),
+  promotional_price NUMERIC(12,2) CHECK (promotional_price IS NULL OR (promotional_price >= 0 AND price IS NOT NULL AND promotional_price < price)),
   tags              TEXT[] NOT NULL DEFAULT '{}',
   -- Características cadastradas livremente pelo tenant (cor, voltagem,
   -- tamanho, material, ano, o que for) — entram na busca full-text e são
@@ -841,6 +844,8 @@ BEGIN
     coalesce(NEW.short_description, '') || ' ' ||
     coalesce(NEW.category, '')          || ' ' ||
     coalesce(NEW.subcategory, '')       || ' ' ||
+    coalesce(NEW.brand, '')             || ' ' ||
+    coalesce(NEW.audience, '')          || ' ' ||
     coalesce(array_to_string(NEW.tags, ' '), '')            || ' ' ||
     coalesce(array_to_string(NEW.characteristics, ' '), '')
   );
@@ -893,6 +898,37 @@ CREATE POLICY "super_admin_delete" ON products
 
 CREATE POLICY "service_role_full_access" ON products
   FOR ALL USING (auth.role() = 'service_role');
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  size TEXT NOT NULL,
+  color TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, sku),
+  UNIQUE (product_id, size, color)
+);
+CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_variants_tenant_stock ON product_variants(tenant_id, stock);
+CREATE TRIGGER trg_product_variants_updated_at
+  BEFORE UPDATE ON product_variants FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation_select" ON product_variants FOR SELECT
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID OR (auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+CREATE POLICY "owner_admin_insert" ON product_variants FOR INSERT
+  WITH CHECK (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID AND (auth.jwt() ->> 'user_role') IN ('owner', 'admin'));
+CREATE POLICY "owner_admin_update" ON product_variants FOR UPDATE
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID AND (auth.jwt() ->> 'user_role') IN ('owner', 'admin'));
+CREATE POLICY "owner_admin_delete" ON product_variants FOR DELETE
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID AND (auth.jwt() ->> 'user_role') IN ('owner', 'admin'));
+CREATE POLICY "super_admin_full_access" ON product_variants FOR ALL
+  USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+CREATE POLICY "service_role_full_access" ON product_variants FOR ALL
+  USING (auth.role() = 'service_role');
 
 
 -- ================================================================

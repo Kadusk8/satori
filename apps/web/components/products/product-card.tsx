@@ -12,6 +12,11 @@ export interface Product {
   price: number | null
   priceDisplay: string | null
   category: string | null
+  subcategory: string | null
+  brand: string | null
+  audience: 'female' | 'male' | 'kids' | 'unisex' | null
+  promotionalPrice: number | null
+  variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
@@ -119,8 +124,13 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
       <div className="p-3 space-y-1">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-medium text-sm leading-tight line-clamp-1">{product.name}</h3>
-          <span className="text-sm font-semibold text-primary shrink-0">
-            {formatPrice(product.price, product.priceDisplay)}
+          <span className="shrink-0 text-right">
+            {product.promotionalPrice !== null && product.price !== null && (
+              <span className="block text-[10px] text-muted-foreground line-through">{formatPrice(product.price, null)}</span>
+            )}
+            <span className="block text-sm font-semibold text-primary">
+              {formatPrice(product.promotionalPrice ?? product.price, product.promotionalPrice === null ? product.priceDisplay : null)}
+            </span>
           </span>
         </div>
 
@@ -132,6 +142,13 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
           <span className="inline-block text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5">
             {product.category}
           </span>
+        )}
+
+        {product.brand && <span className="ml-1 text-xs text-muted-foreground">{product.brand}</span>}
+        {product.variants.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {product.variants.length} variações · {product.variants.reduce((total, variant) => total + variant.stock, 0)} em estoque
+          </p>
         )}
 
         {product.itemKind === 'service' && product.durationMinutes && (

@@ -14,7 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const businessModel = claims.tenantId
     ? await withClaims({ sub: claims.userId!, tenant_id: claims.tenantId, user_role: claims.userRole, is_super_admin: claims.isSuperAdmin }, async (tx) => {
         const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenantId!)).limit(1)
-        return tenant?.businessModel === 'service' ? 'service' as const : 'product' as const
+        return tenant?.businessModel === 'service' || tenant?.businessModel === 'fashion' ? tenant.businessModel : 'product' as const
       })
     : 'product'
 

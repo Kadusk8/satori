@@ -53,7 +53,7 @@ interface TenantPageProps {
 interface AdminTenantRow {
   id: string; name: string; status: string; plan: string
   business_segment: string | null; business_description: string | null
-  business_model: 'product' | 'service'
+  business_model: 'product' | 'fashion' | 'service'
   owner_name: string | null; owner_email: string | null; owner_phone: string | null
   city: string | null; state: string | null; website: string | null
   latitude: string | null; longitude: string | null
@@ -162,7 +162,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <DetailRow label="Segmento" value={segmentLabel[tenant.business_segment ?? ''] ?? tenant.business_segment ?? '—'} />
-            <DetailRow label="Modelo" value={tenant.business_model === 'service' ? 'Empresa de serviços' : 'Empresa de produtos'} />
+            <DetailRow label="Modelo" value={tenant.business_model === 'service' ? 'Empresa de serviços' : tenant.business_model === 'fashion' ? 'Loja de roupas' : 'Empresa de produtos'} />
             <DetailRow label="Descrição" value={tenant.business_description ?? '—'} />
             <DetailRow label="Responsável" value={tenant.owner_name ?? '—'} />
             <DetailRow label="Email" value={tenant.owner_email ?? '—'} />

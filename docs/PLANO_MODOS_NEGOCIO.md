@@ -1,12 +1,16 @@
-# Plano: Satori para empresas de produtos e de serviços
+# Plano: modos de negócio do Satori
 
-> **Status em 06/11/2026:** implementação concluída e migration aplicada ao banco de produção. A publicação de frontend/backend e o piloto com uma empresa real são as etapas operacionais restantes.
+> **Status em 06/11/2026:** produtos e serviços estão em produção. O terceiro modo, loja de roupas, está implementado no código e aguarda migration e publicação.
 
 ## Objetivo e decisão
 
-O super admin escolhe **Produtos** ou **Serviços** ao cadastrar uma empresa. O Satori continua com uma aplicação, um banco e um backend, mas apresenta cadastro, painel e comportamento da IA adequados ao modo escolhido. `business_segment` (clínica, loja etc.) continua independente do novo `business_model` (`product` ou `service`): o segmento não determina como a empresa opera.
+O super admin escolhe **Produtos**, **Loja de roupas** ou **Serviços** ao cadastrar uma empresa. O Satori continua com uma aplicação, um banco e um backend, mas apresenta cadastro, painel e comportamento da IA adequados ao modo escolhido. `business_segment` continua independente de `business_model` (`product`, `fashion` ou `service`).
 
-O lançamento terá dois modos. O esquema e as funções de leitura devem permitir adicionar `hybrid` mais tarde sem reescrever o fluxo inteiro, mas não haverá opção mista no cadastro inicial.
+Não haverá opção mista no cadastro inicial.
+
+## Extensão: loja de roupas
+
+O modo `fashion` reutiliza o catálogo de produtos e acrescenta marca, subcategoria, público (feminino, masculino, infantil ou unissex), preço promocional e variações. Cada combinação de tamanho e cor possui SKU e estoque próprios em `product_variants`. A IA recebe apenas variações com estoque positivo e deve confirmar tamanho e cor antes de afirmar disponibilidade.
 
 ## Situação atual que o plano precisa resolver
 

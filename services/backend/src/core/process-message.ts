@@ -143,7 +143,7 @@ interface ConversationRow {
   whatsapp_label_names: string[] | null
   blocked_labels: string[]
   t_name: string
-  business_model: 'product' | 'service'
+  business_model: 'product' | 'fashion' | 'service'
   business_hours: BusinessHours
   timezone: string
   evolution_instance_name: string | null

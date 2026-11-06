@@ -7,7 +7,7 @@ export type BusinessSegment =
   | 'servicos'
   | 'outro'
 
-export type BusinessModel = 'product' | 'service'
+export type BusinessModel = 'product' | 'fashion' | 'service'
 
 export type AgentPersonality =
   | 'simpatico'

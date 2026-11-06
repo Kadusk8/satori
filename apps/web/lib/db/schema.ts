@@ -392,6 +392,9 @@ export const products = pgTable(
     currency: text('currency').notNull().default('BRL'),
     category: text('category'),
     subcategory: text('subcategory'),
+    brand: text('brand'),
+    audience: text('audience'),
+    promotionalPrice: numeric('promotional_price'),
     tags: text('tags').array().notNull().default([]),
     characteristics: text('characteristics').array().notNull().default([]),
     images: jsonb('images').notNull().default([]),
@@ -405,6 +408,26 @@ export const products = pgTable(
   (t) => [
     index('idx_products_tenant_id').on(t.tenantId),
     index('idx_products_category').on(t.tenantId, t.category),
+  ]
+)
+
+export const productVariants = pgTable(
+  'product_variants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+    size: text('size').notNull(),
+    color: text('color').notNull(),
+    sku: text('sku').notNull(),
+    stock: integer('stock').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_product_variants_product').on(t.productId),
+    uniqueIndex('product_variants_tenant_sku_unique').on(t.tenantId, t.sku),
+    uniqueIndex('product_variants_product_size_color_unique').on(t.productId, t.size, t.color),
   ]
 )
 

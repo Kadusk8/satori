@@ -19,7 +19,7 @@ export async function updateTenantStatus(tenantId: string, status: 'active' | 's
 export async function updateTenant(tenantId: string, data: {
   name?: string
   business_segment?: string
-  business_model?: 'product' | 'service'
+  business_model?: 'product' | 'fashion' | 'service'
   business_description?: string
   owner_name?: string
   owner_email?: string
@@ -72,12 +72,14 @@ export async function updateTenant(tenantId: string, data: {
         })
         const modeInstruction = data.business_model === 'service'
           ? '## Modelo atual do negócio\nEsta empresa trabalha com SERVIÇOS. Ignore quaisquer instruções antigas sobre venda, estoque ou imagens de produtos; consulte serviços e conduza agendamentos.'
-          : '## Modelo atual do negócio\nEsta empresa trabalha com PRODUTOS. Ignore quaisquer instruções antigas que tratem o catálogo exclusivamente como serviços.'
+          : data.business_model === 'fashion'
+            ? '## Modelo atual do negócio\nEsta empresa é uma LOJA DE ROUPAS. Consulte produtos e confirme tamanho, cor e estoque da variação antes de afirmar disponibilidade.'
+            : '## Modelo atual do negócio\nEsta empresa trabalha com PRODUTOS. Ignore quaisquer instruções antigas que tratem o catálogo exclusivamente como serviços.'
         await tx.update(aiAgents).set({
           systemPrompt: sql`${modeInstruction} || E'\n\n' || ${aiAgents.systemPrompt}`,
           canSearchProducts: true,
           canBookAppointments: true,
-          canSendImages: data.business_model === 'product',
+          canSendImages: data.business_model !== 'service',
           updatedAt: new Date(),
         }).where(eq(aiAgents.tenantId, tenantId))
       }

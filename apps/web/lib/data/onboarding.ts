@@ -45,6 +45,7 @@ function buildAgentPrompt(
   productSummary?: string
 ): string {
   const isService = step1.businessModel === 'service'
+  const isFashion = step1.businessModel === 'fashion'
   const personalityMap: Record<string, string> = {
     simpatico: 'Simpático, proativo e focado em ajudar o cliente',
     formal: 'Formal, profissional e respeitoso',
@@ -65,7 +66,10 @@ function buildAgentPrompt(
   const catalogRules = isService
     ? `3. Quando o cliente perguntar por um serviço, use search_services antes de afirmar preço, duração ou disponibilidade
 4. Ao oferecer agendamento, identifique o serviço e consulte check_availability com o ID correspondente`
-    : `3. Quando o cliente demonstrar interesse em um produto, use search_products para buscar e mostrar com imagem
+    : isFashion
+      ? `3. Quando o cliente demonstrar interesse em uma roupa, use search_products antes de responder
+4. Confirme tamanho, cor e estoque da variação antes de afirmar disponibilidade; mostre a imagem do produto quando houver`
+      : `3. Quando o cliente demonstrar interesse em um produto, use search_products para buscar e mostrar com imagem
 4. Quando o cliente quiser agendar uma visita, use check_availability e ofereça opções de horário`
 
   const base = `## Identidade
@@ -131,8 +135,8 @@ export async function onboardTenant(
   if (!step1?.name || !step1?.ownerEmail || !step2?.whatsappNumber) {
     throw new Error('Dados obrigatórios ausentes (name, ownerEmail, whatsappNumber)')
   }
-  if (step1.businessModel !== 'product' && step1.businessModel !== 'service') {
-    throw new Error('Selecione se a empresa trabalha com produtos ou serviços.')
+  if (!['product', 'fashion', 'service'].includes(step1.businessModel)) {
+    throw new Error('Selecione produtos, loja de roupas ou serviços.')
   }
   if (!step2.evolutionApiUrl || !step2.evolutionApiKey || !step2.instanceName) {
     throw new Error('Dados Evolution API obrigatórios (evolutionApiUrl, evolutionApiKey, instanceName)')
@@ -239,7 +243,7 @@ export async function onboardTenant(
         step4.products.map((p) => ({
           tenantId,
           name: p.name,
-          itemKind: step1.businessModel,
+          itemKind: step1.businessModel === 'service' ? 'service' : 'product',
           durationMinutes: step1.businessModel === 'service' ? (p.durationMinutes ?? 30) : null,
           description: p.description,
           price: p.price ? String(parseFloat(p.price.replace(/[^0-9,]/g, '').replace(',', '.')) || 0) : null,
@@ -281,7 +285,7 @@ export async function onboardTenant(
           outOfHoursMessage: step3.outOfHoursMessage,
           canSearchProducts: true,
           canBookAppointments: step1.businessModel === 'service' ? true : undefined,
-          canSendImages: step1.businessModel === 'product',
+          canSendImages: step1.businessModel !== 'service',
           updatedAt: new Date(),
         })
         .where(eq(aiAgents.id, existingAgent[0].id))
@@ -302,7 +306,7 @@ export async function onboardTenant(
         outOfHoursMessage: step3.outOfHoursMessage,
         canSearchProducts: true,
         canBookAppointments: step1.businessModel === 'service',
-        canSendImages: step1.businessModel === 'product',
+        canSendImages: step1.businessModel !== 'service',
         escalationRules: {},
         sdrInstructions: {},
       })

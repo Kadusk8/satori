@@ -28,7 +28,7 @@ function NotificationBadge({ count }: { count: number }) {
 interface DashboardSidebarProps {
   tenantId: string | null
   userRole: string | null
-  businessModel: 'product' | 'service'
+  businessModel: 'product' | 'fashion' | 'service'
 }
 
 const roleLabel: Record<string, string> = {
@@ -80,7 +80,7 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
     { label: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard, badge: 0 },
     { label: 'CRM',          href: '/conversations', icon: MessageSquare,   badge: waitingCount },
     { label: 'Contatos',     href: '/contacts',      icon: Users,           badge: 0 },
-    { label: businessModel === 'service' ? 'Serviços' : 'Produtos', href: '/products', icon: Package, badge: 0 },
+    { label: businessModel === 'service' ? 'Serviços' : businessModel === 'fashion' ? 'Roupas' : 'Produtos', href: '/products', icon: Package, badge: 0 },
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
     ...(isManagerRole ? [{ label: 'Equipe', href: '/team', icon: UserCog, badge: 0 }] : []),
     { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },

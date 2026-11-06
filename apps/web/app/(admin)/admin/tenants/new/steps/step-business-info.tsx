@@ -22,7 +22,7 @@ const schema = z.object({
   segment: z.enum(['clinica', 'loja', 'restaurante', 'servicos', 'outro'], {
     error: 'Selecione o segmento',
   }),
-  businessModel: z.enum(['product', 'service'], { error: 'Selecione o modelo do negócio' }),
+  businessModel: z.enum(['product', 'fashion', 'service'], { error: 'Selecione o modelo do negócio' }),
   description: z.string().optional().default(''),
   ownerName: z.string().min(2, 'Nome do responsável obrigatório'),
   ownerEmail: z.string().email('Email inválido'),
@@ -92,9 +92,10 @@ export function StepBusinessInfo() {
           <label className="text-sm font-medium">
             Modelo do negócio <span className="text-destructive">*</span>
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {([
               { value: 'product', title: 'Empresa de produtos', text: 'Catálogo, preços, fotos e disponibilidade de produtos.' },
+              { value: 'fashion', title: 'Loja de roupas', text: 'Roupas com marca, público, tamanhos, cores, SKU e estoque.' },
               { value: 'service', title: 'Empresa de serviços', text: 'Serviços, duração, preços e agendamentos.' },
             ] as const).map((option) => (
               <button

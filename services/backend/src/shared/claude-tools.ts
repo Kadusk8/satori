@@ -13,13 +13,13 @@ export interface Tool {
 
 export function isToolAllowedForBusinessModel(
   toolName: string,
-  businessModel: 'product' | 'service',
+  businessModel: 'product' | 'fashion' | 'service',
   capabilities: { canSearchCatalog: boolean; canSendImages: boolean }
 ): boolean {
-  if (toolName === 'search_products') return businessModel === 'product' && capabilities.canSearchCatalog
+  if (toolName === 'search_products') return businessModel !== 'service' && capabilities.canSearchCatalog
   if (toolName === 'search_services') return businessModel === 'service' && capabilities.canSearchCatalog
   if (toolName === 'send_product_image' || toolName === 'send_more_product_images') {
-    return businessModel === 'product' && capabilities.canSendImages
+    return businessModel !== 'service' && capabilities.canSendImages
   }
   return true
 }

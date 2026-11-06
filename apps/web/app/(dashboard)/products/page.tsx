@@ -26,6 +26,11 @@ interface DBProduct {
   price: number | null
   price_display: string | null
   category: string | null
+  subcategory: string | null
+  brand: string | null
+  audience: 'female' | 'male' | 'kids' | 'unisex' | null
+  promotional_price: number | null
+  variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
@@ -45,6 +50,11 @@ function mapProduct(row: DBProduct): Product {
     price: row.price,
     priceDisplay: row.price_display,
     category: row.category,
+    subcategory: row.subcategory,
+    brand: row.brand,
+    audience: row.audience,
+    promotionalPrice: row.promotional_price,
+    variants: row.variants ?? [],
     tags: row.tags ?? [],
     characteristics: row.characteristics ?? [],
     images: (row.images ?? []) as { url: string; thumbnailUrl: string; alt: string }[],
@@ -60,7 +70,7 @@ type ViewMode = 'grid' | 'list'
 type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured' | 'running_ad'
 
 export default function ProductsPage() {
-  const [businessModel, setBusinessModel] = useState<'product' | 'service'>('product')
+  const [businessModel, setBusinessModel] = useState<'product' | 'fashion' | 'service'>('product')
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [registeredCategories, setRegisteredCategories] = useState<string[]>([])
@@ -107,8 +117,11 @@ export default function ProductsPage() {
         !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.category?.toLowerCase().includes(search.toLowerCase()) ||
+        p.subcategory?.toLowerCase().includes(search.toLowerCase()) ||
+        p.brand?.toLowerCase().includes(search.toLowerCase()) ||
         p.tags.some((t) => t.toLowerCase().includes(search.toLowerCase())) ||
-        p.characteristics.some((c) => c.toLowerCase().includes(search.toLowerCase()))
+        p.characteristics.some((c) => c.toLowerCase().includes(search.toLowerCase())) ||
+        p.variants.some((variant) => [variant.size, variant.color, variant.sku].some((value) => value.toLowerCase().includes(search.toLowerCase())))
 
       const matchStatus =
         filterStatus === 'all' ||
@@ -136,6 +149,11 @@ export default function ProductsPage() {
         price: data.price,
         priceDisplay: data.priceDisplay,
         category: data.category,
+        subcategory: data.subcategory,
+        brand: data.brand,
+        audience: data.audience,
+        promotionalPrice: data.promotionalPrice,
+        variants: data.variants,
         tags: data.tags,
         characteristics: data.characteristics,
         images: data.images,
@@ -203,13 +221,16 @@ export default function ProductsPage() {
   }
 
   const allCategories = ['Todas', ...categories]
+  const singularLabel = businessModel === 'service' ? 'serviço' : businessModel === 'fashion' ? 'roupa' : 'produto'
+  const pluralLabel = businessModel === 'service' ? 'Serviços' : businessModel === 'fashion' ? 'Roupas' : 'Produtos'
+  const newItemLabel = businessModel === 'fashion' ? 'Nova roupa' : `Novo ${singularLabel}`
 
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{businessModel === 'service' ? 'Serviços' : 'Produtos'}</h1>
+          <h1 className="text-2xl font-bold">{pluralLabel}</h1>
           <p className="text-muted-foreground text-sm mt-1">
             {products.filter((p) => p.isAvailable).length} disponíveis ·{' '}
             {products.length} no total
@@ -217,7 +238,7 @@ export default function ProductsPage() {
         </div>
         <Button onClick={openNew} className="gap-2">
           <Plus className="h-4 w-4" />
-          Novo {businessModel === 'service' ? 'serviço' : 'produto'}
+          {newItemLabel}
         </Button>
       </div>
 
@@ -305,11 +326,11 @@ export default function ProductsPage() {
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
           <Package className="h-12 w-12 opacity-30" />
           <p className="text-sm">
-            {products.length === 0 ? `Nenhum ${businessModel === 'service' ? 'serviço' : 'produto'} cadastrado` : `Nenhum ${businessModel === 'service' ? 'serviço' : 'produto'} encontrado`}
+            {products.length === 0 ? `Nenhum item cadastrado em ${pluralLabel.toLowerCase()}` : `Nenhum item encontrado em ${pluralLabel.toLowerCase()}`}
           </p>
           {products.length === 0 && (
             <Button variant="outline" size="sm" onClick={openNew}>
-              Cadastrar primeiro {businessModel === 'service' ? 'serviço' : 'produto'}
+              Cadastrar {singularLabel}
             </Button>
           )}
         </div>
@@ -330,7 +351,7 @@ export default function ProductsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/30">
-                <th className="text-left font-medium text-muted-foreground px-4 py-3">{businessModel === 'service' ? 'Serviço' : 'Produto'}</th>
+                <th className="text-left font-medium text-muted-foreground px-4 py-3">{singularLabel[0].toUpperCase() + singularLabel.slice(1)}</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Categoria</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Preço</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Status</th>
@@ -366,7 +387,9 @@ export default function ProductsPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{p.category ?? '—'}</td>
                   <td className="px-4 py-3 font-medium">
-                    {p.priceDisplay ?? (p.price != null
+                    {p.promotionalPrice != null
+                      ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.promotionalPrice)
+                      : p.priceDisplay ?? (p.price != null
                       ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)
                       : 'Sob consulta')}
                   </td>

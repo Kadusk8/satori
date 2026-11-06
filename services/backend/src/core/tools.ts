@@ -29,15 +29,23 @@ interface ProductRow {
   price_display: string | null
   price: string | null
   category: string | null
+  subcategory: string | null
+  brand: string | null
+  audience: string | null
+  promotional_price: string | null
+  variants: Array<{ size: string; color: string; sku: string; stock: number }>
   images: unknown
   characteristics: string[] | null
 }
 
 async function queryProducts(whereSql: string, params: unknown[], orderLimitSql: string): Promise<ProductRow[]> {
   const res = await pool.query<ProductRow>(
-    `select id, name, short_description, description, price_display, price, category, images, characteristics
-     from products
-     where tenant_id = $1 and item_kind = 'product' and is_available = true ${whereSql}
+    `select p.id, p.name, p.short_description, p.description, p.price_display, p.price, p.category,
+            p.subcategory, p.brand, p.audience, p.promotional_price, p.images, p.characteristics,
+            coalesce((select json_agg(json_build_object('size', v.size, 'color', v.color, 'sku', v.sku, 'stock', v.stock) order by v.color, v.size)
+                      from product_variants v where v.product_id = p.id), '[]'::json) as variants
+     from products p
+     where p.tenant_id = $1 and p.item_kind = 'product' and p.is_available = true ${whereSql}
      ${orderLimitSql}`,
     params
   )
@@ -142,7 +150,9 @@ export async function toolSearchProducts(
         .map((w) => {
           params.push(`%${w}%`)
           const idx = params.length
-          return `name ilike $${idx} or description ilike $${idx} or exists (select 1 from unnest(characteristics) c where c ilike $${idx})`
+          return `name ilike $${idx} or description ilike $${idx} or brand ilike $${idx} or subcategory ilike $${idx}
+            or exists (select 1 from unnest(characteristics) c where c ilike $${idx})
+            or exists (select 1 from product_variants pv where pv.product_id = p.id and (pv.size ilike $${idx} or pv.color ilike $${idx} or pv.sku ilike $${idx}))`
         })
         .join(' or ')
       data = await queryProducts(`${priceSql} and (${clauses})`, params, `limit ${maxResults}`)
@@ -183,11 +193,15 @@ export async function toolSearchProducts(
       const hasImage = images.length > 0
       const desc = p.short_description || p.description
       const characteristics = p.characteristics ?? []
+      const availableVariants = (p.variants ?? []).filter((variant) => variant.stock > 0)
       return [
         `📦 *${p.name}*`,
-        p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
+        p.promotional_price ? `💰 De R$ ${Number(p.price ?? 0).toFixed(2)} por R$ ${Number(p.promotional_price).toFixed(2)}` : p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
         desc ? `📝 ${desc}` : '',
-        p.category ? `🏷️ ${p.category}` : '',
+        p.category ? `🏷️ ${p.category}${p.subcategory ? ` / ${p.subcategory}` : ''}` : '',
+        p.brand ? `🏢 Marca: ${p.brand}` : '',
+        p.audience ? `👤 Público: ${{ female: 'feminino', male: 'masculino', kids: 'infantil', unisex: 'unissex' }[p.audience] ?? p.audience}` : '',
+        availableVariants.length > 0 ? `📏 Variações disponíveis: ${availableVariants.map((variant) => `${variant.color} ${variant.size} (estoque: ${variant.stock})`).join(', ')}` : '',
         characteristics.length > 0 ? `🔧 Características: ${characteristics.join(', ')}` : '',
         hasImage ? `🖼️ [tem imagem — use send_product_image com id: ${p.id}]` : '',
         `ID: ${p.id}`,
@@ -828,10 +842,11 @@ export async function executeTool(
 
   if (['search_products', 'search_services', 'send_product_image', 'send_more_product_images'].includes(toolName)) {
     const tenantResult = await pool.query<{ business_model: string }>(`select business_model from tenants where id = $1`, [ctx.tenantId])
-    const businessModel = tenantResult.rows[0]?.business_model === 'service' ? 'service' : 'product'
+    const rawBusinessModel = tenantResult.rows[0]?.business_model
+    const businessModel = rawBusinessModel === 'service' || rawBusinessModel === 'fashion' ? rawBusinessModel : 'product'
     const invalidForMode =
       (businessModel === 'service' && ['search_products', 'send_product_image', 'send_more_product_images'].includes(toolName))
-      || (businessModel === 'product' && toolName === 'search_services')
+      || (businessModel !== 'service' && toolName === 'search_services')
     if (invalidForMode) {
       return { result: 'Ferramenta indisponível para o modelo desta empresa.', escalated: false }
     }

@@ -19,7 +19,7 @@ export interface OnboardingPayload {
   step1: {
     name: string
     segment: string
-    businessModel: 'product' | 'service'
+    businessModel: 'product' | 'fashion' | 'service'
     description: string
     ownerName: string
     ownerEmail: string

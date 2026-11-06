@@ -16,4 +16,10 @@ describe('isToolAllowedForBusinessModel', () => {
     expect(isToolAllowedForBusinessModel('send_product_image', 'service', enabled)).toBe(false)
     expect(isToolAllowedForBusinessModel('book_appointment', 'service', enabled)).toBe(true)
   })
+
+  it('usa catálogo e imagens no modo loja de roupas', () => {
+    expect(isToolAllowedForBusinessModel('search_products', 'fashion', enabled)).toBe(true)
+    expect(isToolAllowedForBusinessModel('search_services', 'fashion', enabled)).toBe(false)
+    expect(isToolAllowedForBusinessModel('send_product_image', 'fashion', enabled)).toBe(true)
+  })
 })

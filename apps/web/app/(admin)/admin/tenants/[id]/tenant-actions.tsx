@@ -30,7 +30,7 @@ interface TenantActionsProps {
     name: string
     status: string
     business_segment: string | null
-    business_model: 'product' | 'service'
+    business_model: 'product' | 'fashion' | 'service'
     business_description: string | null
     owner_name: string | null
     owner_email: string | null
@@ -159,10 +159,11 @@ export function TenantActions({ tenant }: TenantActionsProps) {
               </Select>
             </Field>
             <Field label="Modelo do negócio">
-              <Select value={form.business_model} onValueChange={v => v && setForm(f => ({ ...f, business_model: v as 'product' | 'service' }))}>
+              <Select value={form.business_model} onValueChange={v => v && setForm(f => ({ ...f, business_model: v as 'product' | 'fashion' | 'service' }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="product">Empresa de produtos</SelectItem>
+                  <SelectItem value="fashion">Loja de roupas</SelectItem>
                   <SelectItem value="service">Empresa de serviços</SelectItem>
                 </SelectContent>
               </Select>

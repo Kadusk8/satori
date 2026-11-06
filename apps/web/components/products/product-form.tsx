@@ -19,6 +19,10 @@ const schema = z.object({
   price: z.string().optional(),
   priceDisplay: z.string().optional(),
   category: z.string().optional(),
+  subcategory: z.string().optional(),
+  brand: z.string().optional(),
+  audience: z.enum(['female', 'male', 'kids', 'unisex']).optional(),
+  promotionalPrice: z.string().optional(),
   tags: z.string().optional(), // CSV
   isAvailable: z.boolean(),
   isFeatured: z.boolean(),
@@ -55,7 +59,7 @@ interface ProductFormProps {
   cloudName: string
   uploadPreset: string
   categories: string[]
-  businessModel: 'product' | 'service'
+  businessModel: 'product' | 'fashion' | 'service'
   onSave: (data: Omit<Product, 'id'> & { id?: string }) => Promise<void>
   onClose: () => void
 }
@@ -69,6 +73,8 @@ export function ProductForm({
   onSave,
   onClose,
 }: ProductFormProps) {
+  const itemLabel = businessModel === 'service' ? 'serviço' : businessModel === 'fashion' ? 'roupa' : 'produto'
+  const newItemLabel = businessModel === 'fashion' ? 'Nova roupa' : `Novo ${itemLabel}`
   const [images, setImages] = useState<UploadedImage[]>(
     product?.images.map((img) => ({
       url: img.url,
@@ -80,6 +86,7 @@ export function ProductForm({
   const [saving, setSaving] = useState(false)
   const [characteristics, setCharacteristics] = useState<string[]>(product?.characteristics ?? [])
   const [characteristicInput, setCharacteristicInput] = useState('')
+  const [variants, setVariants] = useState(product?.variants ?? [])
 
   const addCharacteristic = () => {
     const value = characteristicInput.trim()
@@ -113,6 +120,10 @@ export function ProductForm({
       price: product?.price != null ? String(product.price) : '',
       priceDisplay: product?.priceDisplay ?? '',
       category: product?.category ?? '',
+      subcategory: product?.subcategory ?? '',
+      brand: product?.brand ?? '',
+      audience: product?.audience ?? undefined,
+      promotionalPrice: product?.promotionalPrice != null ? String(product.promotionalPrice) : '',
       tags: product?.tags.join(', ') ?? '',
       isAvailable: product?.isAvailable ?? true,
       isFeatured: product?.isFeatured ?? false,
@@ -132,6 +143,11 @@ export function ProductForm({
         price: data.price ? parseBRLPrice(data.price) : null,
         priceDisplay: data.priceDisplay ?? null,
         category: data.category ?? null,
+        subcategory: businessModel === 'fashion' ? data.subcategory ?? null : null,
+        brand: businessModel === 'fashion' ? data.brand ?? null : null,
+        audience: businessModel === 'fashion' ? data.audience ?? null : null,
+        promotionalPrice: businessModel === 'fashion' && data.promotionalPrice ? parseBRLPrice(data.promotionalPrice) : null,
+        variants: businessModel === 'fashion' ? variants : [],
         tags: data.tags
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
@@ -144,7 +160,7 @@ export function ProductForm({
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
         isRunningAd: data.isRunningAd,
-        itemKind: businessModel,
+        itemKind: businessModel === 'service' ? 'service' : 'product',
         durationMinutes: businessModel === 'service' ? (data.durationMinutes ?? 30) : null,
       })
       onClose()
@@ -160,7 +176,7 @@ export function ProductForm({
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-6 py-4">
           <h2 className="text-lg font-semibold">
-            {product ? `Editar ${businessModel === 'service' ? 'serviço' : 'produto'}` : `Novo ${businessModel === 'service' ? 'serviço' : 'produto'}`}
+            {product ? `Editar ${itemLabel}` : newItemLabel}
           </h2>
           <button
             onClick={onClose}
@@ -294,6 +310,57 @@ export function ProductForm({
             </div>
           </div>
 
+          {businessModel === 'fashion' && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Subcategoria</label>
+                  <Input {...register('subcategory')} placeholder="Ex: Camisetas" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Marca</label>
+                  <Input {...register('brand')} placeholder="Ex: Nike" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Público</label>
+                  <select {...register('audience')} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
+                    <option value="">Selecione</option>
+                    <option value="female">Feminino</option>
+                    <option value="male">Masculino</option>
+                    <option value="kids">Infantil</option>
+                    <option value="unisex">Unissex</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Preço promocional (R$)</label>
+                  <Input {...register('promotionalPrice')} placeholder="79,90" inputMode="decimal" />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">Variações de tamanho e cor</h3>
+                    <p className="text-xs text-muted-foreground">Cada combinação possui SKU e estoque próprios.</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setVariants((current) => [...current, { size: '', color: '', sku: '', stock: 0 }])}>
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                  </Button>
+                </div>
+                {variants.map((variant, index) => (
+                  <div key={variant.id ?? index} className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1.4fr_0.8fr_auto] gap-2 items-end">
+                    <div><label className="text-xs">Tamanho</label><Input value={variant.size} placeholder="M" onChange={(e) => setVariants((current) => current.map((item, i) => i === index ? { ...item, size: e.target.value } : item))} /></div>
+                    <div><label className="text-xs">Cor</label><Input value={variant.color} placeholder="Preta" onChange={(e) => setVariants((current) => current.map((item, i) => i === index ? { ...item, color: e.target.value } : item))} /></div>
+                    <div><label className="text-xs">SKU</label><Input value={variant.sku} placeholder="CAM-PRE-M" onChange={(e) => setVariants((current) => current.map((item, i) => i === index ? { ...item, sku: e.target.value } : item))} /></div>
+                    <div><label className="text-xs">Estoque</label><Input type="number" min={0} value={variant.stock} onChange={(e) => setVariants((current) => current.map((item, i) => i === index ? { ...item, stock: Number(e.target.value) } : item))} /></div>
+                    <Button type="button" variant="ghost" size="icon" aria-label="Remover variação" onClick={() => setVariants((current) => current.filter((_, i) => i !== index))}><X className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+                {variants.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma variação cadastrada.</p>}
+              </div>
+            </>
+          )}
+
           {businessModel === 'service' && (
             <div>
               <label className="block text-sm font-medium mb-1.5">Duração do serviço (minutos)</label>
@@ -340,7 +407,7 @@ export function ProductForm({
               />
               <span className="text-sm">{businessModel === 'service' ? 'Serviço em destaque' : 'Produto em destaque'}</span>
             </label>
-            {businessModel === 'product' && <label className="flex items-center gap-2 cursor-pointer">
+            {businessModel !== 'service' && <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 {...register('isRunningAd')}
@@ -357,7 +424,7 @@ export function ProductForm({
             </Button>
             <Button type="submit" disabled={saving} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {product ? 'Salvar alterações' : `Criar ${businessModel === 'service' ? 'serviço' : 'produto'}`}
+              {product ? 'Salvar alterações' : `Criar ${itemLabel}`}
             </Button>
           </div>
         </form>

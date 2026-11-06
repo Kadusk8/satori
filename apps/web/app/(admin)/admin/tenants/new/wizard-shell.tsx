@@ -24,7 +24,7 @@ const STEPS = [
 export function WizardShell() {
   const { currentStep, setStep, step1 } = useWizardStore()
   const steps = STEPS.map((step) => step.number === 4
-    ? { ...step, label: step1.businessModel === 'service' ? 'Serviços' : 'Produtos' }
+    ? { ...step, label: step1.businessModel === 'service' ? 'Serviços' : step1.businessModel === 'fashion' ? 'Roupas' : 'Produtos' }
     : step)
 
   return (

@@ -90,7 +90,7 @@ export default async function TenantsPage({ searchParams }: TenantsPageProps) {
     name: t.name,
     slug: t.slug,
     segment: t.businessSegment ?? '',
-    businessModel: t.businessModel === 'service' ? 'service' : 'product',
+    businessModel: t.businessModel === 'service' || t.businessModel === 'fashion' ? t.businessModel : 'product',
     ownerName: t.ownerName ?? '',
     ownerEmail: t.ownerEmail ?? '',
     plan: t.plan,
@@ -164,7 +164,7 @@ export default async function TenantsPage({ searchParams }: TenantsPageProps) {
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <div>{segmentLabel[tenant.segment] ?? tenant.segment}</div>
-                    <div className="text-[10px] mt-0.5">{tenant.businessModel === 'service' ? 'Serviços' : 'Produtos'}</div>
+                    <div className="text-[10px] mt-0.5">{tenant.businessModel === 'service' ? 'Serviços' : tenant.businessModel === 'fashion' ? 'Loja de roupas' : 'Produtos'}</div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={planVariant[tenant.plan]} className="text-[10px] px-1.5 py-0 h-4">{tenant.plan}</Badge>
