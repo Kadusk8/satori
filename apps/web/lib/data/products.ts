@@ -1,9 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
-import { products, productCategories } from '@/lib/db/schema'
+import { products, productCategories, tenants } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
 
 export interface DBProductRow {
@@ -20,6 +20,8 @@ export interface DBProductRow {
   is_available: boolean
   is_featured: boolean
   is_running_ad: boolean
+  item_kind: 'product' | 'service'
+  duration_minutes: number | null
 }
 
 export interface ProductInput {
@@ -36,6 +38,7 @@ export interface ProductInput {
   isAvailable: boolean
   isFeatured: boolean
   isRunningAd: boolean
+  durationMinutes: number | null
 }
 
 async function claimsOrThrow() {
@@ -59,7 +62,18 @@ function toRow(p: typeof products.$inferSelect): DBProductRow {
     is_available: p.isAvailable,
     is_featured: p.isFeatured,
     is_running_ad: p.isRunningAd,
+    item_kind: p.itemKind as 'product' | 'service',
+    duration_minutes: p.durationMinutes,
   }
+}
+
+export async function getCatalogContext(): Promise<{ businessModel: 'product' | 'service' }> {
+  const claims = await claimsOrThrow()
+  if (!claims.tenant_id) throw new Error('Tenant não identificado.')
+  return withClaims(claims, async (tx) => {
+    const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    return { businessModel: tenant?.businessModel === 'service' ? 'service' : 'product' }
+  })
 }
 
 export async function listProductCategories(): Promise<string[]> {
@@ -72,14 +86,30 @@ export async function listProductCategories(): Promise<string[]> {
 
 export async function listProducts(): Promise<DBProductRow[]> {
   const claims = await claimsOrThrow()
+  if (!claims.tenant_id) throw new Error('Tenant não identificado.')
+  const itemKind = await businessModelForClaims(claims)
   const rows = await withClaims(claims, (tx) =>
-    tx.select().from(products).orderBy(desc(products.createdAt))
+    tx.select().from(products)
+      .where(and(eq(products.tenantId, claims.tenant_id!), eq(products.itemKind, itemKind)))
+      .orderBy(desc(products.createdAt))
   )
   return rows.map(toRow)
 }
 
+async function businessModelForClaims(claims: Awaited<ReturnType<typeof claimsOrThrow>>): Promise<'product' | 'service'> {
+  if (!claims.tenant_id) throw new Error('Tenant não identificado.')
+  return withClaims(claims, async (tx) => {
+    const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    return tenant?.businessModel === 'service' ? 'service' : 'product'
+  })
+}
+
 export async function saveProduct(input: ProductInput): Promise<{ id: string }> {
   const claims = await claimsOrThrow()
+  const itemKind = await businessModelForClaims(claims)
+  if (itemKind === 'service' && (!input.durationMinutes || input.durationMinutes < 5)) {
+    throw new Error('Informe uma duração válida para o serviço.')
+  }
   const values = {
     name: input.name,
     description: input.description,
@@ -93,12 +123,18 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     isAvailable: input.isAvailable,
     isFeatured: input.isFeatured,
     isRunningAd: input.isRunningAd,
+    itemKind,
+    durationMinutes: itemKind === 'service' ? input.durationMinutes : null,
   }
 
   const id = await withClaims(claims, async (tx) => {
     if (input.id) {
-      await tx.update(products).set({ ...values, updatedAt: new Date() }).where(eq(products.id, input.id))
-      return input.id
+      const updated = await tx.update(products)
+        .set({ ...values, updatedAt: new Date() })
+        .where(and(eq(products.id, input.id), eq(products.itemKind, itemKind)))
+        .returning({ id: products.id })
+      if (!updated[0]) throw new Error('Item não encontrado neste catálogo.')
+      return updated[0].id
     }
     if (!claims.tenant_id) throw new Error('Tenant não identificado.')
     const res = await tx
@@ -114,14 +150,16 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
 
 export async function deleteProduct(id: string): Promise<void> {
   const claims = await claimsOrThrow()
-  await withClaims(claims, (tx) => tx.delete(products).where(eq(products.id, id)))
+  const itemKind = await businessModelForClaims(claims)
+  await withClaims(claims, (tx) => tx.delete(products).where(and(eq(products.id, id), eq(products.itemKind, itemKind))))
   revalidatePath('/products')
 }
 
 export async function setProductAvailable(id: string, available: boolean): Promise<void> {
   const claims = await claimsOrThrow()
+  const itemKind = await businessModelForClaims(claims)
   await withClaims(claims, (tx) =>
-    tx.update(products).set({ isAvailable: available, updatedAt: new Date() }).where(eq(products.id, id))
+    tx.update(products).set({ isAvailable: available, updatedAt: new Date() }).where(and(eq(products.id, id), eq(products.itemKind, itemKind)))
   )
   revalidatePath('/products')
 }

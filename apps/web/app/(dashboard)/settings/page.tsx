@@ -5,6 +5,7 @@ import { Bot, MessagesSquare, UserCog, ArrowRight, Kanban, UserRound, Tags, Trop
 import { getSessionClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
 import { ChangePasswordDialog } from './change-password-dialog'
+import { getCatalogContext } from '@/lib/data/products'
 
 const managedSections = [
   {
@@ -22,6 +23,7 @@ const managedSections = [
 export default async function SettingsPage() {
   const claims = await getSessionClaims()
   const canManage = isManager(claims.userRole)
+  const { businessModel } = claims.tenantId ? await getCatalogContext() : { businessModel: 'product' as const }
 
   return (
     <div className="p-8 space-y-6 max-w-2xl mx-auto">
@@ -105,9 +107,9 @@ export default async function SettingsPage() {
               <Tags className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1">
-              <h2 className="font-semibold">Categorias de produto</h2>
+              <h2 className="font-semibold">Categorias de {businessModel === 'service' ? 'serviço' : 'produto'}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Crie, renomeie, reordene e exclua as categorias usadas no catálogo de produtos.
+                Crie, renomeie, reordene e exclua as categorias usadas no catálogo de {businessModel === 'service' ? 'serviços' : 'produtos'}.
               </p>
             </div>
             <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-2 group-hover:translate-x-0.5 transition-transform" />

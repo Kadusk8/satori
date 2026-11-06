@@ -44,6 +44,7 @@ function buildAgentPrompt(
   hoursText: string,
   productSummary?: string
 ): string {
+  const isService = step1.businessModel === 'service'
   const personalityMap: Record<string, string> = {
     simpatico: 'Simpático, proativo e focado em ajudar o cliente',
     formal: 'Formal, profissional e respeitoso',
@@ -61,13 +62,19 @@ function buildAgentPrompt(
     : ''
   const address = [step1.address, step1.city, step1.state].filter(Boolean).join(', ') || 'Não informado'
 
+  const catalogRules = isService
+    ? `3. Quando o cliente perguntar por um serviço, use search_services antes de afirmar preço, duração ou disponibilidade
+4. Ao oferecer agendamento, identifique o serviço e consulte check_availability com o ID correspondente`
+    : `3. Quando o cliente demonstrar interesse em um produto, use search_products para buscar e mostrar com imagem
+4. Quando o cliente quiser agendar uma visita, use check_availability e ofereça opções de horário`
+
   const base = `## Identidade
 Você é o assistente virtual da ${step1.name}, especializada em ${step1.segment}.
-Seu nome é ${step3.agentName}. Você é um vendedor/SDR digital.
+Seu nome é ${step3.agentName}. Você atende como ${isService ? 'consultor de serviços' : 'vendedor'}.
 
 ## Objetivo principal
-Atender clientes no WhatsApp, qualificar leads, apresentar produtos/serviços,
-agendar atendimentos e converter interessados em clientes.
+Atender clientes no WhatsApp, qualificar leads, apresentar ${isService ? 'serviços' : 'produtos'},
+${isService ? 'organizar agendamentos' : 'conduzir a venda'} e converter interessados em clientes.
 
 ## Tom e personalidade
 ${personality}${toneSection}
@@ -75,14 +82,13 @@ ${personality}${toneSection}
 ## Regras de ouro
 1. SEMPRE cumprimente o cliente pelo nome quando disponível
 2. Seja objetivo mas simpático — não mande mensagens longas demais
-3. Quando o cliente demonstrar interesse em um produto, use search_products para buscar e mostrar com imagem
-4. Quando o cliente quiser agendar, use check_availability e ofereça 3 opções de horário
+${catalogRules}
 5. Se o cliente pedir desconto ou negociação, escale para humano com escalate_to_human
 6. Se não souber responder algo sobre o negócio, NÃO invente — escale para humano
 7. Colete nome e interesse do cliente naturalmente durante a conversa (lead qualification)
 8. Nunca discuta sobre concorrentes ou faça comparações negativas
 9. No máximo 3 mensagens sem obter uma resposta do cliente — não seja insistente
-10. GERE VALOR ANTES DO PREÇO: ao apresentar um produto, destaque benefícios e diferenciais primeiro. Só mencione o preço quando o cliente perguntar ou demonstrar interesse claro de compra
+10. ${isService ? 'Nunca invente serviços, duração ou preço; use apenas dados retornados pelo catálogo' : 'GERE VALOR ANTES DO PREÇO: destaque benefícios reais antes de citar o preço, salvo quando o cliente perguntar diretamente'}
 
 ## Informações do negócio
 - Empresa: ${step1.name}
@@ -95,19 +101,19 @@ ${personality}${toneSection}
 ## Fluxo de qualificação (SDR)
 1. Cumprimentar e perguntar como pode ajudar
 2. Identificar a necessidade/interesse
-3. Apresentar produto/serviço relevante (com imagem se disponível)
+3. Apresentar ${isService ? 'o serviço relevante, com escopo, duração e preço cadastrados' : 'o produto relevante, com imagem quando disponível'}
 4. Responder dúvidas
 5. Oferecer agendamento ou próximo passo
 6. Se não converter agora, perguntar se pode entrar em contato depois
 
 ## O que você NÃO deve fazer
-- Não invente preços, promoções ou informações que não estão no catálogo
+- Não invente preços, promoções, duração ou informações que não estão no catálogo
 - Não faça promessas que o negócio não pode cumprir
 - Não envie mais de 2 mensagens seguidas sem resposta do cliente
 - Não compartilhe dados pessoais de outros clientes
 - Não discuta política, religião ou temas polêmicos${customRulesSection}`
 
-  return productSummary ? `${base}\n\n## Produtos/serviços disponíveis\n${productSummary}` : base
+  return productSummary ? `${base}\n\n## ${isService ? 'Serviços' : 'Produtos'} disponíveis\n${productSummary}` : base
 }
 
 async function requireSuperAdmin() {
@@ -125,6 +131,9 @@ export async function onboardTenant(
   if (!step1?.name || !step1?.ownerEmail || !step2?.whatsappNumber) {
     throw new Error('Dados obrigatórios ausentes (name, ownerEmail, whatsappNumber)')
   }
+  if (step1.businessModel !== 'product' && step1.businessModel !== 'service') {
+    throw new Error('Selecione se a empresa trabalha com produtos ou serviços.')
+  }
   if (!step2.evolutionApiUrl || !step2.evolutionApiKey || !step2.instanceName) {
     throw new Error('Dados Evolution API obrigatórios (evolutionApiUrl, evolutionApiKey, instanceName)')
   }
@@ -135,6 +144,7 @@ export async function onboardTenant(
   const tenantValues = {
     name: step1.name,
     businessSegment: step1.segment,
+    businessModel: step1.businessModel,
     businessDescription: step1.description,
     ownerName: step1.ownerName,
     ownerEmail: step1.ownerEmail,
@@ -154,9 +164,12 @@ export async function onboardTenant(
 
   // ── Tenant (cria ou atualiza, se uma tentativa anterior já criou o slug) ──
   const { tenantId, webhookSecret } = await withAdmin(async (tx) => {
-    const existing = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1)
+    const existing = await tx.select({ id: tenants.id, businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.slug, slug)).limit(1)
 
     if (existing[0]) {
+      if (existing[0].businessModel !== step1.businessModel) {
+        throw new Error('Já existe uma empresa com esse nome em outro modelo de negócio. Edite o cadastro existente para continuar.')
+      }
       await tx.update(tenants).set({ ...tenantValues, updatedAt: new Date() }).where(eq(tenants.id, existing[0].id))
       const row = await tx
         .select({ webhookSecret: tenants.webhookSecret })
@@ -216,12 +229,18 @@ export async function onboardTenant(
 
   // ── Produtos (opcional) ──
   let productSummary: string | undefined
-  if (!step4.skipped && step4.products.length > 0) {
+  const hasCatalogItems = await withAdmin(async (tx) => {
+    const [item] = await tx.select({ id: products.id }).from(products).where(eq(products.tenantId, tenantId)).limit(1)
+    return Boolean(item)
+  })
+  if (!hasCatalogItems && !step4.skipped && step4.products.length > 0) {
     await withAdmin((tx) =>
       tx.insert(products).values(
         step4.products.map((p) => ({
           tenantId,
           name: p.name,
+          itemKind: step1.businessModel,
+          durationMinutes: step1.businessModel === 'service' ? (p.durationMinutes ?? 30) : null,
           description: p.description,
           price: p.price ? String(parseFloat(p.price.replace(/[^0-9,]/g, '').replace(',', '.')) || 0) : null,
           priceDisplay: p.price || null,
@@ -260,6 +279,9 @@ export async function onboardTenant(
           personality: step3.personality,
           greetingMessage: step3.greetingMessage,
           outOfHoursMessage: step3.outOfHoursMessage,
+          canSearchProducts: true,
+          canBookAppointments: step1.businessModel === 'service' ? true : undefined,
+          canSendImages: step1.businessModel === 'product',
           updatedAt: new Date(),
         })
         .where(eq(aiAgents.id, existingAgent[0].id))
@@ -278,6 +300,9 @@ export async function onboardTenant(
         personality: step3.personality,
         greetingMessage: step3.greetingMessage,
         outOfHoursMessage: step3.outOfHoursMessage,
+        canSearchProducts: true,
+        canBookAppointments: step1.businessModel === 'service',
+        canSendImages: step1.businessModel === 'product',
         escalationRules: {},
         sdrInstructions: {},
       })

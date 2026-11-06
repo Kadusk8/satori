@@ -30,6 +30,7 @@ interface TenantActionsProps {
     name: string
     status: string
     business_segment: string | null
+    business_model: 'product' | 'service'
     business_description: string | null
     owner_name: string | null
     owner_email: string | null
@@ -52,6 +53,7 @@ export function TenantActions({ tenant }: TenantActionsProps) {
   const [form, setForm] = useState({
     name: tenant.name,
     business_segment: tenant.business_segment ?? '',
+    business_model: tenant.business_model,
     business_description: tenant.business_description ?? '',
     owner_name: tenant.owner_name ?? '',
     owner_email: tenant.owner_email ?? '',
@@ -153,6 +155,15 @@ export function TenantActions({ tenant }: TenantActionsProps) {
                   <SelectItem value="restaurante">Restaurante</SelectItem>
                   <SelectItem value="servicos">Serviços</SelectItem>
                   <SelectItem value="outro">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Modelo do negócio">
+              <Select value={form.business_model} onValueChange={v => v && setForm(f => ({ ...f, business_model: v as 'product' | 'service' }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="product">Empresa de produtos</SelectItem>
+                  <SelectItem value="service">Empresa de serviços</SelectItem>
                 </SelectContent>
               </Select>
             </Field>

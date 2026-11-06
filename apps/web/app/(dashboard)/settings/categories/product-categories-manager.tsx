@@ -26,7 +26,7 @@ interface Category {
   position: number
 }
 
-export function ProductCategoriesManager({ initialCategories }: { initialCategories: Category[] }) {
+export function ProductCategoriesManager({ initialCategories, itemLabel }: { initialCategories: Category[]; itemLabel: string }) {
   const router = useRouter()
   const [categories, setCategories] = useState(initialCategories)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -53,7 +53,7 @@ export function ProductCategoriesManager({ initialCategories }: { initialCategor
   }
 
   async function handleDelete(category: Category) {
-    if (!confirm(`Excluir a categoria "${category.name}"? Produtos que já usam esse nome não são alterados.`)) return
+    if (!confirm(`Excluir a categoria "${category.name}"? ${itemLabel.charAt(0).toUpperCase() + itemLabel.slice(1)} que já usam esse nome não são alterados.`)) return
     setBusyId(category.id)
     try {
       await deleteProductCategory(category.id)

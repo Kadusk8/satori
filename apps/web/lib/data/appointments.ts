@@ -12,6 +12,7 @@ export interface DBAppointmentRow {
   contact_id: string
   conversation_id: string | null
   assigned_to: string | null
+  service_id: string | null
   title: string | null
   notes: string | null
   date: string
@@ -29,9 +30,10 @@ export interface CompletedService {
 }
 
 export interface CompletionOptions {
-  products: { id: string; name: string; price: number }[]
+  products: { id: string; name: string; price: number; durationMinutes: number | null }[]
   professionals: { id: string; name: string }[]
   currentUserId: string
+  businessModel: 'product' | 'service'
 }
 
 export interface TenantScheduleConfig {
@@ -73,6 +75,7 @@ export async function listAppointments(fromDate: string, toDate: string): Promis
         contact_id: appointments.contactId,
         conversation_id: appointments.conversationId,
         assigned_to: appointments.assignedTo,
+        service_id: appointments.serviceId,
         title: appointments.title,
         notes: appointments.notes,
         date: appointments.date,
@@ -116,6 +119,7 @@ export async function listAppointments(fromDate: string, toDate: string): Promis
     contact_id: r.contact_id,
     conversation_id: r.conversation_id,
     assigned_to: r.assigned_to,
+    service_id: r.service_id,
     title: r.title,
     notes: r.notes,
     date: r.date,
@@ -131,10 +135,12 @@ export async function listAppointments(fromDate: string, toDate: string): Promis
 export async function getCompletionOptions(): Promise<CompletionOptions> {
   const claims = await claimsOrThrow()
   return withClaims(claims, async (tx) => {
+    const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    const businessModel = tenant?.businessModel === 'service' ? 'service' : 'product'
     const productRows = await tx
-      .select({ id: products.id, name: products.name, price: products.price })
+      .select({ id: products.id, name: products.name, price: products.price, durationMinutes: products.durationMinutes })
       .from(products)
-      .where(eq(products.tenantId, claims.tenant_id!))
+      .where(and(eq(products.tenantId, claims.tenant_id!), eq(products.itemKind, businessModel), eq(products.isAvailable, true)))
       .orderBy(asc(products.name))
     const userRows = await tx
       .select({ id: users.id, name: users.fullName })
@@ -142,9 +148,10 @@ export async function getCompletionOptions(): Promise<CompletionOptions> {
       .where(and(eq(users.tenantId, claims.tenant_id!), eq(users.active, true)))
       .orderBy(asc(users.fullName))
     return {
-      products: productRows.map((p) => ({ id: p.id, name: p.name, price: Number(p.price ?? 0) })),
+      products: productRows.map((p) => ({ id: p.id, name: p.name, price: Number(p.price ?? 0), durationMinutes: p.durationMinutes })),
       professionals: userRows,
       currentUserId: claims.sub,
+      businessModel,
     }
   })
 }
@@ -156,6 +163,7 @@ export interface AppointmentInput {
   contactPhone: string
   conversationId?: string
   assignedTo?: string
+  serviceId?: string | null
   title: string | null
   notes: string | null
   date: string
@@ -170,6 +178,27 @@ export async function saveAppointment(input: AppointmentInput): Promise<void> {
   const claims = await claimsOrThrow()
 
   await withClaims(claims, async (tx) => {
+    const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    const isServiceBusiness = tenant?.businessModel === 'service'
+    let serviceId = input.serviceId ?? null
+    let endTime = input.endTime
+    let serviceName: string | null = null
+    if (isServiceBusiness) {
+      if (!serviceId) throw new Error('Selecione o serviço do agendamento.')
+      const [service] = await tx
+        .select({ name: products.name, durationMinutes: products.durationMinutes })
+        .from(products)
+        .where(and(eq(products.id, serviceId), eq(products.tenantId, claims.tenant_id!), eq(products.itemKind, 'service'), eq(products.isAvailable, true)))
+        .limit(1)
+      if (!service?.durationMinutes) throw new Error('Serviço inválido ou indisponível.')
+      const [hours, minutes] = input.startTime.split(':').map(Number)
+      const total = hours * 60 + minutes + service.durationMinutes
+      endTime = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+      serviceName = service.name
+    } else {
+      serviceId = null
+    }
+
     // Resolve o contato: existente por telefone, ou cria um novo.
     let contactId = input.contactId
     if (!contactId || contactId.startsWith('c')) {
@@ -195,11 +224,12 @@ export async function saveAppointment(input: AppointmentInput): Promise<void> {
       contactId,
       conversationId: input.conversationId ?? null,
       assignedTo: input.assignedTo ?? null,
-      title: input.title,
+      serviceId,
+      title: serviceName ?? input.title,
       notes: input.notes,
       date: input.date,
       startTime: input.startTime,
-      endTime: input.endTime,
+      endTime,
       status: input.status,
     }
 

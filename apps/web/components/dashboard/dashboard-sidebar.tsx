@@ -28,6 +28,7 @@ function NotificationBadge({ count }: { count: number }) {
 interface DashboardSidebarProps {
   tenantId: string | null
   userRole: string | null
+  businessModel: 'product' | 'service'
 }
 
 const roleLabel: Record<string, string> = {
@@ -36,7 +37,7 @@ const roleLabel: Record<string, string> = {
   operator: 'Vendedor',
 }
 
-export function DashboardSidebar({ tenantId, userRole }: DashboardSidebarProps) {
+export function DashboardSidebar({ tenantId, userRole, businessModel }: DashboardSidebarProps) {
   const pathname = usePathname()
   const isManagerRole = userRole === 'owner' || userRole === 'admin'
 
@@ -79,7 +80,7 @@ export function DashboardSidebar({ tenantId, userRole }: DashboardSidebarProps) 
     { label: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard, badge: 0 },
     { label: 'CRM',          href: '/conversations', icon: MessageSquare,   badge: waitingCount },
     { label: 'Contatos',     href: '/contacts',      icon: Users,           badge: 0 },
-    { label: 'Produtos',     href: '/products',      icon: Package,         badge: 0 },
+    { label: businessModel === 'service' ? 'Serviços' : 'Produtos', href: '/products', icon: Package, badge: 0 },
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
     ...(isManagerRole ? [{ label: 'Equipe', href: '/team', icon: UserCog, badge: 0 }] : []),
     { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },

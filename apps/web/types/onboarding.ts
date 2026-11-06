@@ -19,6 +19,7 @@ export interface OnboardingPayload {
   step1: {
     name: string
     segment: string
+    businessModel: 'product' | 'service'
     description: string
     ownerName: string
     ownerEmail: string
@@ -52,6 +53,7 @@ export interface OnboardingPayload {
       description: string
       price: string
       category: string
+      durationMinutes?: number
     }>
     skipped: boolean
   }

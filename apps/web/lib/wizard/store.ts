@@ -22,7 +22,13 @@ export const useWizardStore = create<WizardState>()(
       setStep: (step) => set({ currentStep: step }),
 
       saveStep1: (data: Step1Data) =>
-        set({ step1: data, currentStep: 2 }),
+        set((state) => ({
+          step1: data,
+          step4: state.step1.businessModel && state.step1.businessModel !== data.businessModel
+            ? { products: [], skipped: false }
+            : state.step4,
+          currentStep: 2,
+        })),
 
       saveStep2: (data: Step2Data) =>
         set({ step2: data, currentStep: 3 }),

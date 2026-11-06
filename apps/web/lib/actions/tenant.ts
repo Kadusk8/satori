@@ -3,9 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq, sql } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
-import { tenants, aiAgents, users, authUsers } from '@/lib/db/schema'
+import { tenants, aiAgents, users, authUsers, products, tenantBusinessModelHistory } from '@/lib/db/schema'
 import { encryptedColumn } from '@/lib/db/encryption'
 import { checkEvolutionConnection, setEvolutionWebhook } from '@/lib/evolution/client'
+import { getDbClaims } from '@/lib/auth/session'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -18,6 +19,7 @@ export async function updateTenantStatus(tenantId: string, status: 'active' | 's
 export async function updateTenant(tenantId: string, data: {
   name?: string
   business_segment?: string
+  business_model?: 'product' | 'service'
   business_description?: string
   owner_name?: string
   owner_email?: string
@@ -32,9 +34,12 @@ export async function updateTenant(tenantId: string, data: {
   max_products?: number
   max_operators?: number
 }) {
+  const claims = await getDbClaims()
+  if (!claims?.is_super_admin) throw new Error('Apenas o super admin pode editar empresas.')
   const patch = {
     name: data.name,
     businessSegment: data.business_segment,
+    businessModel: data.business_model,
     businessDescription: data.business_description,
     ownerName: data.owner_name,
     ownerEmail: data.owner_email,
@@ -54,6 +59,29 @@ export async function updateTenant(tenantId: string, data: {
   const cleaned = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
 
   await withAdmin(async (tx) => {
+    if (data.business_model) {
+      const [current] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, tenantId)).limit(1)
+      if (current && current.businessModel !== data.business_model) {
+        const [catalogItem] = await tx.select({ id: products.id }).from(products).where(eq(products.tenantId, tenantId)).limit(1)
+        if (catalogItem) throw new Error('Converta ou remova os itens do catálogo antes de mudar o modelo da empresa.')
+        await tx.insert(tenantBusinessModelHistory).values({
+          tenantId,
+          fromModel: current.businessModel,
+          toModel: data.business_model,
+          changedBy: claims.sub,
+        })
+        const modeInstruction = data.business_model === 'service'
+          ? '## Modelo atual do negócio\nEsta empresa trabalha com SERVIÇOS. Ignore quaisquer instruções antigas sobre venda, estoque ou imagens de produtos; consulte serviços e conduza agendamentos.'
+          : '## Modelo atual do negócio\nEsta empresa trabalha com PRODUTOS. Ignore quaisquer instruções antigas que tratem o catálogo exclusivamente como serviços.'
+        await tx.update(aiAgents).set({
+          systemPrompt: sql`${modeInstruction} || E'\n\n' || ${aiAgents.systemPrompt}`,
+          canSearchProducts: true,
+          canBookAppointments: true,
+          canSendImages: data.business_model === 'product',
+          updatedAt: new Date(),
+        }).where(eq(aiAgents.tenantId, tenantId))
+      }
+    }
     await tx.update(tenants).set(cleaned).where(eq(tenants.id, tenantId))
 
     // O email do owner também é a credencial de login (auth_users.email) —

@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   slug        TEXT    NOT NULL UNIQUE,
 
   business_segment     TEXT CHECK (business_segment IN ('clinica','loja','servicos','restaurante','outro')),
+  business_model       TEXT NOT NULL DEFAULT 'product' CHECK (business_model IN ('product','service')),
   business_description TEXT,
   owner_name           TEXT,
   owner_email          TEXT,
@@ -302,6 +303,24 @@ CREATE POLICY "super_admin_full_access" ON tenants
 CREATE POLICY "service_role_full_access" ON tenants
   FOR ALL USING (auth.role() = 'service_role');
 
+-- Auditoria de mudanças do modelo operacional do tenant.
+CREATE TABLE IF NOT EXISTS tenant_business_model_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  from_model TEXT NOT NULL CHECK (from_model IN ('product', 'service')),
+  to_model TEXT NOT NULL CHECK (to_model IN ('product', 'service')),
+  changed_by UUID REFERENCES super_admins(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_business_model_history_tenant
+  ON tenant_business_model_history (tenant_id, created_at DESC);
+
+ALTER TABLE tenant_business_model_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "super_admin_full_access" ON tenant_business_model_history
+  FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+CREATE POLICY "service_role_full_access" ON tenant_business_model_history
+  FOR ALL USING (auth.role() = 'service_role');
 
 -- ================================================================
 -- TABELA: users (operadores do painel tenant)
@@ -766,6 +785,8 @@ CREATE TABLE IF NOT EXISTS products (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
 
   name              TEXT NOT NULL,
+  item_kind         TEXT NOT NULL DEFAULT 'product' CHECK (item_kind IN ('product','service')),
+  duration_minutes  INTEGER,
   description       TEXT,
   short_description TEXT,
   price             NUMERIC(12,2),
@@ -790,13 +811,18 @@ CREATE TABLE IF NOT EXISTS products (
   search_vector TSVECTOR,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (item_kind = 'product' AND duration_minutes IS NULL)
+    OR (item_kind = 'service' AND duration_minutes IS NOT NULL AND duration_minutes > 0)
+  )
 );
 
 COMMENT ON TABLE products IS 'Catálogo de produtos/serviços por tenant. Usado pela IA via function calling.';
 COMMENT ON COLUMN products.is_running_ad IS 'Marca se o produto está em campanha de anúncio (Facebook/Instagram Ads) ativa — usado pra IA reconhecer leads vindos de Click-to-WhatsApp.';
 
 CREATE INDEX IF NOT EXISTS idx_products_tenant_id    ON products (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_products_tenant_kind  ON products (tenant_id, item_kind, is_available);
 CREATE INDEX IF NOT EXISTS idx_products_category     ON products (tenant_id, category);
 CREATE INDEX IF NOT EXISTS idx_products_is_available ON products (tenant_id, is_available);
 CREATE INDEX IF NOT EXISTS idx_products_is_featured  ON products (tenant_id, is_featured);
@@ -878,6 +904,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   contact_id      UUID NOT NULL REFERENCES contacts(id),
   conversation_id UUID REFERENCES conversations(id),
   assigned_to     UUID REFERENCES users(id),
+  service_id      UUID REFERENCES products(id) ON DELETE SET NULL,
 
   title TEXT,
   notes TEXT,
@@ -911,6 +938,7 @@ CREATE INDEX IF NOT EXISTS idx_appointments_contact_id  ON appointments (contact
 CREATE INDEX IF NOT EXISTS idx_appointments_date        ON appointments (tenant_id, date);
 CREATE INDEX IF NOT EXISTS idx_appointments_status      ON appointments (tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_appointments_assigned_to ON appointments (assigned_to);
+CREATE INDEX IF NOT EXISTS idx_appointments_service_id ON appointments (service_id) WHERE service_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_appointments_reminders   ON appointments (tenant_id, date, reminder_24h_sent, reminder_1h_sent)
   WHERE status NOT IN ('cancelled','completed');
 

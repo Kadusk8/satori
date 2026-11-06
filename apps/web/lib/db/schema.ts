@@ -51,6 +51,7 @@ export const tenants = pgTable(
     slug: text('slug').notNull().unique(),
 
     businessSegment: text('business_segment'),
+    businessModel: text('business_model').notNull().default('product'),
     businessDescription: text('business_description'),
     ownerName: text('owner_name'),
     ownerEmail: text('owner_email'),
@@ -119,6 +120,19 @@ export const tenants = pgTable(
     index('idx_tenants_status').on(t.status),
     index('idx_tenants_webhook_secret').on(t.webhookSecret),
   ]
+)
+
+export const tenantBusinessModelHistory = pgTable(
+  'tenant_business_model_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+    fromModel: text('from_model').notNull(),
+    toModel: text('to_model').notNull(),
+    changedBy: uuid('changed_by').references(() => superAdmins.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_tenant_business_model_history_tenant').on(t.tenantId, t.createdAt)]
 )
 
 export const users = pgTable(
@@ -369,6 +383,8 @@ export const products = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    itemKind: text('item_kind').notNull().default('product'),
+    durationMinutes: integer('duration_minutes'),
     description: text('description'),
     shortDescription: text('short_description'),
     price: numeric('price'),
@@ -404,6 +420,7 @@ export const appointments = pgTable(
       .references(() => contacts.id),
     conversationId: uuid('conversation_id').references(() => conversations.id),
     assignedTo: uuid('assigned_to').references(() => users.id),
+    serviceId: uuid('service_id').references(() => products.id, { onDelete: 'set null' }),
 
     title: text('title'),
     notes: text('notes'),

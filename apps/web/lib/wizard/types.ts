@@ -7,6 +7,8 @@ export type BusinessSegment =
   | 'servicos'
   | 'outro'
 
+export type BusinessModel = 'product' | 'service'
+
 export type AgentPersonality =
   | 'simpatico'
   | 'formal'
@@ -33,6 +35,7 @@ export interface BusinessHours {
 export interface Step1Data {
   name: string
   segment: BusinessSegment
+  businessModel: BusinessModel
   description?: string
   ownerName: string
   ownerEmail: string
@@ -101,6 +104,7 @@ export interface ProductDraft {
   description: string
   price: string
   category: string
+  durationMinutes?: number
 }
 
 export interface Step4Data {

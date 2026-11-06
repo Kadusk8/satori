@@ -23,6 +23,7 @@ export interface Appointment {
   endTime: string     // HH:MM
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'
   assignedTo?: string
+  serviceId?: string | null
   /** Serviços realizados (só em atendimentos concluídos) */
   services?: { productId: string; professionalId: string | null }[]
 }

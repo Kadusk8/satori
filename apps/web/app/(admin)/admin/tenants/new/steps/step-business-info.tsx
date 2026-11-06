@@ -22,6 +22,7 @@ const schema = z.object({
   segment: z.enum(['clinica', 'loja', 'restaurante', 'servicos', 'outro'], {
     error: 'Selecione o segmento',
   }),
+  businessModel: z.enum(['product', 'service'], { error: 'Selecione o modelo do negócio' }),
   description: z.string().optional().default(''),
   ownerName: z.string().min(2, 'Nome do responsável obrigatório'),
   ownerEmail: z.string().email('Email inválido'),
@@ -47,6 +48,7 @@ export function StepBusinessInfo() {
     defaultValues: {
       name: step1.name ?? '',
       segment: step1.segment ?? undefined,
+      businessModel: step1.businessModel ?? undefined,
       description: step1.description ?? '',
       ownerName: step1.ownerName ?? '',
       ownerEmail: step1.ownerEmail ?? '',
@@ -60,6 +62,7 @@ export function StepBusinessInfo() {
   })
 
   const segment = watch('segment')
+  const businessModel = watch('businessModel')
 
   return (
     <form onSubmit={handleSubmit(saveStep1)} className="space-y-6">
@@ -83,6 +86,29 @@ export function StepBusinessInfo() {
           {errors.name && (
             <p className="text-xs text-destructive">{errors.name.message}</p>
           )}
+        </div>
+
+        <div className="sm:col-span-2 space-y-2">
+          <label className="text-sm font-medium">
+            Modelo do negócio <span className="text-destructive">*</span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {([
+              { value: 'product', title: 'Empresa de produtos', text: 'Catálogo, preços, fotos e disponibilidade de produtos.' },
+              { value: 'service', title: 'Empresa de serviços', text: 'Serviços, duração, preços e agendamentos.' },
+            ] as const).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setValue('businessModel', option.value, { shouldValidate: true })}
+                className={`rounded-lg border p-4 text-left transition-colors ${businessModel === option.value ? 'border-primary bg-primary/5' : 'hover:border-primary/50'}`}
+              >
+                <span className="block text-sm font-semibold">{option.title}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{option.text}</span>
+              </button>
+            ))}
+          </div>
+          {errors.businessModel && <p className="text-xs text-destructive">{errors.businessModel.message}</p>}
         </div>
 
         {/* Segmento */}

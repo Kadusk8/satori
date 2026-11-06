@@ -18,6 +18,8 @@ export interface Product {
   isAvailable: boolean
   isFeatured: boolean
   isRunningAd: boolean
+  itemKind: 'product' | 'service'
+  durationMinutes: number | null
 }
 
 interface ProductCardProps {
@@ -129,6 +131,12 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
         {product.category && (
           <span className="inline-block text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5">
             {product.category}
+          </span>
+        )}
+
+        {product.itemKind === 'service' && product.durationMinutes && (
+          <span className="inline-block text-xs text-muted-foreground ml-1">
+            {product.durationMinutes} min
           </span>
         )}
 

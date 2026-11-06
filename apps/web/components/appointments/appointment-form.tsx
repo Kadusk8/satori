@@ -20,6 +20,7 @@ const schema = z.object({
   date: z.string().min(1, 'Data obrigatória'),
   startTime: z.string().min(1, 'Horário obrigatório'),
   durationMinutes: z.string(),
+  serviceId: z.string().optional(),
   title: z.string().optional(),
   notes: z.string().optional(),
   status: z.enum(['pending', 'confirmed', 'cancelled', 'completed', 'no_show']),
@@ -67,6 +68,7 @@ export function AppointmentForm({
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -76,6 +78,7 @@ export function AppointmentForm({
       date: appointment?.date ?? defaultDate ?? '',
       startTime: appointment?.startTime ?? defaultStartTime ?? '',
       durationMinutes: String(slotDurationMinutes),
+      serviceId: appointment?.serviceId ?? '',
       title: appointment?.title ?? '',
       notes: appointment?.notes ?? '',
       status: appointment?.status ?? 'confirmed',
@@ -86,21 +89,29 @@ export function AppointmentForm({
   const duration = watch('durationMinutes')
   const status = watch('status')
   const isCompleted = status === 'completed'
+  const serviceId = watch('serviceId')
 
-  // Catálogo + equipe só são carregados quando o atendimento vai ser concluído.
+  // O catálogo define o serviço e sua duração na reserva; na conclusão também
+  // registra os serviços efetivamente realizados.
   useEffect(() => {
-    if (!isCompleted || options) return
+    if (options) return
     getCompletionOptions()
       .then((opts) => {
         setOptions(opts)
         setServices((prev) =>
-          prev.length > 0 || opts.products.length === 0
+          !isCompleted || prev.length > 0 || opts.products.length === 0
             ? prev
             : [{ productId: '', professionalId: appointment?.assignedTo ?? opts.currentUserId }]
         )
       })
       .catch(() => setServicesError('Não foi possível carregar o catálogo de serviços.'))
   }, [isCompleted, options, appointment?.assignedTo])
+
+  useEffect(() => {
+    if (!options || options.businessModel !== 'service' || !serviceId) return
+    const selected = options.products.find((product) => product.id === serviceId)
+    if (selected?.durationMinutes) setValue('durationMinutes', String(selected.durationMinutes))
+  }, [options, serviceId, setValue])
 
   const priceOf = (productId: string) => options?.products.find((p) => p.id === productId)?.price ?? 0
   const servicesTotal = services.reduce((sum, s) => sum + priceOf(s.productId), 0)
@@ -111,6 +122,10 @@ export function AppointmentForm({
   }
 
   const onSubmit = async (data: FormData) => {
+    if (options?.businessModel === 'service' && !data.serviceId) {
+      setServicesError('Selecione o serviço do agendamento.')
+      return
+    }
     const filledServices = services.filter((s) => s.productId)
     if (data.status === 'completed' && options && options.products.length > 0 && filledServices.length === 0) {
       setServicesError('Informe pelo menos um serviço realizado.')
@@ -132,6 +147,7 @@ export function AppointmentForm({
         endTime,
         status: data.status,
         assignedTo: appointment?.assignedTo,
+        serviceId: data.serviceId || null,
         services: data.status === 'completed' && options ? filledServices : undefined,
       })
       onClose()
@@ -179,6 +195,26 @@ export function AppointmentForm({
             )}
           </div>
 
+          {options?.businessModel === 'service' && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                Serviço <span className="text-destructive">*</span>
+              </label>
+              <select
+                {...register('serviceId')}
+                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/30"
+              >
+                <option value="">Selecione o serviço</option>
+                {options.products.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name} · {service.durationMinutes} min
+                  </option>
+                ))}
+              </select>
+              {servicesError && !isCompleted && <p className="text-xs text-destructive mt-1">{servicesError}</p>}
+            </div>
+          )}
+
           {/* Data e horário */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -208,9 +244,9 @@ export function AppointmentForm({
               <Input
                 type="number"
                 {...register('durationMinutes')}
-                min={15}
+                min={5}
                 max={480}
-                step={15}
+                step={5}
                 className="w-28"
               />
               {startTime && duration && parseInt(duration, 10) > 0 && (

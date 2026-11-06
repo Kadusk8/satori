@@ -70,6 +70,7 @@ export default async function TenantsPage({ searchParams }: TenantsPageProps) {
         name: tenantsTable.name,
         slug: tenantsTable.slug,
         businessSegment: tenantsTable.businessSegment,
+        businessModel: tenantsTable.businessModel,
         ownerName: tenantsTable.ownerName,
         ownerEmail: tenantsTable.ownerEmail,
         plan: tenantsTable.plan,
@@ -89,6 +90,7 @@ export default async function TenantsPage({ searchParams }: TenantsPageProps) {
     name: t.name,
     slug: t.slug,
     segment: t.businessSegment ?? '',
+    businessModel: t.businessModel === 'service' ? 'service' : 'product',
     ownerName: t.ownerName ?? '',
     ownerEmail: t.ownerEmail ?? '',
     plan: t.plan,
@@ -161,7 +163,8 @@ export default async function TenantsPage({ searchParams }: TenantsPageProps) {
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {segmentLabel[tenant.segment] ?? tenant.segment}
+                    <div>{segmentLabel[tenant.segment] ?? tenant.segment}</div>
+                    <div className="text-[10px] mt-0.5">{tenant.businessModel === 'service' ? 'Serviços' : 'Produtos'}</div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={planVariant[tenant.plan]} className="text-[10px] px-1.5 py-0 h-4">{tenant.plan}</Badge>

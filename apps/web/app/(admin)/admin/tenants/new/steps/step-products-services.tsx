@@ -13,10 +13,12 @@ const EMPTY_PRODUCT: ProductDraft = {
   description: '',
   price: '',
   category: '',
+  durationMinutes: 30,
 }
 
 export function StepProductsServices() {
-  const { step4, saveStep4, setStep } = useWizardStore()
+  const { step1, step4, saveStep4, setStep } = useWizardStore()
+  const isService = step1.businessModel === 'service'
 
   const [products, setProducts] = useState<ProductDraft[]>(
     step4.products && step4.products.length > 0
@@ -48,6 +50,7 @@ export function StepProductsServices() {
     const newErrors: Record<number, string> = {}
     products.forEach((p, i) => {
       if (!p.name.trim()) newErrors[i] = 'Nome obrigatório'
+      else if (isService && (!p.durationMinutes || p.durationMinutes < 5)) newErrors[i] = 'Informe uma duração válida'
     })
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -69,7 +72,7 @@ export function StepProductsServices() {
           <ShoppingBag className="h-5 w-5 text-orange-600" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold">Produtos e Serviços</h2>
+          <h2 className="text-lg font-semibold">{isService ? 'Serviços' : 'Produtos'}</h2>
           <p className="text-sm text-muted-foreground">
             Cadastro inicial do catálogo (opcional)
           </p>
@@ -77,7 +80,7 @@ export function StepProductsServices() {
       </div>
 
       <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-        Adicione alguns produtos ou serviços agora para o agente de IA já conhecer
+        Adicione alguns {isService ? 'serviços' : 'produtos'} agora para o agente de IA já conhecer
         o catálogo. Você pode pular e cadastrar depois no painel do tenant.
       </div>
 
@@ -87,7 +90,7 @@ export function StepProductsServices() {
           <div key={index} className="rounded-lg border p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-muted-foreground">
-                Produto / Serviço #{index + 1}
+                {isService ? 'Serviço' : 'Produto'} #{index + 1}
               </span>
               <button
                 type="button"
@@ -104,7 +107,7 @@ export function StepProductsServices() {
                   Nome <span className="text-destructive">*</span>
                 </label>
                 <Input
-                  placeholder="Ex: Consulta Dermatológica"
+                  placeholder={isService ? 'Ex: Consulta Dermatológica' : 'Ex: Camiseta Básica'}
                   value={product.name}
                   onChange={(e) => updateProduct(index, 'name', e.target.value)}
                 />
@@ -112,6 +115,19 @@ export function StepProductsServices() {
                   <p className="text-xs text-destructive">{errors[index]}</p>
                 )}
               </div>
+
+              {isService && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Duração (minutos)</label>
+                  <Input
+                    type="number"
+                    min={5}
+                    step={5}
+                    value={product.durationMinutes ?? 30}
+                    onChange={(e) => setProducts((prev) => prev.map((p, i) => i === index ? { ...p, durationMinutes: Number(e.target.value) } : p))}
+                  />
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="text-xs font-medium">Preço</label>
@@ -153,7 +169,7 @@ export function StepProductsServices() {
           className="w-full"
         >
           <Plus className="h-4 w-4 mr-2" />
-          Adicionar produto / serviço
+          Adicionar {isService ? 'serviço' : 'produto'}
         </Button>
       </div>
 

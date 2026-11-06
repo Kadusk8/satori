@@ -11,6 +11,19 @@ export interface Tool {
   }
 }
 
+export function isToolAllowedForBusinessModel(
+  toolName: string,
+  businessModel: 'product' | 'service',
+  capabilities: { canSearchCatalog: boolean; canSendImages: boolean }
+): boolean {
+  if (toolName === 'search_products') return businessModel === 'product' && capabilities.canSearchCatalog
+  if (toolName === 'search_services') return businessModel === 'service' && capabilities.canSearchCatalog
+  if (toolName === 'send_product_image' || toolName === 'send_more_product_images') {
+    return businessModel === 'product' && capabilities.canSendImages
+  }
+  return true
+}
+
 export const AI_TOOLS: Tool[] = [
   {
     name: 'search_products',
@@ -28,11 +41,24 @@ export const AI_TOOLS: Tool[] = [
     },
   },
   {
+    name: 'search_services',
+    description: 'Busca serviços reais oferecidos pelo estabelecimento. Use antes de informar preço, duração ou tentar agendar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Nome, categoria ou descrição do serviço pedido' },
+        max_results: { type: 'number', description: 'Máximo de resultados (padrão: 5)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'check_availability',
     description: 'Consulta horários disponíveis para agendamento. Use quando o cliente quiser marcar, agendar ou saber horários livres.',
     input_schema: {
       type: 'object',
       properties: {
+        service_id: { type: 'string', description: 'ID do serviço escolhido, obrigatório para empresas de serviços' },
         date: { type: 'string', description: 'Data no formato YYYY-MM-DD. Se não informada, usa os próximos 7 dias.' },
         period: { type: 'string', enum: ['morning', 'afternoon', 'evening'], description: 'Período do dia preferido' },
       },
@@ -44,6 +70,7 @@ export const AI_TOOLS: Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
+        service_id: { type: 'string', description: 'ID do serviço escolhido, obrigatório para empresas de serviços' },
         date: { type: 'string', description: 'Data YYYY-MM-DD' },
         start_time: { type: 'string', description: 'Horário HH:MM' },
         contact_name: { type: 'string', description: 'Nome do cliente' },

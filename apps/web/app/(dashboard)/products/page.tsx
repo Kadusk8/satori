@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { ProductCard, type Product } from '@/components/products/product-card'
 import { ProductForm } from '@/components/products/product-form'
 import { cn } from '@/lib/utils'
-import { listProducts, listProductCategories, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
+import { getCatalogContext, listProducts, listProductCategories, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
 import { toast } from 'sonner'
 
 // Configuração Cloudinary — vem do tenant no banco (fallback para dev)
@@ -32,6 +32,8 @@ interface DBProduct {
   is_available: boolean
   is_featured: boolean
   is_running_ad: boolean
+  item_kind: 'product' | 'service'
+  duration_minutes: number | null
 }
 
 function mapProduct(row: DBProduct): Product {
@@ -49,6 +51,8 @@ function mapProduct(row: DBProduct): Product {
     isAvailable: row.is_available,
     isFeatured: row.is_featured,
     isRunningAd: row.is_running_ad,
+    itemKind: row.item_kind,
+    durationMinutes: row.duration_minutes,
   }
 }
 
@@ -56,6 +60,7 @@ type ViewMode = 'grid' | 'list'
 type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured' | 'running_ad'
 
 export default function ProductsPage() {
+  const [businessModel, setBusinessModel] = useState<'product' | 'service'>('product')
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [registeredCategories, setRegisteredCategories] = useState<string[]>([])
@@ -77,14 +82,16 @@ export default function ProductsPage() {
       const cats = Array.from(new Set(mapped.map((p) => p.category).filter(Boolean) as string[])).sort()
       setCategories(cats)
     } catch (err) {
-      toast.error('Erro ao carregar produtos: ' + (err instanceof Error ? err.message : 'erro'))
+      toast.error(`Erro ao carregar ${businessModel === 'service' ? 'serviços' : 'produtos'}: ` + (err instanceof Error ? err.message : 'erro'))
     }
-  }, [])
+  }, [businessModel])
 
   useEffect(() => {
     setIsLoading(true)
     loadProducts().finally(() => setIsLoading(false))
   }, [loadProducts])
+
+  useEffect(() => { getCatalogContext().then((ctx) => setBusinessModel(ctx.businessModel)).catch(() => {}) }, [])
 
   useEffect(() => {
     listProductCategories()
@@ -135,14 +142,15 @@ export default function ProductsPage() {
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
         isRunningAd: data.isRunningAd,
+        durationMinutes: data.durationMinutes,
       })
 
       if (data.id) {
         setProducts((prev) => prev.map((p) => (p.id === data.id ? { ...p, ...data, id: data.id! } : p)))
-        toast.success('Produto atualizado.')
+        toast.success(`${businessModel === 'service' ? 'Serviço' : 'Produto'} atualizado.`)
       } else {
         setProducts((prev) => [{ ...data, id }, ...prev])
-        toast.success('Produto criado.')
+        toast.success(`${businessModel === 'service' ? 'Serviço' : 'Produto'} criado.`)
       }
 
       setCategories((prev) => {
@@ -150,19 +158,19 @@ export default function ProductsPage() {
         return Array.from(new Set([...prev, data.category])).sort()
       })
     } catch (err) {
-      toast.error('Erro ao salvar produto: ' + (err instanceof Error ? err.message : 'erro'))
+      toast.error(`Erro ao salvar ${businessModel === 'service' ? 'serviço' : 'produto'}: ` + (err instanceof Error ? err.message : 'erro'))
     }
-  }, [])
+  }, [businessModel])
 
   const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteProduct(id)
       setProducts((prev) => prev.filter((p) => p.id !== id))
-      toast.success('Produto excluído.')
+      toast.success(`${businessModel === 'service' ? 'Serviço' : 'Produto'} excluído.`)
     } catch (err) {
-      toast.error('Erro ao excluir produto: ' + (err instanceof Error ? err.message : 'erro'))
+      toast.error(`Erro ao excluir ${businessModel === 'service' ? 'serviço' : 'produto'}: ` + (err instanceof Error ? err.message : 'erro'))
     }
-  }, [])
+  }, [businessModel])
 
   const handleToggleAvailability = useCallback(async (id: string, available: boolean) => {
     try {
@@ -189,7 +197,7 @@ export default function ProductsPage() {
     return (
       <div className="flex items-center justify-center h-screen text-muted-foreground text-sm gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Carregando produtos...
+        Carregando {businessModel === 'service' ? 'serviços' : 'produtos'}...
       </div>
     )
   }
@@ -201,7 +209,7 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Produtos</h1>
+          <h1 className="text-2xl font-bold">{businessModel === 'service' ? 'Serviços' : 'Produtos'}</h1>
           <p className="text-muted-foreground text-sm mt-1">
             {products.filter((p) => p.isAvailable).length} disponíveis ·{' '}
             {products.length} no total
@@ -209,7 +217,7 @@ export default function ProductsPage() {
         </div>
         <Button onClick={openNew} className="gap-2">
           <Plus className="h-4 w-4" />
-          Novo produto
+          Novo {businessModel === 'service' ? 'serviço' : 'produto'}
         </Button>
       </div>
 
@@ -297,11 +305,11 @@ export default function ProductsPage() {
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
           <Package className="h-12 w-12 opacity-30" />
           <p className="text-sm">
-            {products.length === 0 ? 'Nenhum produto cadastrado' : 'Nenhum produto encontrado'}
+            {products.length === 0 ? `Nenhum ${businessModel === 'service' ? 'serviço' : 'produto'} cadastrado` : `Nenhum ${businessModel === 'service' ? 'serviço' : 'produto'} encontrado`}
           </p>
           {products.length === 0 && (
             <Button variant="outline" size="sm" onClick={openNew}>
-              Cadastrar primeiro produto
+              Cadastrar primeiro {businessModel === 'service' ? 'serviço' : 'produto'}
             </Button>
           )}
         </div>
@@ -322,7 +330,7 @@ export default function ProductsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/30">
-                <th className="text-left font-medium text-muted-foreground px-4 py-3">Produto</th>
+                <th className="text-left font-medium text-muted-foreground px-4 py-3">{businessModel === 'service' ? 'Serviço' : 'Produto'}</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Categoria</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Preço</th>
                 <th className="text-left font-medium text-muted-foreground px-4 py-3">Status</th>
@@ -391,6 +399,7 @@ export default function ProductsPage() {
           cloudName={CLOUDINARY_CLOUD_NAME}
           uploadPreset={CLOUDINARY_UPLOAD_PRESET}
           categories={registeredCategories}
+        businessModel={businessModel}
           onSave={handleSave}
           onClose={() => setShowForm(false)}
         />

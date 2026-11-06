@@ -13,7 +13,7 @@ import { db } from '../db/index.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { callLLM, classifyLLMError, type LLMMessage, type LLMContentBlock, type LLMTool, type LLMProvider } from '../shared/llm-client.js'
 import { recordLLMUsage } from '../shared/llm-usage.js'
-import { AI_TOOLS } from '../shared/claude-tools.js'
+import { AI_TOOLS, isToolAllowedForBusinessModel } from '../shared/claude-tools.js'
 import { transcribeAudio } from '../shared/whisper-client.js'
 import { textToSpeech, audioToBase64 } from '../shared/elevenlabs-client.js'
 import {
@@ -143,6 +143,7 @@ interface ConversationRow {
   whatsapp_label_names: string[] | null
   blocked_labels: string[]
   t_name: string
+  business_model: 'product' | 'service'
   business_hours: BusinessHours
   timezone: string
   evolution_instance_name: string | null
@@ -497,7 +498,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
              where wla.tenant_id = ct.tenant_id and wla.labeled = true
                and wla.jid in (ct.whatsapp_lid, ct.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
-            t.name as t_name, t.business_hours, t.timezone, t.evolution_instance_name,
+            t.name as t_name, t.business_model, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key,
             t.latitude, t.longitude
      from conversations c
@@ -536,6 +537,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   const agentFollowUpMaxAttempts = Number(agent.follow_up_max_attempts ?? 3)
 
   const tenantId = conv.tenant_id
+  const isServiceBusiness = conv.business_model === 'service'
   const contactId = conv.contact_id
   const contactNumber = conv.whatsapp_number
 
@@ -731,7 +733,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   // O foco veio do anúncio que o cliente clicou (não do histórico da conversa) — usado pela
   // âncora de busca do primeiro turno, mais abaixo.
   let focusFromAdReferral = false
-  if (focusCandidate) {
+  if (!isServiceBusiness && focusCandidate) {
     const focusRows = await db
       .select({ name: products.name, price: products.price, priceDisplay: products.priceDisplay })
       .from(products)
@@ -747,7 +749,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   // da conversa) — busca os produtos em campanha e tenta identificar qual foi anunciado.
   const adReferral = conv.metadata?.source === 'ctwa_ad' ? conv.metadata.ad_referral ?? null : null
   let adProducts: Array<{ id: string; name: string; price_display: string | null; price: string | null }> = []
-  if (adReferral) {
+  if (!isServiceBusiness && adReferral) {
     const adRows = await db
       .select({ id: products.id, name: products.name, priceDisplay: products.priceDisplay, price: products.price })
       .from(products)
@@ -768,7 +770,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')
 
-  const systemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
+  const productSystemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
 
 ## Regras de comportamento (obrigatórias)
@@ -857,9 +859,41 @@ mandar foto; só fale com o cliente como um vendedor que já está mostrando o c
 Conduza ativamente pra gerar interesse e avançar rumo a um agendamento ou fechamento — não trate isso
 como um atendimento genérico de primeiro contato.` : ''}`
 
+  const serviceSystemPrompt = `## Seu papel
+Você atende clientes interessados nos serviços da empresa. Entenda a necessidade, consulte o catálogo real com search_services e conduza para o agendamento quando fizer sentido.
+
+## Regras obrigatórias para serviços
+- Responda sempre à mensagem atual do cliente e mantenha mensagens curtas, naturais e objetivas.
+- Quando o cliente mencionar um serviço, necessidade, preço ou duração, chame search_services antes de responder com dados específicos.
+- Apresente apenas serviços retornados pela ferramenta. Nunca invente serviço, preço, duração, promoção ou disponibilidade.
+- Antes de consultar horários, identifique o serviço e use o ID retornado em service_id ao chamar check_availability.
+- Só chame book_appointment depois de o cliente confirmar serviço, data e horário. Repita o mesmo service_id.
+- Se o serviço pedido não existir, diga isso com clareza e pergunte se ele aceita outra opção; encaminhe à equipe quando necessário.
+- Não prometa nem envie foto automaticamente. Não use regras de estoque, veículo, produto em anúncio ou negociação de mercadoria.
+- Se a mensagem for apenas uma saudação, cumprimente e pergunte como pode ajudar sem chamar ferramentas.
+- Se o cliente pedir algo que você não consegue confirmar com os dados disponíveis, use escalate_to_human.
+
+## Humanização
+- Fale como alguém da equipe no WhatsApp, sem textos longos, formulários ou listas desnecessárias.
+- Se perguntarem diretamente se você é IA, responda com honestidade e naturalidade.
+- Não encerre toda mensagem com frases repetidas como "estou à disposição".
+
+## Contexto do negócio e personalidade
+${agent.system_prompt}
+${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse como base, adaptando ao pedido atual: "${agent.greeting_message}"` : ''}
+
+## Contexto atual
+- Data/hora: ${now}
+- Horário de atendimento: ${formatBusinessHours(businessHours)}
+- Status: ${withinBusinessHours ? 'DENTRO' : 'FORA'} do horário de atendimento`
+
+  const systemPrompt = isServiceBusiness ? serviceSystemPrompt : productSystemPrompt
+
   const allowedTools = AI_TOOLS.filter((tool) => {
-    if (tool.name === 'search_products' && !agent.can_search_products) return false
-    if ((tool.name === 'send_product_image' || tool.name === 'send_more_product_images') && !agent.can_send_images) return false
+    if (!isToolAllowedForBusinessModel(tool.name, isServiceBusiness ? 'service' : 'product', {
+      canSearchCatalog: agent.can_search_products,
+      canSendImages: agent.can_send_images,
+    })) return false
     if ((tool.name === 'check_availability' || tool.name === 'book_appointment' || tool.name === 'cancel_appointment') && !agent.can_book_appointments) return false
     if (tool.name === 'escalate_to_human' && !agent.can_escalate) return false
     if (tool.name === 'schedule_follow_up' && !agentFollowUpEnabled) return false
@@ -1159,7 +1193,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // apresentar os resultados reais (visto mais de uma vez: ela ignora tanto os resultados quanto
   // a instrução [SISTEMA]). Nesse ponto o problema não é mais a busca, é o texto do LLM — descarta
   // e monta uma resposta determinística com o primeiro resultado real que a busca encontrou.
-  if (staleQueryTerm && finalText && finalText.toLowerCase().includes(staleQueryTerm) && lastSearchProductsWithImages.length > 0) {
+  if (!isServiceBusiness && staleQueryTerm && finalText && finalText.toLowerCase().includes(staleQueryTerm) && lastSearchProductsWithImages.length > 0) {
     // Nunca reoferece um produto que o cliente já recusou explicitamente — só o próximo da lista
     // que ainda não foi rejeitado. Se todos já foram recusados, admite e pergunta a preferência
     // dele em vez de insistir de novo na mesma foto (ver extractRejectedProductIds).
@@ -1178,7 +1212,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // texto alega indisponibilidade sem nenhuma tool chamada neste turno, força uma busca de
   // verdade (com as palavras da mensagem atual, ou busca geral se ela não tiver nenhuma — ex:
   // "quero" sozinho) e monta a resposta a partir do resultado real.
-  if (!wasEscalated && finalText && allToolCalls.length === 0 && agent.can_search_products && /n[ãa]o temos\b/i.test(finalText)) {
+  if (!isServiceBusiness && !wasEscalated && finalText && allToolCalls.length === 0 && agent.can_search_products && /n[ãa]o temos\b/i.test(finalText)) {
     const currentKeywords = extractCustomerKeywords(lastCustomerMsg?.content)
     const forcedQuery = currentKeywords.slice(0, 3).join(' ')
     const forcedMeta: { usedFallback?: boolean } = {}
@@ -1206,6 +1240,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // a conversa morre num "não temos" seco, sem abrir caminho pra vender outra coisa. Exclui menções
   // a horário/agenda pra não confundir com "não temos horário disponível" (agendamento).
   if (
+    !isServiceBusiness &&
     !wasEscalated &&
     finalText &&
     allToolCalls.length > 0 &&
@@ -1224,6 +1259,7 @@ como um atendimento genérico de primeiro contato.` : ''}`
   // porque era o único resultado. Regras: (1) nunca disparar em cima de busca do tier aleatório;
   // (2) só disparar se EXATAMENTE UM produto da busca for citado de forma inequívoca no texto.
   if (
+    !isServiceBusiness &&
     !deferredImage &&
     finalText &&
     lastSearchProductsWithImages.length > 0 &&

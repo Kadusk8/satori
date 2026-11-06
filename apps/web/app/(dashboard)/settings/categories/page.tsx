@@ -9,6 +9,7 @@ import { isManager } from '@/lib/auth/permissions'
 import { Card, CardContent } from '@/components/ui/card'
 import { ArrowLeft, ShieldAlert } from 'lucide-react'
 import { ProductCategoriesManager } from './product-categories-manager'
+import { getCatalogContext } from '@/lib/data/products'
 
 export default async function ProductCategoriesPage() {
   const claims = await getSessionClaims()
@@ -29,6 +30,7 @@ export default async function ProductCategoriesPage() {
   }
 
   const dbClaims = (await getDbClaims())!
+  const { businessModel } = await getCatalogContext()
   const categories = await withClaims(dbClaims, (tx) =>
     tx
       .select({
@@ -50,13 +52,13 @@ export default async function ProductCategoriesPage() {
           <ArrowLeft className="h-3.5 w-3.5" />
           Configurações
         </Link>
-        <h1 className="text-2xl font-bold">Categorias de produto</h1>
+        <h1 className="text-2xl font-bold">Categorias de {businessModel === 'service' ? 'serviço' : 'produto'}</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Crie, renomeie, reordene e exclua as categorias usadas no catálogo de produtos.
+          Crie, renomeie, reordene e exclua as categorias usadas no catálogo de {businessModel === 'service' ? 'serviços' : 'produtos'}.
         </p>
       </div>
 
-      <ProductCategoriesManager initialCategories={categories} />
+      <ProductCategoriesManager initialCategories={categories} itemLabel={businessModel === 'service' ? 'serviços' : 'produtos'} />
     </div>
   )
 }

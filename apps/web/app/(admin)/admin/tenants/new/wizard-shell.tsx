@@ -22,7 +22,10 @@ const STEPS = [
 ]
 
 export function WizardShell() {
-  const { currentStep, setStep } = useWizardStore()
+  const { currentStep, setStep, step1 } = useWizardStore()
+  const steps = STEPS.map((step) => step.number === 4
+    ? { ...step, label: step1.businessModel === 'service' ? 'Serviços' : 'Produtos' }
+    : step)
 
   return (
     <div className="min-h-screen py-8 px-4">
@@ -49,7 +52,7 @@ export function WizardShell() {
         {/* Stepper */}
         <div className="mb-8">
           <div className="flex items-center">
-            {STEPS.map((step, i) => {
+            {steps.map((step, i) => {
               const isDone = currentStep > step.number
               const isCurrent = currentStep === step.number
 
@@ -93,7 +96,7 @@ export function WizardShell() {
                     </span>
                   </button>
 
-                  {i < STEPS.length - 1 && (
+                  {i < steps.length - 1 && (
                     <div
                       className={cn(
                         'flex-1 h-0.5 mx-2 rounded transition-colors',

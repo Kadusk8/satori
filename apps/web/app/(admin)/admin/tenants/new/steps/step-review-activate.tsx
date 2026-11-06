@@ -56,6 +56,11 @@ const PERSONALITY_LABELS: Record<string, string> = {
   tecnico: 'Técnico e Objetivo',
 }
 
+const BUSINESS_MODEL_LABELS: Record<string, string> = {
+  product: 'Empresa de produtos',
+  service: 'Empresa de serviços',
+}
+
 export function StepReviewActivate() {
   const router = useRouter()
   const { step1, step2, step3, step4, step5, setStep, reset } = useWizardStore()
@@ -144,6 +149,7 @@ export function StepReviewActivate() {
                 label="Segmento"
                 value={SEGMENT_LABELS[step1.segment ?? ''] ?? step1.segment ?? '—'}
               />
+              <ReviewRow label="Modelo" value={BUSINESS_MODEL_LABELS[step1.businessModel ?? ''] ?? '—'} />
               <ReviewRow label="Responsável" value={step1.ownerName ?? '—'} />
               <ReviewRow label="Email" value={step1.ownerEmail ?? '—'} />
               <ReviewRow label="Telefone" value={step1.ownerPhone ?? '—'} />
@@ -169,7 +175,7 @@ export function StepReviewActivate() {
             </ReviewSection>
 
             {/* Step 4 */}
-            <ReviewSection icon={ShoppingBag} title="Produtos" onEdit={() => setStep(4)}>
+            <ReviewSection icon={ShoppingBag} title={step1.businessModel === 'service' ? 'Serviços' : 'Produtos'} onEdit={() => setStep(4)}>
               {step4.skipped ? (
                 <span className="text-sm text-muted-foreground">
                   Pulado — cadastrar depois
@@ -177,7 +183,7 @@ export function StepReviewActivate() {
               ) : (
                 <ReviewRow
                   label="Quantidade"
-                  value={`${step4.products?.length ?? 0} produto(s) cadastrado(s)`}
+                  value={`${step4.products?.length ?? 0} ${step1.businessModel === 'service' ? 'serviço(s)' : 'produto(s)'} cadastrado(s)`}
                 />
               )}
             </ReviewSection>

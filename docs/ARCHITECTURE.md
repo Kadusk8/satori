@@ -20,6 +20,10 @@ de ZapAgent pra **Satori**.
 - **Claude API** (+ OpenAI/Gemini, BYOK por tenant) — geração de respostas da IA com function calling (busca de produtos, agendamento, escalação para humano, follow-up).
 - **Cloudinary** — imagens de produto e áudio recebido do WhatsApp.
 
+### Modos de negócio
+
+Cada tenant possui `business_model = product | service`, independente de `business_segment`. O modo controla os rótulos e campos do catálogo, as ferramentas oferecidas ao agente e as regras de atendimento. Os itens continuam na tabela `products` para preservar as relações históricas, diferenciados por `item_kind`; serviços também possuem `duration_minutes`. Agendamentos de empresas de serviços guardam `service_id` e usam a duração cadastrada para calcular disponibilidade e término.
+
 ## Fluxo: mensagem do WhatsApp → resposta da IA
 
 ```

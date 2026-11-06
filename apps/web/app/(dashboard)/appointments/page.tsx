@@ -28,6 +28,7 @@ interface DBAppointment {
   contact_id: string
   conversation_id: string | null
   assigned_to: string | null
+  service_id: string | null
   title: string | null
   notes: string | null
   date: string
@@ -59,6 +60,7 @@ function mapAppointment(row: DBAppointment): Appointment {
     endTime: row.end_time,
     status: row.status,
     assignedTo: row.assigned_to ?? undefined,
+    serviceId: row.service_id,
     services: row.services,
   }
 }
@@ -224,6 +226,7 @@ export default function AppointmentsPage() {
         contactPhone: data.contactPhone,
         conversationId: data.conversationId,
         assignedTo: data.assignedTo,
+        serviceId: data.serviceId,
         title: data.title,
         notes: data.notes,
         date: data.date,

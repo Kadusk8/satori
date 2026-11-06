@@ -23,6 +23,7 @@ const schema = z.object({
   isAvailable: z.boolean(),
   isFeatured: z.boolean(),
   isRunningAd: z.boolean(),
+  durationMinutes: z.number().int().min(5).optional(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -54,6 +55,7 @@ interface ProductFormProps {
   cloudName: string
   uploadPreset: string
   categories: string[]
+  businessModel: 'product' | 'service'
   onSave: (data: Omit<Product, 'id'> & { id?: string }) => Promise<void>
   onClose: () => void
 }
@@ -63,6 +65,7 @@ export function ProductForm({
   cloudName,
   uploadPreset,
   categories,
+  businessModel,
   onSave,
   onClose,
 }: ProductFormProps) {
@@ -114,6 +117,7 @@ export function ProductForm({
       isAvailable: product?.isAvailable ?? true,
       isFeatured: product?.isFeatured ?? false,
       isRunningAd: product?.isRunningAd ?? false,
+      durationMinutes: product?.durationMinutes ?? 30,
     },
   })
 
@@ -140,6 +144,8 @@ export function ProductForm({
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
         isRunningAd: data.isRunningAd,
+        itemKind: businessModel,
+        durationMinutes: businessModel === 'service' ? (data.durationMinutes ?? 30) : null,
       })
       onClose()
     } finally {
@@ -154,7 +160,7 @@ export function ProductForm({
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-6 py-4">
           <h2 className="text-lg font-semibold">
-            {product ? 'Editar produto' : 'Novo produto'}
+            {product ? `Editar ${businessModel === 'service' ? 'serviço' : 'produto'}` : `Novo ${businessModel === 'service' ? 'serviço' : 'produto'}`}
           </h2>
           <button
             onClick={onClose}
@@ -181,7 +187,7 @@ export function ProductForm({
             <label className="block text-sm font-medium mb-1.5">
               Nome <span className="text-destructive">*</span>
             </label>
-            <Input {...register('name')} placeholder="Ex: Camiseta Básica" />
+            <Input {...register('name')} placeholder={businessModel === 'service' ? 'Ex: Consulta dermatológica' : 'Ex: Camiseta Básica'} />
             {errors.name && (
               <p className="text-xs text-destructive mt-1">{errors.name.message}</p>
             )}
@@ -203,7 +209,7 @@ export function ProductForm({
             </div>
             <Input
               {...register('shortDescription')}
-              placeholder="Ex: Algodão 100%, disponível em P/M/G"
+              placeholder={businessModel === 'service' ? 'Ex: Avaliação completa com duração de 30 minutos' : 'Ex: Algodão 100%, disponível em P/M/G'}
               maxLength={120}
             />
             <p className="text-xs text-muted-foreground mt-1">
@@ -220,7 +226,7 @@ export function ProductForm({
             <label className="block text-sm font-medium mb-1.5">Descrição completa</label>
             <Textarea
               {...register('description')}
-              placeholder="Descrição detalhada do produto..."
+              placeholder={`Descrição detalhada do ${businessModel === 'service' ? 'serviço' : 'produto'}...`}
               rows={3}
             />
           </div>
@@ -230,7 +236,7 @@ export function ProductForm({
             <label className="block text-sm font-medium mb-1.5">Características</label>
             <p className="text-xs text-muted-foreground mb-2">
               Cadastre quantas forem necessárias (cor, tamanho, modelo, voltagem, ano, material...).
-              A IA usa isso pra identificar o produto certo mesmo quando o cliente pergunta por um
+              A IA usa isso pra identificar {businessModel === 'service' ? 'o serviço' : 'o produto'} certo mesmo quando o cliente pergunta por um
               detalhe que não está na descrição.
             </p>
             <div className="flex gap-2">
@@ -288,6 +294,14 @@ export function ProductForm({
             </div>
           </div>
 
+          {businessModel === 'service' && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Duração do serviço (minutos)</label>
+              <Input {...register('durationMinutes', { valueAsNumber: true })} type="number" min={5} step={5} />
+              {errors.durationMinutes && <p className="text-xs text-destructive mt-1">Informe no mínimo 5 minutos.</p>}
+            </div>
+          )}
+
           {/* Categoria e tags */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -324,16 +338,16 @@ export function ProductForm({
                 {...register('isFeatured')}
                 className="h-4 w-4 rounded accent-primary"
               />
-              <span className="text-sm">Produto em destaque</span>
+              <span className="text-sm">{businessModel === 'service' ? 'Serviço em destaque' : 'Produto em destaque'}</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer">
+            {businessModel === 'product' && <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 {...register('isRunningAd')}
                 className="h-4 w-4 rounded accent-primary"
               />
               <span className="text-sm">Em anúncio (Facebook/Instagram Ads)</span>
-            </label>
+            </label>}
           </div>
 
           {/* Ações */}
@@ -343,7 +357,7 @@ export function ProductForm({
             </Button>
             <Button type="submit" disabled={saving} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {product ? 'Salvar alterações' : 'Criar produto'}
+              {product ? 'Salvar alterações' : `Criar ${businessModel === 'service' ? 'serviço' : 'produto'}`}
             </Button>
           </div>
         </form>

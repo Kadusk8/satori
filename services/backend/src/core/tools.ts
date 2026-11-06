@@ -37,7 +37,7 @@ async function queryProducts(whereSql: string, params: unknown[], orderLimitSql:
   const res = await pool.query<ProductRow>(
     `select id, name, short_description, description, price_display, price, category, images, characteristics
      from products
-     where tenant_id = $1 and is_available = true ${whereSql}
+     where tenant_id = $1 and item_kind = 'product' and is_available = true ${whereSql}
      ${orderLimitSql}`,
     params
   )
@@ -61,7 +61,7 @@ export async function toolSearchProducts(
 
   // Categorias disponíveis no catálogo, pra detectar match dinâmico
   const catRes = await pool.query<{ category: string }>(
-    `select distinct category from products where tenant_id = $1 and is_available = true and category is not null`,
+    `select distinct category from products where tenant_id = $1 and item_kind = 'product' and is_available = true and category is not null`,
     [tenantId]
   )
   // Categoria vazia ('' — diferente de NULL, que já é excluído pelo where acima) não é uma
@@ -198,15 +198,70 @@ export async function toolSearchProducts(
     .join('\n\n')
 }
 
+export async function toolSearchServices(tenantId: string, input: Record<string, unknown>): Promise<string> {
+  const query = String(input.query ?? '').trim()
+  const maxResults = Math.min(Math.max(Number(input.max_results ?? 5), 1), 10)
+  const params: unknown[] = [tenantId]
+  let searchSql = ''
+  if (query) {
+    params.push(`%${query}%`)
+    searchSql = `and (name ilike $2 or category ilike $2 or description ilike $2 or short_description ilike $2)`
+  }
+  params.push(maxResults)
+  const limitIndex = params.length
+  const result = await pool.query<{
+    id: string; name: string; description: string | null; short_description: string | null
+    price: string | null; price_display: string | null; category: string | null; duration_minutes: number
+  }>(
+    `select id, name, description, short_description, price, price_display, category, duration_minutes
+       from products
+      where tenant_id = $1 and item_kind = 'service' and is_available = true ${searchSql}
+      order by is_featured desc, name asc limit $${limitIndex}`,
+    params
+  )
+  if (result.rows.length === 0) return 'Nenhum serviço cadastrado corresponde ao pedido. Não invente um serviço; peça outra preferência ou encaminhe à equipe.'
+  return result.rows.map((service) => [
+    `🛠️ *${service.name}*`,
+    service.price_display ? `💰 ${service.price_display}` : service.price ? `💰 R$ ${Number(service.price).toFixed(2)}` : '💰 Sob consulta',
+    `⏱️ Duração: ${service.duration_minutes} minutos`,
+    service.short_description || service.description ? `📝 ${service.short_description || service.description}` : '',
+    service.category ? `🏷️ ${service.category}` : '',
+    `ID: ${service.id}`,
+  ].filter(Boolean).join('\n')).join('\n\n')
+}
+
+async function resolveAppointmentDuration(tenantId: string, input: Record<string, unknown>): Promise<{ duration: number; serviceId: string | null; serviceName: string | null; error?: string }> {
+  const tenantResult = await pool.query<{ business_model: string; appointment_duration_minutes: number }>(
+    `select business_model, appointment_duration_minutes from tenants where id = $1`, [tenantId]
+  )
+  const tenant = tenantResult.rows[0]
+  if (!tenant) return { duration: 30, serviceId: null, serviceName: null, error: 'Empresa não encontrada.' }
+  if (tenant.business_model !== 'service') {
+    return { duration: tenant.appointment_duration_minutes ?? 30, serviceId: null, serviceName: null }
+  }
+  const serviceId = String(input.service_id ?? '')
+  if (!serviceId) return { duration: 30, serviceId: null, serviceName: null, error: 'Escolha um serviço antes de consultar ou confirmar o horário.' }
+  const serviceResult = await pool.query<{ id: string; name: string; duration_minutes: number }>(
+    `select id, name, duration_minutes from products where id = $1 and tenant_id = $2 and item_kind = 'service' and is_available = true`,
+    [serviceId, tenantId]
+  )
+  const service = serviceResult.rows[0]
+  if (!service) return { duration: 30, serviceId: null, serviceName: null, error: 'Serviço inválido ou indisponível. Consulte search_services novamente.' }
+  return { duration: service.duration_minutes, serviceId: service.id, serviceName: service.name }
+}
+
 export async function toolCheckAvailability(tenantId: string, input: Record<string, unknown>): Promise<string> {
-  const tenantRows = await pool.query<{ appointment_duration_minutes: number; business_hours: Record<string, { enabled: boolean; start: string; end: string }>; timezone: string }>(
-    `select appointment_duration_minutes, business_hours, timezone from tenants where id = $1`,
+  const tenantRows = await pool.query<{ appointment_duration_minutes: number; appointment_slot_interval_minutes: number; business_hours: Record<string, { enabled: boolean; start: string; end: string }>; timezone: string }>(
+    `select appointment_duration_minutes, appointment_slot_interval_minutes, business_hours, timezone from tenants where id = $1`,
     [tenantId]
   )
   const tenant = tenantRows.rows[0]
   if (!tenant) return 'Erro ao buscar configurações de agenda.'
 
-  const duration = tenant.appointment_duration_minutes ?? 30
+  const resolved = await resolveAppointmentDuration(tenantId, input)
+  if (resolved.error) return resolved.error
+  const duration = resolved.duration
+  const slotInterval = tenant.appointment_slot_interval_minutes ?? 30
   const bh = tenant.business_hours
   const timezone = tenant.timezone ?? 'America/Sao_Paulo'
 
@@ -246,7 +301,7 @@ export async function toolCheckAvailability(tenantId: string, input: Record<stri
     }
 
     const slots: string[] = []
-    for (let m = startMinutes; m + duration <= endMinutes; m += duration) {
+    for (let m = startMinutes; m + duration <= endMinutes; m += slotInterval) {
       if (period) {
         const [pStart, pEnd] = periodFilters[period] ?? [0, 1440]
         if (m < pStart || m >= pEnd) continue
@@ -258,12 +313,23 @@ export async function toolCheckAvailability(tenantId: string, input: Record<stri
     if (slots.length === 0) continue
 
     const booked = await db
-      .select({ startTime: appointments.startTime })
+      .select({ startTime: appointments.startTime, endTime: appointments.endTime })
       .from(appointments)
       .where(and(eq(appointments.tenantId, tenantId), eq(appointments.date, dateStr), ne(appointments.status, 'cancelled')))
 
-    const bookedTimes = new Set(booked.map((a) => a.startTime.slice(0, 5)))
-    const freeSlots = slots.filter((s) => !bookedTimes.has(s))
+    const toMinutes = (value: string) => {
+      const [hours, minutes] = value.slice(0, 5).split(':').map(Number)
+      return hours * 60 + minutes
+    }
+    const freeSlots = slots.filter((slot) => {
+      const slotStart = toMinutes(slot)
+      const slotEnd = slotStart + duration
+      return !booked.some((appointment) => {
+        const bookedStart = toMinutes(appointment.startTime)
+        const bookedEnd = toMinutes(appointment.endTime)
+        return slotStart < bookedEnd && slotEnd > bookedStart
+      })
+    })
 
     if (freeSlots.length > 0) {
       const dateLabel = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: timezone }).format(date)
@@ -286,11 +352,9 @@ export async function toolBookAppointment(
   const startTime = String(input.start_time ?? '')
   if (!date || !startTime) return 'Data e horário são obrigatórios para agendar.'
 
-  const tenantRows = await pool.query<{ appointment_duration_minutes: number }>(
-    `select appointment_duration_minutes from tenants where id = $1`,
-    [tenantId]
-  )
-  const duration = tenantRows.rows[0]?.appointment_duration_minutes ?? 30
+  const resolved = await resolveAppointmentDuration(tenantId, input)
+  if (resolved.error) return resolved.error
+  const duration = resolved.duration
   const [h, m] = startTime.split(':').map(Number)
   const endMinutes = h * 60 + m + duration
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`
@@ -302,11 +366,12 @@ export async function toolBookAppointment(
         tenantId,
         contactId,
         conversationId,
+        serviceId: resolved.serviceId,
         date,
         startTime,
         endTime,
         status: 'confirmed',
-        title: input.contact_name ? `Agendamento — ${input.contact_name}` : 'Agendamento',
+        title: resolved.serviceName ?? (input.contact_name ? `Agendamento — ${input.contact_name}` : 'Agendamento'),
         notes: input.notes ? String(input.notes) : null,
         reminder24hSent: false,
         reminder1hSent: false,
@@ -343,7 +408,7 @@ export async function toolBookAppointment(
       console.error('[toolBookAppointment] Erro ao processar Meta CAPI:', metaErr)
     }
 
-    return `✅ Agendamento confirmado!\n📅 Data: ${date}\n🕐 Horário: ${startTime}–${endTime}\nID: ${created[0].id}`
+    return `✅ Agendamento confirmado!${resolved.serviceName ? `\n🛠️ Serviço: ${resolved.serviceName}` : ''}\n📅 Data: ${date}\n🕐 Horário: ${startTime}–${endTime}\nID: ${created[0].id}`
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     if (message.includes('exclusion') || message.includes('conflito')) {
@@ -761,9 +826,23 @@ export async function executeTool(
   let result: string
   let escalated = false
 
+  if (['search_products', 'search_services', 'send_product_image', 'send_more_product_images'].includes(toolName)) {
+    const tenantResult = await pool.query<{ business_model: string }>(`select business_model from tenants where id = $1`, [ctx.tenantId])
+    const businessModel = tenantResult.rows[0]?.business_model === 'service' ? 'service' : 'product'
+    const invalidForMode =
+      (businessModel === 'service' && ['search_products', 'send_product_image', 'send_more_product_images'].includes(toolName))
+      || (businessModel === 'product' && toolName === 'search_services')
+    if (invalidForMode) {
+      return { result: 'Ferramenta indisponível para o modelo desta empresa.', escalated: false }
+    }
+  }
+
   switch (toolName) {
     case 'search_products':
       result = await toolSearchProducts(ctx.tenantId, input)
+      break
+    case 'search_services':
+      result = await toolSearchServices(ctx.tenantId, input)
       break
     case 'check_availability':
       result = await toolCheckAvailability(ctx.tenantId, input)
