@@ -53,6 +53,9 @@ export interface OnboardingPayload {
       description: string
       price: string
       category: string
+      additionalCategories: string[]
+      characteristics: string[]
+      priceTiers: Array<{ label: string; minQuantity: number; unitPrice: number }>
       durationMinutes?: number
     }>
     skipped: boolean

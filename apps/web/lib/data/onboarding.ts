@@ -249,6 +249,9 @@ export async function onboardTenant(
           price: p.price ? String(parseFloat(p.price.replace(/[^0-9,]/g, '').replace(',', '.')) || 0) : null,
           priceDisplay: p.price || null,
           category: p.category || null,
+          additionalCategories: p.additionalCategories ?? [],
+          characteristics: p.characteristics ?? [],
+          priceTiers: [...(p.priceTiers ?? [])].sort((a, b) => a.minQuantity - b.minQuantity),
           isAvailable: true,
         }))
       )

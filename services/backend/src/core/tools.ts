@@ -29,6 +29,7 @@ interface ProductRow {
   price_display: string | null
   price: string | null
   category: string | null
+  additional_categories: string[] | null
   subcategory: string | null
   brand: string | null
   audience: string | null
@@ -36,12 +37,13 @@ interface ProductRow {
   variants: Array<{ size: string; color: string; sku: string; stock: number }>
   images: unknown
   characteristics: string[] | null
+  price_tiers: Array<{ label: string; minQuantity: number; unitPrice: number }> | null
 }
 
 async function queryProducts(whereSql: string, params: unknown[], orderLimitSql: string): Promise<ProductRow[]> {
   const res = await pool.query<ProductRow>(
     `select p.id, p.name, p.short_description, p.description, p.price_display, p.price, p.category,
-            p.subcategory, p.brand, p.audience, p.promotional_price, p.images, p.characteristics,
+            p.additional_categories, p.subcategory, p.brand, p.audience, p.promotional_price, p.images, p.characteristics, p.price_tiers,
             coalesce((select json_agg(json_build_object('size', v.size, 'color', v.color, 'sku', v.sku, 'stock', v.stock) order by v.color, v.size)
                       from product_variants v where v.product_id = p.id), '[]'::json) as variants
      from products p
@@ -69,7 +71,10 @@ export async function toolSearchProducts(
 
   // Categorias disponíveis no catálogo, pra detectar match dinâmico
   const catRes = await pool.query<{ category: string }>(
-    `select distinct category from products where tenant_id = $1 and item_kind = 'product' and is_available = true and category is not null`,
+    `select distinct category
+       from products p
+       cross join lateral unnest(array_remove(array_prepend(p.category, p.additional_categories), null)) category
+      where tenant_id = $1 and item_kind = 'product' and is_available = true`,
     [tenantId]
   )
   // Categoria vazia ('' — diferente de NULL, que já é excluído pelo where acima) não é uma
@@ -88,7 +93,11 @@ export async function toolSearchProducts(
   if (matchedCategory) {
     const params: unknown[] = priceMax ? [tenantId, priceMax, matchedCategory] : [tenantId, matchedCategory]
     const catIdx = priceMax ? 3 : 2
-    const categoryResult = await queryProducts(`${priceSql} and category ilike $${catIdx}`, params, `limit ${maxResults}`)
+    const categoryResult = await queryProducts(
+      `${priceSql} and (category ilike $${catIdx} or exists (select 1 from unnest(additional_categories) c where c ilike $${catIdx}))`,
+      params,
+      `limit ${maxResults}`
+    )
 
     const remainingTokens = queryLower
       .split(matchedCategory.toLowerCase())
@@ -151,6 +160,7 @@ export async function toolSearchProducts(
           params.push(`%${w}%`)
           const idx = params.length
           return `name ilike $${idx} or description ilike $${idx} or brand ilike $${idx} or subcategory ilike $${idx}
+            or exists (select 1 from unnest(additional_categories) c where c ilike $${idx})
             or exists (select 1 from unnest(characteristics) c where c ilike $${idx})
             or exists (select 1 from product_variants pv where pv.product_id = p.id and (pv.size ilike $${idx} or pv.color ilike $${idx} or pv.sku ilike $${idx}))`
         })
@@ -193,16 +203,20 @@ export async function toolSearchProducts(
       const hasImage = images.length > 0
       const desc = p.short_description || p.description
       const characteristics = p.characteristics ?? []
+      const additionalCategories = p.additional_categories ?? []
+      const priceTiers = [...(p.price_tiers ?? [])].sort((a, b) => a.minQuantity - b.minQuantity)
       const availableVariants = (p.variants ?? []).filter((variant) => variant.stock > 0)
       return [
         `📦 *${p.name}*`,
         p.promotional_price ? `💰 De R$ ${Number(p.price ?? 0).toFixed(2)} por R$ ${Number(p.promotional_price).toFixed(2)}` : p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
         desc ? `📝 ${desc}` : '',
         p.category ? `🏷️ ${p.category}${p.subcategory ? ` / ${p.subcategory}` : ''}` : '',
+        additionalCategories.length > 0 ? `🏷️ Outras categorias: ${additionalCategories.join(', ')}` : '',
         p.brand ? `🏢 Marca: ${p.brand}` : '',
         p.audience ? `👤 Público: ${{ female: 'feminino', male: 'masculino', kids: 'infantil', unisex: 'unissex' }[p.audience] ?? p.audience}` : '',
         availableVariants.length > 0 ? `📏 Variações disponíveis: ${availableVariants.map((variant) => `${variant.color} ${variant.size} (estoque: ${variant.stock})`).join(', ')}` : '',
         characteristics.length > 0 ? `🔧 Características: ${characteristics.join(', ')}` : '',
+        priceTiers.length > 0 ? `📊 Preços por quantidade: ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ unidades = R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join('; ')}. Aplique a faixa de maior quantidade mínima que o pedido atingir; abaixo do menor mínimo, diga que o valor precisa ser consultado.` : '',
         hasImage ? `🖼️ [tem imagem — use send_product_image com id: ${p.id}]` : '',
         `ID: ${p.id}`,
       ]
@@ -519,6 +533,7 @@ export async function resolveProductImageData(tenantId: string, productId: strin
       characteristics: products.characteristics,
       price: products.price,
       priceDisplay: products.priceDisplay,
+      priceTiers: products.priceTiers,
     })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
@@ -543,6 +558,9 @@ export async function resolveProductImageData(tenantId: string, productId: strin
     : product.price != null
     ? `R$ ${Number(product.price).toFixed(2)}`
     : null
+  const priceTiers = Array.isArray(product.priceTiers)
+    ? (product.priceTiers as Array<{ label: string; minQuantity: number; unitPrice: number }>).sort((a, b) => a.minQuantity - b.minQuantity)
+    : []
 
   // Ficha do veículo: quando o produto tem características cadastradas (Ano, Cor, Câmbio, Km...),
   // inclui na legenda uma por linha — assim todo card mostra os dados completos mesmo se a
@@ -551,6 +569,7 @@ export async function resolveProductImageData(tenantId: string, productId: strin
   const caption = [
     `📦 *${product.name}*`,
     priceText ? `💰 ${priceText}` : '',
+    priceTiers.length > 0 ? `📊 ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ un. — R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join(' | ')}` : '',
     buildImageCaptionText(product.description, product.shortDescription),
     characteristics.length > 0 ? characteristics.map((c) => `▪️ ${c}`).join('\n') : '',
   ]

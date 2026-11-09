@@ -793,6 +793,7 @@ CREATE TABLE IF NOT EXISTS products (
   price_display     TEXT,
   currency          TEXT NOT NULL DEFAULT 'BRL',
   category          TEXT,
+  additional_categories TEXT[] NOT NULL DEFAULT '{}',
   subcategory       TEXT,
   brand             TEXT,
   audience          TEXT CHECK (audience IS NULL OR audience IN ('female','male','kids','unisex')),
@@ -803,6 +804,7 @@ CREATE TABLE IF NOT EXISTS products (
   -- mostradas pra IA junto do resultado, pra ela conseguir identificar o
   -- produto certo mesmo quando isso não está na descrição.
   characteristics   TEXT[] NOT NULL DEFAULT '{}',
+  price_tiers       JSONB NOT NULL DEFAULT '[]',
 
   images JSONB NOT NULL DEFAULT '[]',
 
@@ -827,6 +829,7 @@ COMMENT ON COLUMN products.is_running_ad IS 'Marca se o produto está em campanh
 CREATE INDEX IF NOT EXISTS idx_products_tenant_id    ON products (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_products_tenant_kind  ON products (tenant_id, item_kind, is_available);
 CREATE INDEX IF NOT EXISTS idx_products_category     ON products (tenant_id, category);
+CREATE INDEX IF NOT EXISTS idx_products_additional_categories ON products USING GIN (additional_categories);
 CREATE INDEX IF NOT EXISTS idx_products_is_available ON products (tenant_id, is_available);
 CREATE INDEX IF NOT EXISTS idx_products_is_featured  ON products (tenant_id, is_featured);
 CREATE INDEX IF NOT EXISTS idx_products_is_running_ad ON products (tenant_id, is_running_ad);
@@ -843,6 +846,7 @@ BEGIN
     coalesce(NEW.description, '')       || ' ' ||
     coalesce(NEW.short_description, '') || ' ' ||
     coalesce(NEW.category, '')          || ' ' ||
+    coalesce(array_to_string(NEW.additional_categories, ' '), '') || ' ' ||
     coalesce(NEW.subcategory, '')       || ' ' ||
     coalesce(NEW.brand, '')             || ' ' ||
     coalesce(NEW.audience, '')          || ' ' ||

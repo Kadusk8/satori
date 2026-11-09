@@ -13,6 +13,9 @@ const EMPTY_PRODUCT: ProductDraft = {
   description: '',
   price: '',
   category: '',
+  additionalCategories: [],
+  characteristics: [],
+  priceTiers: [],
   durationMinutes: 30,
 }
 
@@ -46,11 +49,17 @@ export function StepProductsServices() {
     )
   }
 
+  const updateProductData = (index: number, changes: Partial<ProductDraft>) => {
+    setProducts((prev) => prev.map((product, i) => i === index ? { ...product, ...changes } : product))
+  }
+
   const validate = (): boolean => {
     const newErrors: Record<number, string> = {}
     products.forEach((p, i) => {
       if (!p.name.trim()) newErrors[i] = 'Nome obrigatório'
       else if (isService && (!p.durationMinutes || p.durationMinutes < 5)) newErrors[i] = 'Informe uma duração válida'
+      else if ((p.priceTiers ?? []).some((tier) => !tier.label.trim() || !Number.isInteger(tier.minQuantity) || tier.minQuantity < 1 || !Number.isFinite(tier.unitPrice) || tier.unitPrice < 0)) newErrors[i] = 'Preencha corretamente todas as faixas de preço'
+      else if (new Set((p.priceTiers ?? []).map((tier) => tier.minQuantity)).size !== (p.priceTiers ?? []).length) newErrors[i] = 'Não repita a quantidade mínima nas faixas'
     })
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
@@ -147,6 +156,26 @@ export function StepProductsServices() {
                 />
               </div>
 
+              {!isService && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium">Outras categorias</label>
+                  <Input
+                    placeholder="Básicas, Lançamento, Infantil"
+                    value={(product.additionalCategories ?? []).join(', ')}
+                    onChange={(e) => updateProductData(index, { additionalCategories: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })}
+                  />
+                </div>
+              )}
+
+              <div className="sm:col-span-2 space-y-1">
+                <label className="text-xs font-medium">Características</label>
+                <Input
+                  placeholder="Malha peruana, tamanhos 2 ao 16"
+                  value={(product.characteristics ?? []).join(', ')}
+                  onChange={(e) => updateProductData(index, { characteristics: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })}
+                />
+              </div>
+
               <div className="sm:col-span-2 space-y-1">
                 <label className="text-xs font-medium">Descrição</label>
                 <Textarea
@@ -158,6 +187,28 @@ export function StepProductsServices() {
                   }
                 />
               </div>
+
+              {!isService && (
+                <div className="sm:col-span-2 space-y-2 border-t pt-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-medium">Preços por quantidade</label>
+                      <p className="text-[11px] text-muted-foreground">A maior quantidade mínima atingida tem prioridade.</p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => updateProductData(index, { priceTiers: [...(product.priceTiers ?? []), { label: '', minQuantity: 1, unitPrice: 0 }] })}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Faixa
+                    </Button>
+                  </div>
+                  {(product.priceTiers ?? []).map((tier, tierIndex) => (
+                    <div key={tierIndex} className="grid grid-cols-[1fr_90px_110px_32px] gap-2 items-end">
+                      <div><label className="text-[11px] text-muted-foreground">Modalidade</label><Input value={tier.label} placeholder="Atacado" onChange={(e) => updateProductData(index, { priceTiers: product.priceTiers.map((item, i) => i === tierIndex ? { ...item, label: e.target.value } : item) })} /></div>
+                      <div><label className="text-[11px] text-muted-foreground">Mínimo</label><Input type="number" min={1} value={tier.minQuantity} onChange={(e) => updateProductData(index, { priceTiers: product.priceTiers.map((item, i) => i === tierIndex ? { ...item, minQuantity: Number(e.target.value) } : item) })} /></div>
+                      <div><label className="text-[11px] text-muted-foreground">R$ unitário</label><Input type="number" min={0} step="0.01" value={tier.unitPrice} onChange={(e) => updateProductData(index, { priceTiers: product.priceTiers.map((item, i) => i === tierIndex ? { ...item, unitPrice: Number(e.target.value) } : item) })} /></div>
+                      <button type="button" className="h-9 text-muted-foreground hover:text-destructive" onClick={() => updateProductData(index, { priceTiers: product.priceTiers.filter((_, i) => i !== tierIndex) })}><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}

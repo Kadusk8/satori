@@ -14,6 +14,7 @@ export interface DBProductRow {
   price: number | null
   price_display: string | null
   category: string | null
+  additional_categories: string[]
   subcategory: string | null
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
@@ -21,6 +22,7 @@ export interface DBProductRow {
   variants: ProductVariantInput[]
   tags: string[]
   characteristics: string[]
+  price_tiers: ProductPriceTier[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
@@ -37,6 +39,12 @@ export interface ProductVariantInput {
   stock: number
 }
 
+export interface ProductPriceTier {
+  label: string
+  minQuantity: number
+  unitPrice: number
+}
+
 export interface ProductInput {
   id?: string
   name: string
@@ -45,6 +53,7 @@ export interface ProductInput {
   price: number | null
   priceDisplay: string | null
   category: string | null
+  additionalCategories: string[]
   subcategory: string | null
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
@@ -52,6 +61,7 @@ export interface ProductInput {
   variants: ProductVariantInput[]
   tags: string[]
   characteristics: string[]
+  priceTiers: ProductPriceTier[]
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
@@ -74,6 +84,7 @@ function toRow(p: typeof products.$inferSelect, variants: ProductVariantInput[] 
     price: p.price === null ? null : Number(p.price),
     price_display: p.priceDisplay,
     category: p.category,
+    additional_categories: p.additionalCategories ?? [],
     subcategory: p.subcategory,
     brand: p.brand,
     audience: p.audience as DBProductRow['audience'],
@@ -81,6 +92,7 @@ function toRow(p: typeof products.$inferSelect, variants: ProductVariantInput[] 
     variants,
     tags: p.tags ?? [],
     characteristics: p.characteristics ?? [],
+    price_tiers: (p.priceTiers ?? []) as ProductPriceTier[],
     images: (p.images ?? []) as DBProductRow['images'],
     is_available: p.isAvailable,
     is_featured: p.isFeatured,
@@ -156,6 +168,15 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
       throw new Error('Não repita combinações de tamanho/cor nem códigos SKU.')
     }
   }
+  const normalizedTiers = [...input.priceTiers]
+    .map((tier) => ({ label: tier.label.trim(), minQuantity: Number(tier.minQuantity), unitPrice: Number(tier.unitPrice) }))
+    .sort((a, b) => a.minQuantity - b.minQuantity)
+  if (normalizedTiers.some((tier) => !tier.label || !Number.isInteger(tier.minQuantity) || tier.minQuantity < 1 || !Number.isFinite(tier.unitPrice) || tier.unitPrice < 0)) {
+    throw new Error('Preencha modalidade, quantidade mínima e preço válido em todas as faixas.')
+  }
+  if (new Set(normalizedTiers.map((tier) => tier.minQuantity)).size !== normalizedTiers.length) {
+    throw new Error('Não repita a mesma quantidade mínima em faixas de preço diferentes.')
+  }
   const values = {
     name: input.name,
     description: input.description,
@@ -163,12 +184,14 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     price: input.price === null ? null : String(input.price),
     priceDisplay: input.priceDisplay,
     category: input.category,
+    additionalCategories: Array.from(new Set(input.additionalCategories.map((category) => category.trim()).filter(Boolean))),
     subcategory: context.businessModel === 'fashion' ? input.subcategory : null,
     brand: context.businessModel === 'fashion' ? input.brand : null,
     audience: context.businessModel === 'fashion' ? input.audience : null,
     promotionalPrice: context.businessModel === 'fashion' && input.promotionalPrice !== null ? String(input.promotionalPrice) : null,
     tags: input.tags,
     characteristics: input.characteristics,
+    priceTiers: normalizedTiers,
     images: input.images,
     isAvailable: input.isAvailable,
     isFeatured: input.isFeatured,

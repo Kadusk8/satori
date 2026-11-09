@@ -26,6 +26,7 @@ interface DBProduct {
   price: number | null
   price_display: string | null
   category: string | null
+  additional_categories: string[]
   subcategory: string | null
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
@@ -33,6 +34,7 @@ interface DBProduct {
   variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
+  price_tiers: Array<{ label: string; minQuantity: number; unitPrice: number }>
   images: { url: string; thumbnailUrl: string; alt: string }[]
   is_available: boolean
   is_featured: boolean
@@ -50,6 +52,7 @@ function mapProduct(row: DBProduct): Product {
     price: row.price,
     priceDisplay: row.price_display,
     category: row.category,
+    additionalCategories: row.additional_categories ?? [],
     subcategory: row.subcategory,
     brand: row.brand,
     audience: row.audience,
@@ -57,6 +60,7 @@ function mapProduct(row: DBProduct): Product {
     variants: row.variants ?? [],
     tags: row.tags ?? [],
     characteristics: row.characteristics ?? [],
+    priceTiers: row.price_tiers ?? [],
     images: (row.images ?? []) as { url: string; thumbnailUrl: string; alt: string }[],
     isAvailable: row.is_available,
     isFeatured: row.is_featured,
@@ -89,7 +93,7 @@ export default function ProductsPage() {
       const data = await listProducts()
       const mapped = data.map((p) => mapProduct(p as unknown as DBProduct))
       setProducts(mapped)
-      const cats = Array.from(new Set(mapped.map((p) => p.category).filter(Boolean) as string[])).sort()
+      const cats = Array.from(new Set(mapped.flatMap((p) => [p.category, ...p.additionalCategories]).filter(Boolean) as string[])).sort()
       setCategories(cats)
     } catch (err) {
       toast.error(`Erro ao carregar ${businessModel === 'service' ? 'serviços' : 'produtos'}: ` + (err instanceof Error ? err.message : 'erro'))
@@ -117,6 +121,7 @@ export default function ProductsPage() {
         !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.category?.toLowerCase().includes(search.toLowerCase()) ||
+        p.additionalCategories.some((category) => category.toLowerCase().includes(search.toLowerCase())) ||
         p.subcategory?.toLowerCase().includes(search.toLowerCase()) ||
         p.brand?.toLowerCase().includes(search.toLowerCase()) ||
         p.tags.some((t) => t.toLowerCase().includes(search.toLowerCase())) ||
@@ -131,7 +136,7 @@ export default function ProductsPage() {
         (filterStatus === 'running_ad' && p.isRunningAd)
 
       const matchCategory =
-        filterCategory === 'Todas' || p.category === filterCategory
+        filterCategory === 'Todas' || p.category === filterCategory || p.additionalCategories.includes(filterCategory)
 
       return matchSearch && matchStatus && matchCategory
     })
@@ -149,6 +154,7 @@ export default function ProductsPage() {
         price: data.price,
         priceDisplay: data.priceDisplay,
         category: data.category,
+        additionalCategories: data.additionalCategories,
         subcategory: data.subcategory,
         brand: data.brand,
         audience: data.audience,
@@ -156,6 +162,7 @@ export default function ProductsPage() {
         variants: data.variants,
         tags: data.tags,
         characteristics: data.characteristics,
+        priceTiers: data.priceTiers,
         images: data.images,
         isAvailable: data.isAvailable,
         isFeatured: data.isFeatured,
@@ -172,8 +179,7 @@ export default function ProductsPage() {
       }
 
       setCategories((prev) => {
-        if (!data.category) return prev
-        return Array.from(new Set([...prev, data.category])).sort()
+        return Array.from(new Set([...prev, ...(data.category ? [data.category] : []), ...data.additionalCategories])).sort()
       })
     } catch (err) {
       toast.error(`Erro ao salvar ${businessModel === 'service' ? 'serviço' : 'produto'}: ` + (err instanceof Error ? err.message : 'erro'))

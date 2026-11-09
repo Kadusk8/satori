@@ -86,6 +86,9 @@ export function ProductForm({
   const [saving, setSaving] = useState(false)
   const [characteristics, setCharacteristics] = useState<string[]>(product?.characteristics ?? [])
   const [characteristicInput, setCharacteristicInput] = useState('')
+  const [additionalCategories, setAdditionalCategories] = useState<string[]>(product?.additionalCategories ?? [])
+  const [additionalCategoryInput, setAdditionalCategoryInput] = useState('')
+  const [priceTiers, setPriceTiers] = useState(product?.priceTiers ?? [])
   const [variants, setVariants] = useState(product?.variants ?? [])
 
   const addCharacteristic = () => {
@@ -104,6 +107,13 @@ export function ProductForm({
       e.preventDefault()
       addCharacteristic()
     }
+  }
+
+  const addAdditionalCategory = () => {
+    const value = additionalCategoryInput.trim()
+    if (!value || additionalCategories.some((category) => category.toLowerCase() === value.toLowerCase())) return
+    setAdditionalCategories((prev) => [...prev, value])
+    setAdditionalCategoryInput('')
   }
 
   const {
@@ -143,6 +153,7 @@ export function ProductForm({
         price: data.price ? parseBRLPrice(data.price) : null,
         priceDisplay: data.priceDisplay ?? null,
         category: data.category ?? null,
+        additionalCategories,
         subcategory: businessModel === 'fashion' ? data.subcategory ?? null : null,
         brand: businessModel === 'fashion' ? data.brand ?? null : null,
         audience: businessModel === 'fashion' ? data.audience ?? null : null,
@@ -152,6 +163,7 @@ export function ProductForm({
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
         characteristics,
+        priceTiers,
         images: images.map((img) => ({
           url: img.url,
           thumbnailUrl: img.thumbnailUrl,
@@ -310,6 +322,59 @@ export function ProductForm({
             </div>
           </div>
 
+          {businessModel !== 'service' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-sm font-medium">Faixas de preço por quantidade</label>
+                  <p className="text-xs text-muted-foreground">A IA aplica a faixa com a maior quantidade mínima atendida pelo pedido.</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPriceTiers((prev) => [...prev, { label: '', minQuantity: 1, unitPrice: 0 }])}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar faixa
+                </Button>
+              </div>
+              {priceTiers.map((tier, index) => (
+                <div key={index} className="grid grid-cols-[1fr_110px_130px_36px] gap-2 items-end rounded-lg border p-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Modalidade</label>
+                    <Input
+                      value={tier.label}
+                      placeholder="Ex: Atacado"
+                      onChange={(e) => setPriceTiers((prev) => prev.map((item, i) => i === index ? { ...item, label: e.target.value } : item))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Mínimo</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={tier.minQuantity}
+                      onChange={(e) => setPriceTiers((prev) => prev.map((item, i) => i === index ? { ...item, minQuantity: Number(e.target.value) } : item))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Preço unitário</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={tier.unitPrice}
+                      onChange={(e) => setPriceTiers((prev) => prev.map((item, i) => i === index ? { ...item, unitPrice: Number(e.target.value) } : item))}
+                    />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => setPriceTiers((prev) => prev.filter((_, i) => i !== index))}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {businessModel === 'fashion' && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -369,7 +434,7 @@ export function ProductForm({
             </div>
           )}
 
-          {/* Categoria e tags */}
+          {/* Categorias */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1.5">Categoria</label>
@@ -381,12 +446,41 @@ export function ProductForm({
               </datalist>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1.5">
-                Tags{' '}
-                <span className="text-muted-foreground font-normal">(vírgula)</span>
-              </label>
-              <Input {...register('tags')} placeholder="promo, novo, destaque" />
+              <label className="block text-sm font-medium mb-1.5">Outras categorias</label>
+              <div className="flex gap-2">
+                <Input
+                  value={additionalCategoryInput}
+                  placeholder="Ex: Lançamentos"
+                  onChange={(e) => setAdditionalCategoryInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault()
+                      addAdditionalCategory()
+                    }
+                  }}
+                />
+                <Button type="button" variant="outline" size="icon" onClick={addAdditionalCategory}><Plus className="h-4 w-4" /></Button>
+              </div>
+              {additionalCategories.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {additionalCategories.map((category) => (
+                    <span key={category} className="inline-flex items-center gap-1 text-xs bg-orange-500/10 text-orange-700 rounded-full pl-2.5 pr-1 py-1">
+                      {category}
+                      <button type="button" onClick={() => setAdditionalCategories((prev) => prev.filter((item) => item !== category))} className="rounded-full p-0.5 hover:bg-background">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1.5">
+              Tags internas <span className="text-muted-foreground font-normal">(separadas por vírgula)</span>
+            </label>
+            <Input {...register('tags')} placeholder="promo, destaque" />
           </div>
 
           {/* Switches */}

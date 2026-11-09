@@ -12,6 +12,7 @@ export interface Product {
   price: number | null
   priceDisplay: string | null
   category: string | null
+  additionalCategories: string[]
   subcategory: string | null
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
@@ -19,6 +20,7 @@ export interface Product {
   variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
+  priceTiers: Array<{ label: string; minQuantity: number; unitPrice: number }>
   images: { url: string; thumbnailUrl: string; alt: string }[]
   isAvailable: boolean
   isFeatured: boolean
@@ -142,6 +144,24 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
           <span className="inline-block text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5">
             {product.category}
           </span>
+        )}
+        {product.additionalCategories.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {product.additionalCategories.map((category) => (
+              <span key={category} className="text-[10px] bg-orange-500/10 text-orange-700 rounded px-1.5 py-0.5">
+                {category}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {product.priceTiers.length > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            {[...product.priceTiers]
+              .sort((a, b) => a.minQuantity - b.minQuantity)
+              .map((tier) => `${tier.label}: ${tier.minQuantity}+ por ${formatPrice(tier.unitPrice, null)}`)
+              .join(' · ')}
+          </p>
         )}
 
         {product.brand && <span className="ml-1 text-xs text-muted-foreground">{product.brand}</span>}
