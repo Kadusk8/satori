@@ -72,10 +72,10 @@ export async function toolSearchProducts(
 
   // Categorias disponíveis no catálogo, pra detectar match dinâmico
   const catRes = await pool.query<{ category: string }>(
-    `select distinct category
+    `select distinct c.category
        from products p
-       cross join lateral unnest(array_remove(array_prepend(p.category, p.additional_categories), null)) category
-      where tenant_id = $1 and item_kind = 'product' and is_available = true`,
+       cross join lateral unnest(array_remove(array_prepend(p.category, p.additional_categories), null)) as c(category)
+      where p.tenant_id = $1 and p.item_kind = 'product' and p.is_available = true`,
     [tenantId]
   )
   // Categoria vazia ('' — diferente de NULL, que já é excluído pelo where acima) não é uma
