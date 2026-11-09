@@ -254,14 +254,14 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
       </div>
 
       {/* Mensagens */}
-      <div className="flex-1 space-y-2 overflow-y-auto bg-[#ECE5DD] p-3">
+      <div className="flex-1 space-y-2 overflow-y-auto bg-[#ECE5DD] p-3 text-neutral-900">
         {msgs.length === 0 && (
           <div className="mt-2 space-y-3">
             <p className="mx-auto max-w-[85%] rounded-lg bg-[#FFF3C4] px-3 py-2 text-center text-xs text-[#54450f]">
               Escreva ou grave um áudio como um cliente. Em qualquer resposta da IA, toque em “Quero mudar esta resposta”.
             </p>
             <div className="text-center">
-              <p className="mb-1.5 text-[11px] text-muted-foreground">Ou toque em uma pergunta comum para começar:</p>
+              <p className="mb-1.5 text-[11px] text-neutral-600">Ou toque em uma pergunta comum para começar:</p>
               <div className="flex flex-wrap justify-center gap-1.5">
                 {SCENARIOS[businessModel].map((q) => (
                   <button
@@ -283,7 +283,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
           const noted = feedback.some((f) => f.aiResponse && f.aiResponse === m.content)
           return (
             <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[82%] rounded-lg px-2.5 py-1.5 text-sm shadow-sm ${mine ? 'bg-[#DCF8C6]' : 'bg-white'}`}>
+              <div className={`max-w-[82%] rounded-lg px-2.5 py-1.5 text-sm text-neutral-900 shadow-sm ${mine ? 'bg-[#DCF8C6]' : 'bg-white'}`}>
                 {m.contentType === 'image' && m.mediaUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={m.mediaUrl} alt="" className="mb-1 max-h-60 rounded-md" />
@@ -291,13 +291,13 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
                 {m.contentType === 'audio' && m.mediaUrl && <audio controls src={playable(m.mediaUrl)} className="h-9 w-56" />}
                 {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
                 {m.contentType === 'audio' && mine && !m.content && !String(m.id).startsWith('tmp-') && (
-                  <p className="text-[11px] italic text-muted-foreground">🎤 áudio enviado</p>
+                  <p className="text-[11px] italic text-neutral-500">🎤 áudio enviado</p>
                 )}
-                <p className="mt-0.5 text-right text-[10px] text-muted-foreground">{formatTime(m.createdAt)}</p>
+                <p className="mt-0.5 text-right text-[10px] text-neutral-500">{formatTime(m.createdAt)}</p>
               </div>
               {!mine && !String(m.id).startsWith('tmp-') && (m.content || m.mediaUrl) && (
                 feedbackFor === m.id ? (
-                  <div className="mt-1 w-full max-w-[90%] space-y-1.5 rounded-lg bg-white p-2 shadow-sm">
+                  <div className="mt-1 w-full max-w-[90%] space-y-1.5 rounded-lg bg-white p-2 text-neutral-900 shadow-sm">
                     <p className="text-xs font-medium">Como você queria que a IA respondesse?</p>
                     <textarea
                       value={feedbackText}
@@ -305,17 +305,17 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
                       rows={3}
                       autoFocus
                       placeholder="Ex: Em vez de pedir o nome, já mandar o preço e perguntar a cor."
-                      className="w-full rounded-md border p-2 text-sm"
+                      className="w-full rounded-md border border-neutral-300 bg-white p-2 text-sm text-neutral-900 placeholder:text-neutral-500"
                     />
                     <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => { setFeedbackFor(null); setFeedbackText('') }}>Cancelar</Button>
+                      <Button size="sm" variant="ghost" className="text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900" onClick={() => { setFeedbackFor(null); setFeedbackText('') }}>Cancelar</Button>
                       <Button size="sm" onClick={() => submitFeedback(m.id)} disabled={savingFeedback || !feedbackText.trim()}>
                         {savingFeedback ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Anotar'}
                       </Button>
                     </div>
                   </div>
                 ) : noted ? (
-                  <span className="mt-0.5 flex items-center gap-1 text-[11px] text-emerald-700"><Check className="h-3 w-3" /> mudança anotada</span>
+                  <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-800"><Check className="h-3 w-3" /> mudança anotada</span>
                 ) : (
                   <button
                     type="button"
@@ -331,7 +331,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
         })}
         {busy && (
           <div className="flex justify-start">
-            <div className="rounded-lg bg-white px-3 py-2 shadow-sm"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            <div className="rounded-lg bg-white px-3 py-2 shadow-sm"><Loader2 className="h-4 w-4 animate-spin text-neutral-500" /></div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -341,10 +341,10 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
       <div className="flex items-center gap-2 bg-[#F0F0F0] p-2">
         {recording ? (
           <>
-            <button type="button" onClick={() => stopRecording(true)} aria-label="Cancelar gravação" className="p-2 text-muted-foreground hover:text-destructive">
+            <button type="button" onClick={() => stopRecording(true)} aria-label="Cancelar gravação" className="p-2 text-neutral-600 hover:text-red-600">
               <X className="h-5 w-5" />
             </button>
-            <div className="flex flex-1 items-center gap-2 rounded-full bg-white px-3 py-2 text-sm">
+            <div className="flex flex-1 items-center gap-2 rounded-full bg-white px-3 py-2 text-sm text-neutral-900">
               <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
               Gravando… {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
             </div>
@@ -360,7 +360,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendText() } }}
               placeholder="Mensagem"
               disabled={busy}
-              className="h-10 flex-1 rounded-full border-0 bg-white px-4 text-sm outline-none"
+              className="h-10 flex-1 rounded-full border-0 bg-white px-4 text-sm text-neutral-900 outline-none placeholder:text-neutral-500"
             />
             {text.trim() ? (
               <button type="button" onClick={() => void sendText()} disabled={busy} aria-label="Enviar" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#075E54] text-white disabled:opacity-50">
@@ -402,7 +402,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
                 onChange={(e) => setNotes(e.target.value)}
                 rows={4}
                 placeholder="Ex: Quero que a IA fale mais informal e nunca ofereça desconto."
-                className="w-full rounded-md border p-2 text-sm"
+                className="w-full rounded-md border bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex justify-end gap-2">
