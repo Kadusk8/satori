@@ -35,14 +35,14 @@ export interface TrainingFeedbackItem {
 // Só owner/admin do tenant treina a IA. Os dados vêm sempre dos claims, nunca do input.
 async function trainerOrThrow() {
   const claims = await getDbClaims()
-  if (!claims?.tenant_id || claims.is_super_admin === true) throw new Error('Acesso restrito ao proprietário da empresa.')
-  if (claims.user_role !== 'owner' && claims.user_role !== 'admin') throw new Error('Apenas o proprietário pode testar a IA.')
+  if (!claims?.tenant_id || claims.is_super_admin === true) throw new UserFacingError('Acesso restrito ao proprietário da empresa.')
+  if (claims.user_role !== 'owner' && claims.user_role !== 'admin') throw new UserFacingError('Apenas o proprietário pode testar a IA.')
   return { tenantId: claims.tenant_id, userId: claims.sub as string }
 }
 
 async function superAdminOrThrow() {
   const claims = await getDbClaims()
-  if (claims?.is_super_admin !== true) throw new Error('Acesso restrito.')
+  if (claims?.is_super_admin !== true) throw new UserFacingError('Acesso restrito.')
 }
 
 // O backend baixa essa URL pra transcrever o áudio, então só aceitamos arquivo do NOSSO
@@ -51,28 +51,32 @@ async function superAdminOrThrow() {
 function validateCloudinaryAudioUrl(raw: string): string {
   const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
   let url: URL
-  try { url = new URL(raw) } catch { throw new Error('Áudio inválido.') }
+  try { url = new URL(raw) } catch { throw new UserFacingError('Áudio inválido.') }
   const ok =
     !!cloud &&
     url.protocol === 'https:' &&
     url.hostname === 'res.cloudinary.com' &&
     url.port === '' && url.username === '' && url.password === '' &&
     url.pathname.startsWith(`/${cloud}/video/upload/`)
-  if (!ok) throw new Error('Áudio inválido.')
+  if (!ok) throw new UserFacingError('Áudio inválido.')
   return url.toString()
 }
 
 export type ActionError = { error: string }
 
-// Em produção o Next esconde a mensagem de qualquer erro lançado numa server action. Pra o dono
-// ver o motivo real (ex: "A IA não conseguiu responder agora"), as ações do teste devolvem o erro
-// como dado em vez de lançar.
+// Só mensagens destinadas ao usuário saem pro navegador. Qualquer outro erro (banco, rede,
+// resposta bruta do backend) fica só no log do servidor e o dono vê um aviso genérico.
+class UserFacingError extends Error {}
+
+// Em produção o Next esconde a mensagem de qualquer erro lançado numa server action, então as
+// ações do teste devolvem o erro como dado em vez de lançar.
 async function guard<T>(label: string, fn: () => Promise<T>): Promise<T | ActionError> {
   try {
     return await fn()
   } catch (err) {
     console.error(`[ai-training] ${label}:`, err instanceof Error ? err.stack ?? err.message : err)
-    return { error: err instanceof Error ? err.message : 'Erro inesperado.' }
+    if (err instanceof UserFacingError) return { error: err.message }
+    return { error: 'Algo deu errado do nosso lado. Tente de novo em instantes.' }
   }
 }
 
@@ -125,7 +129,7 @@ async function ownSession(tenantId: string, sessionId: string) {
       .where(and(eq(aiTrainingSessions.id, sessionId), eq(aiTrainingSessions.tenantId, tenantId)))
       .limit(1)
   )
-  if (!session) throw new Error('Sessão de teste não encontrada.')
+  if (!session) throw new UserFacingError('Sessão de teste não encontrada.')
   return session
 }
 
@@ -178,7 +182,7 @@ async function startTrainingSessionImpl(): Promise<{ sessionId: string; messages
 
     const [agent] = await tx.select({ id: aiAgents.id }).from(aiAgents)
       .where(eq(aiAgents.tenantId, tenantId)).orderBy(desc(aiAgents.isDefault)).limit(1)
-    if (!agent) throw new Error('Esta empresa ainda não tem um agente de IA configurado.')
+    if (!agent) throw new UserFacingError('Esta empresa ainda não tem um agente de IA configurado.')
 
     const [contact] = await tx.insert(contacts).values({
       tenantId,
@@ -213,19 +217,19 @@ async function sendTrainingMessageImpl(input: {
 }): Promise<{ messages: TrainingMessage[] }> {
   const { tenantId } = await trainerOrThrow()
   const session = await ownSession(tenantId, input.sessionId)
-  if (session.status !== 'active' || !session.conversationId) throw new Error('Esta sessão de teste já foi encerrada.')
+  if (session.status !== 'active' || !session.conversationId) throw new UserFacingError('Esta sessão de teste já foi encerrada.')
 
   const text = input.text?.trim() ?? ''
   const audioUrl = input.audioUrl ? validateCloudinaryAudioUrl(input.audioUrl) : null
-  if (!text && !audioUrl) throw new Error('Digite uma mensagem ou grave um áudio.')
-  if (text.length > 4000) throw new Error('Mensagem muito longa.')
-  if (!BACKEND_URL) throw new Error('Serviço da IA indisponível no momento (BACKEND_URL não configurada).')
+  if (!text && !audioUrl) throw new UserFacingError('Digite uma mensagem ou grave um áudio.')
+  if (text.length > 4000) throw new UserFacingError('Mensagem muito longa.')
+  if (!BACKEND_URL) throw new UserFacingError('Serviço da IA indisponível no momento. Tente mais tarde.')
 
   const conversationId = session.conversationId
   await withAdmin(async (tx) => {
     const [conv] = await tx.select({ contactId: conversations.contactId }).from(conversations)
       .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, tenantId), eq(conversations.isSandbox, true))).limit(1)
-    if (!conv) throw new Error('Conversa de teste não encontrada.')
+    if (!conv) throw new UserFacingError('Conversa de teste não encontrada.')
     await tx.insert(messages).values({
       tenantId,
       conversationId,
@@ -238,15 +242,21 @@ async function sendTrainingMessageImpl(input: {
     await tx.update(conversations).set({ lastMessageAt: new Date() }).where(eq(conversations.id, conversationId))
   })
 
-  const res = await fetch(`${BACKEND_URL}/sandbox/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(BACKEND_TOKEN ? { Authorization: `Bearer ${BACKEND_TOKEN}` } : {}) },
-    body: JSON.stringify({ tenantId, conversationId }),
-    signal: AbortSignal.timeout(110_000),
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BACKEND_URL}/sandbox/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(BACKEND_TOKEN ? { Authorization: `Bearer ${BACKEND_TOKEN}` } : {}) },
+      body: JSON.stringify({ tenantId, conversationId }),
+      signal: AbortSignal.timeout(110_000),
+    })
+  } catch (err) {
+    console.error('[ai-training] falha de rede ao chamar o backend:', err instanceof Error ? err.message : err)
+    throw new UserFacingError('Não consegui falar com o serviço da IA agora. Tente de novo.')
+  }
   if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`A IA não conseguiu responder agora (${res.status}). ${detail.slice(0, 120)}`)
+    console.error('[ai-training] backend /sandbox/process respondeu', res.status, (await res.text().catch(() => '')).slice(0, 300))
+    throw new UserFacingError(`A IA não conseguiu responder agora (código ${res.status}). Tente de novo.`)
   }
   return { messages: await listMessages(conversationId) }
 }
@@ -266,14 +276,14 @@ async function saveTrainingFeedbackImpl(input: {
 }): Promise<TrainingFeedbackItem> {
   const { tenantId } = await trainerOrThrow()
   const session = await ownSession(tenantId, input.sessionId)
-  if (!session.conversationId) throw new Error('Sessão sem conversa.')
+  if (!session.conversationId) throw new UserFacingError('Sessão sem conversa.')
   const desired = input.desiredResponse.trim()
-  if (!desired) throw new Error('Escreva como você queria que a IA respondesse.')
-  if (desired.length > 3000) throw new Error('Texto muito longo.')
+  if (!desired) throw new UserFacingError('Escreva como você queria que a IA respondesse.')
+  if (desired.length > 3000) throw new UserFacingError('Texto muito longo.')
 
   const all = await listMessages(session.conversationId)
   const idx = all.findIndex((m) => m.id === input.aiMessageId && m.sender === 'ai')
-  if (idx === -1) throw new Error('Mensagem da IA não encontrada.')
+  if (idx === -1) throw new UserFacingError('Mensagem da IA não encontrada.')
   const customerBefore = [...all.slice(0, idx)].reverse().find((m) => m.sender === 'customer')
 
   const [row] = await withAdmin((tx) =>
@@ -415,8 +425,8 @@ export async function setTrainingFeedbackStatus(id: string, status: 'new' | 'app
 export async function setTrainingFeedbackRule(id: string, ruleText: string | null): Promise<void> {
   await superAdminOrThrow()
   const text = ruleText?.replace(/\s+/g, ' ').trim() ?? ''
-  if (ruleText !== null && !text) throw new Error('Escreva a regra antes de ativar.')
-  if (text.length > 500) throw new Error('A regra pode ter no máximo 500 caracteres.')
+  if (ruleText !== null && !text) throw new UserFacingError('Escreva a regra antes de ativar.')
+  if (text.length > 500) throw new UserFacingError('A regra pode ter no máximo 500 caracteres.')
   await withAdmin((tx) =>
     tx.update(aiTrainingFeedback)
       .set(ruleText === null ? { ruleActive: false } : { ruleText: text, ruleActive: true, status: 'applied' })
