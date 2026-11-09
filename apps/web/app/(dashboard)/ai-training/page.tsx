@@ -15,7 +15,7 @@ export default async function AITrainingPage() {
   if (!claims.tenant_id || (claims.user_role !== 'owner' && claims.user_role !== 'admin')) redirect('/dashboard')
 
   const [tenant] = await withClaims(claims, (tx) =>
-    tx.select({ name: tenants.name }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    tx.select({ name: tenants.name, businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
   )
 
   return (
@@ -24,7 +24,10 @@ export default async function AITrainingPage() {
         <h1 className="text-2xl font-bold">Testar a IA</h1>
         <p className="text-sm text-muted-foreground">Converse como um cliente e diga o que quer que a IA responda diferente.</p>
       </div>
-      <TrainingChat businessName={(tenant?.name ?? 'Sua empresa').trim()} />
+      <TrainingChat
+        businessName={(tenant?.name ?? 'Sua empresa').trim()}
+        businessModel={tenant?.businessModel === 'service' || tenant?.businessModel === 'fashion' ? tenant.businessModel : 'product'}
+      />
     </div>
   )
 }

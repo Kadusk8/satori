@@ -4,9 +4,10 @@ import { revalidatePath } from 'next/cache'
 import { and, asc, desc, eq, inArray, lt } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
 import {
-  aiAgents, aiTrainingFeedback, aiTrainingSessions, contacts, conversations, messages, tenants,
+  aiAgents, aiTrainingFeedback, aiTrainingSessions, contacts, conversations, messages, superAdmins, tenants,
 } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { sendEmail } from '@/lib/email/resend'
 
 const BACKEND_URL = process.env.BACKEND_URL
 const BACKEND_TOKEN = process.env.BACKEND_TOKEN
@@ -57,6 +58,49 @@ function validateCloudinaryAudioUrl(raw: string): string {
     url.pathname.startsWith(`/${cloud}/video/upload/`)
   if (!ok) throw new Error('Áudio inválido.')
   return url.toString()
+}
+
+function esc(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Avisa os super admins quando o cliente encerra um teste com pedidos de mudança ou observações.
+// Nunca derruba o encerramento: falha de e-mail só vai pro log.
+async function notifyAdminsOfTraining(tenantId: string, sessionId: string, notes: string): Promise<void> {
+  try {
+    const { tenantName, admins, items } = await withAdmin(async (tx) => {
+      const [t] = await tx.select({ name: tenants.name }).from(tenants).where(eq(tenants.id, tenantId)).limit(1)
+      const a = await tx.select({ email: superAdmins.email }).from(superAdmins).where(eq(superAdmins.active, true))
+      const f = await tx.select({
+        customerMessage: aiTrainingFeedback.customerMessage,
+        aiResponse: aiTrainingFeedback.aiResponse,
+        desiredResponse: aiTrainingFeedback.desiredResponse,
+      }).from(aiTrainingFeedback).where(eq(aiTrainingFeedback.sessionId, sessionId)).orderBy(asc(aiTrainingFeedback.createdAt))
+      return { tenantName: t?.name?.trim() ?? 'Empresa', admins: a, items: f }
+    })
+    if (admins.length === 0) return
+    const base = (process.env.ADMIN_APP_URL ?? 'https://admin.satori.ia.br').replace(/\/$/, '')
+    const list = items.map((i) => `
+      <li style="margin-bottom:12px">
+        ${i.customerMessage ? `<div><b>Cliente:</b> ${esc(i.customerMessage)}</div>` : ''}
+        <div><b>IA respondeu:</b> ${esc(i.aiResponse ?? '—')}</div>
+        <div><b>Queria:</b> ${esc(i.desiredResponse)}</div>
+      </li>`).join('')
+    const html = `
+      <p><strong>${esc(tenantName)}</strong> terminou um teste da IA.</p>
+      ${items.length > 0 ? `<p>${items.length} mudança(s) pedida(s):</p><ul>${list}</ul>` : '<p>Nenhuma mudança pontual, só observações.</p>'}
+      ${notes ? `<p><b>Observações gerais:</b><br>${esc(notes).replace(/\n/g, '<br>')}</p>` : ''}
+      <p><a href="${base}/admin/training">Abrir o painel de treinamento</a></p>`
+    for (const admin of admins) {
+      await sendEmail({
+        to: admin.email,
+        subject: `Treinamento da IA — ${tenantName}: ${items.length} mudança(s)`,
+        html,
+      })
+    }
+  } catch (err) {
+    console.error('[ai-training] Falha ao avisar admins por e-mail:', err instanceof Error ? err.message : err)
+  }
 }
 
 async function ownSession(tenantId: string, sessionId: string) {
@@ -222,6 +266,7 @@ export async function finishTrainingSession(input: { sessionId: string; generalN
     return fb.length
   })
   revalidatePath('/admin/training')
+  if (feedbackCount > 0 || notes) await notifyAdminsOfTraining(tenantId, session.id, notes)
   return { feedbackCount }
 }
 
@@ -246,6 +291,8 @@ export interface AdminFeedbackRow {
   aiResponse: string | null
   desiredResponse: string
   status: 'new' | 'applied' | 'dismissed'
+  ruleText: string | null
+  ruleActive: boolean
   createdAt: string
   sessionId: string
 }
@@ -270,6 +317,8 @@ export async function listTrainingForAdmin(): Promise<{ feedback: AdminFeedbackR
       aiResponse: aiTrainingFeedback.aiResponse,
       desiredResponse: aiTrainingFeedback.desiredResponse,
       status: aiTrainingFeedback.status,
+      ruleText: aiTrainingFeedback.ruleText,
+      ruleActive: aiTrainingFeedback.ruleActive,
       createdAt: aiTrainingFeedback.createdAt,
       sessionId: aiTrainingFeedback.sessionId,
     }).from(aiTrainingFeedback)
@@ -316,5 +365,19 @@ export async function getTrainingTranscript(sessionId: string): Promise<Training
 export async function setTrainingFeedbackStatus(id: string, status: 'new' | 'applied' | 'dismissed'): Promise<void> {
   await superAdminOrThrow()
   await withAdmin((tx) => tx.update(aiTrainingFeedback).set({ status }).where(eq(aiTrainingFeedback.id, id)))
+  revalidatePath('/admin/training')
+}
+
+// Ativa (texto) ou desativa (null) a regra que entra no prompt da IA do tenant do pedido.
+export async function setTrainingFeedbackRule(id: string, ruleText: string | null): Promise<void> {
+  await superAdminOrThrow()
+  const text = ruleText?.replace(/\s+/g, ' ').trim() ?? ''
+  if (ruleText !== null && !text) throw new Error('Escreva a regra antes de ativar.')
+  if (text.length > 500) throw new Error('A regra pode ter no máximo 500 caracteres.')
+  await withAdmin((tx) =>
+    tx.update(aiTrainingFeedback)
+      .set(ruleText === null ? { ruleActive: false } : { ruleText: text, ruleActive: true, status: 'applied' })
+      .where(eq(aiTrainingFeedback.id, id))
+  )
   revalidatePath('/admin/training')
 }

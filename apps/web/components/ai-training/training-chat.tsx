@@ -38,13 +38,20 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
+const SCENARIOS: Record<'product' | 'fashion' | 'service', string[]> = {
+  product: ['Quanto custa?', 'Tem desconto?', 'Vocês entregam?', 'Qual o horário de funcionamento?', 'Quero falar com um atendente'],
+  fashion: ['Quanto custa?', 'Tem esse em outro tamanho?', 'Tem desconto?', 'Vocês trocam se não servir?', 'Quero falar com um atendente'],
+  service: ['Quais serviços vocês fazem?', 'Quanto custa?', 'Quero agendar um horário', 'Qual o horário de funcionamento?', 'Quero falar com um atendente'],
+}
+
 interface TrainingChatProps {
   businessName: string
+  businessModel: 'product' | 'fashion' | 'service'
 }
 
 type Phase = 'intro' | 'chat' | 'done'
 
-export function TrainingChat({ businessName }: TrainingChatProps) {
+export function TrainingChat({ businessName, businessModel }: TrainingChatProps) {
   const [phase, setPhase] = useState<Phase>('intro')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [msgs, setMsgs] = useState<TrainingMessage[]>([])
@@ -110,10 +117,10 @@ export function TrainingChat({ businessName }: TrainingChatProps) {
     }
   }, [sessionId])
 
-  const sendText = async () => {
-    const value = text.trim()
+  const sendText = async (override?: string) => {
+    const value = (override ?? text).trim()
     if (!value || busy) return
-    setText('')
+    if (override === undefined) setText('')
     await deliver({ text: value }, {
       id: `tmp-${Date.now()}`, sender: 'customer', content: value, contentType: 'text', mediaUrl: null, createdAt: new Date().toISOString(),
     })
@@ -249,9 +256,27 @@ export function TrainingChat({ businessName }: TrainingChatProps) {
       {/* Mensagens */}
       <div className="flex-1 space-y-2 overflow-y-auto bg-[#ECE5DD] p-3">
         {msgs.length === 0 && (
-          <p className="mx-auto mt-4 max-w-[80%] rounded-lg bg-[#FFF3C4] px-3 py-2 text-center text-xs text-[#54450f]">
-            Escreva ou grave um áudio como um cliente. Em qualquer resposta da IA, toque em “Quero mudar esta resposta”.
-          </p>
+          <div className="mt-2 space-y-3">
+            <p className="mx-auto max-w-[85%] rounded-lg bg-[#FFF3C4] px-3 py-2 text-center text-xs text-[#54450f]">
+              Escreva ou grave um áudio como um cliente. Em qualquer resposta da IA, toque em “Quero mudar esta resposta”.
+            </p>
+            <div className="text-center">
+              <p className="mb-1.5 text-[11px] text-muted-foreground">Ou toque em uma pergunta comum para começar:</p>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                {SCENARIOS[businessModel].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void sendText(q)}
+                    className="rounded-full border border-[#075E54]/30 bg-white px-3 py-1 text-xs text-[#075E54] shadow-sm hover:bg-[#DCF8C6] disabled:opacity-50"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
         {msgs.map((m) => {
           const mine = m.sender === 'customer'

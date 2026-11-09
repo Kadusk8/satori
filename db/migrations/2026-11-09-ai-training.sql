@@ -30,11 +30,15 @@ CREATE TABLE IF NOT EXISTS ai_training_feedback (
   ai_response      TEXT,
   desired_response TEXT NOT NULL,
   status           TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','applied','dismissed')),
+  -- Regra ativa: o texto (editado pelo admin) entra no prompt da IA desse tenant.
+  rule_text        TEXT,
+  rule_active      BOOLEAN NOT NULL DEFAULT false,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_training_feedback_tenant ON ai_training_feedback (tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_training_feedback_session ON ai_training_feedback (session_id);
+CREATE INDEX IF NOT EXISTS idx_ai_training_feedback_rules ON ai_training_feedback (tenant_id) WHERE rule_active;
 
 ALTER TABLE ai_training_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_training_feedback ENABLE ROW LEVEL SECURITY;

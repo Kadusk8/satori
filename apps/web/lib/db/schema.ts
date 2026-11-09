@@ -643,5 +643,7 @@ export const aiTrainingFeedback = pgTable('ai_training_feedback', {
   aiResponse: text('ai_response'),
   desiredResponse: text('desired_response').notNull(),
   status: text('status').notNull().default('new'),
+  ruleText: text('rule_text'),
+  ruleActive: boolean('rule_active').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

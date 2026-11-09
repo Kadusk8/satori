@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   getTrainingTranscript,
+  setTrainingFeedbackRule,
   setTrainingFeedbackStatus,
   type AdminFeedbackRow,
   type AdminSessionRow,
@@ -23,6 +24,8 @@ export function TrainingAdminView({ feedback, sessions }: { feedback: AdminFeedb
   const [, startTransition] = useTransition()
   const [openSession, setOpenSession] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TrainingMessage[]>([])
+  const [ruleFor, setRuleFor] = useState<string | null>(null)
+  const [ruleDraft, setRuleDraft] = useState('')
 
   const shown = feedback.filter((f) => filter === 'all' || f.status === 'new')
 
@@ -33,6 +36,23 @@ export function TrainingAdminView({ feedback, sessions }: { feedback: AdminFeedb
         router.refresh()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Erro ao atualizar.')
+      }
+    })
+
+  const suggestRule = (f: AdminFeedbackRow) =>
+    f.customerMessage
+      ? `Quando o cliente disser algo como "${f.customerMessage}", responda no estilo: "${f.desiredResponse}"`
+      : `Em situações como esta, responda no estilo: "${f.desiredResponse}"`
+
+  const saveRule = (id: string, text: string | null) =>
+    startTransition(async () => {
+      try {
+        await setTrainingFeedbackRule(id, text)
+        setRuleFor(null)
+        toast.success(text === null ? 'Regra desativada.' : 'Regra ativada: a IA já usa nas próximas conversas.')
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Erro ao salvar a regra.')
       }
     })
 
@@ -71,7 +91,36 @@ export function TrainingAdminView({ feedback, sessions }: { feedback: AdminFeedb
               {f.customerMessage && <p><span className="text-muted-foreground">Cliente disse:</span> {f.customerMessage}</p>}
               <p><span className="text-muted-foreground">IA respondeu:</span> {f.aiResponse ?? '—'}</p>
               <p className="rounded-md bg-emerald-500/10 p-2"><span className="text-muted-foreground">Queria:</span> <b>{f.desiredResponse}</b></p>
-              <div className="flex gap-2 pt-1">
+              {f.ruleActive && f.ruleText && (
+                <p className="rounded-md border border-emerald-500/40 p-2 text-xs">
+                  <b className="text-emerald-700">Regra ativa na IA:</b> {f.ruleText}
+                </p>
+              )}
+              {ruleFor === f.id && (
+                <div className="space-y-2 rounded-md border p-2">
+                  <p className="text-xs text-muted-foreground">Esta instrução entra no prompt da IA de {f.tenantName}. Ajuste o texto se precisar (máx. 500 caracteres).</p>
+                  <textarea
+                    value={ruleDraft}
+                    onChange={(e) => setRuleDraft(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    className="w-full rounded-md border p-2 text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => saveRule(f.id, ruleDraft)} disabled={!ruleDraft.trim()}>Ativar regra</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRuleFor(null)}>Cancelar</Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {!f.ruleActive ? (
+                  <Button size="sm" onClick={() => { setRuleFor(f.id); setRuleDraft(f.ruleText ?? suggestRule(f)) }}>Ativar como regra na IA</Button>
+                ) : (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => { setRuleFor(f.id); setRuleDraft(f.ruleText ?? '') }}>Editar regra</Button>
+                    <Button size="sm" variant="outline" onClick={() => saveRule(f.id, null)}>Desativar regra</Button>
+                  </>
+                )}
                 {f.status !== 'applied' && <Button size="sm" onClick={() => mark(f.id, 'applied')}>Marcar como aplicado</Button>}
                 {f.status !== 'dismissed' && <Button size="sm" variant="outline" onClick={() => mark(f.id, 'dismissed')}>Descartar</Button>}
                 {f.status !== 'new' && <Button size="sm" variant="ghost" onClick={() => mark(f.id, 'new')}>Reabrir</Button>}

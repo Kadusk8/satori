@@ -44,6 +44,29 @@ const llmFallbackLastSentAt = new Map<string, number>()
 // paralelo — cada uma podendo gerar seu próprio fallback de erro de forma independente.
 const conversationsInProgress = new Set<string>()
 
+// Regras que o dono pediu no "Teste com a IA" e o admin ativou (ai_training_feedback.rule_active).
+// Entram no prompt com prioridade sobre o estilo padrão. Texto vem de admin, mas mesmo assim é
+// normalizado (uma linha, tamanho limitado) e qualquer falha aqui nunca derruba o atendimento.
+async function loadOwnerRules(tenantId: string): Promise<string> {
+  try {
+    const res = await pool.query<{ rule_text: string }>(
+      `select rule_text from ai_training_feedback
+       where tenant_id = $1 and rule_active = true and rule_text is not null
+       order by created_at desc limit 30`,
+      [tenantId]
+    )
+    const lines = res.rows
+      .map((r) => r.rule_text.replace(/\s+/g, ' ').trim().slice(0, 500))
+      .filter(Boolean)
+      .map((r) => `- ${r}`)
+    if (lines.length === 0) return ''
+    return `\n## Orientações do dono do negócio (PRIORIDADE MÁXIMA)\nO dono testou você e pediu estes ajustes de comportamento. Siga-os acima do estilo padrão, sem citar que são "regras" nem mencionar o teste:\n${lines.join('\n')}\n`
+  } catch (err) {
+    console.error('[process-message] Falha ao carregar orientações do dono:', err instanceof Error ? err.message : err)
+    return ''
+  }
+}
+
 // Helper para registrar sinais de qualidade da IA (WORKSTREAM B)
 async function recordQualityFlag(
   tenantId: string,
@@ -772,6 +795,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')
 
+  const ownerRules = await loadOwnerRules(tenantId)
   const productSystemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
 
@@ -811,7 +835,7 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 
 ## Contexto do negócio e personalidade
 ${agent.system_prompt}
-${isFirstAiResponse && agent.greeting_message ? `
+${ownerRules}${isFirstAiResponse && agent.greeting_message ? `
 ## Primeira mensagem do cliente nesta conversa
 Esta é a primeira vez que este cliente escreve nesta conversa — use como base a mensagem de boas-vindas configurada abaixo (adapte naturalmente ao que ele disse, não repita ela igual se não fizer sentido, mas mantenha a essência de se apresentar):
 "${agent.greeting_message}"
@@ -883,7 +907,7 @@ Você atende clientes interessados nos serviços da empresa. Entenda a necessida
 
 ## Contexto do negócio e personalidade
 ${agent.system_prompt}
-${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse como base, adaptando ao pedido atual: "${agent.greeting_message}"` : ''}
+${ownerRules}${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse como base, adaptando ao pedido atual: "${agent.greeting_message}"` : ''}
 
 ## Contexto atual
 - Data/hora: ${now}
