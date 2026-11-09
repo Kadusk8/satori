@@ -136,7 +136,10 @@ async function dropSandbox(tx: Parameters<Parameters<typeof withAdmin>[0]>[0], c
   if (!conversationId) return
   const [conv] = await tx.select({ contactId: conversations.contactId }).from(conversations)
     .where(and(eq(conversations.id, conversationId), eq(conversations.isSandbox, true))).limit(1)
-  if (conv) await tx.delete(contacts).where(and(eq(contacts.id, conv.contactId), eq(contacts.isSandbox, true)))
+  if (!conv) return
+  // messages.contact_id não tem cascata: apaga as mensagens da conversa de teste antes do contato.
+  await tx.delete(messages).where(eq(messages.conversationId, conversationId))
+  await tx.delete(contacts).where(and(eq(contacts.id, conv.contactId), eq(contacts.isSandbox, true)))
 }
 
 export async function startTrainingSession(): Promise<{ sessionId: string; messages: TrainingMessage[] }> {
