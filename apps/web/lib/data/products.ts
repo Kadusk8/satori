@@ -108,13 +108,13 @@ function toRow(p: typeof products.$inferSelect, variants: ProductVariantInput[] 
   }
 }
 
-export async function getCatalogContext(): Promise<{ businessModel: 'product' | 'fashion' | 'service' }> {
+export async function getCatalogContext(): Promise<{ businessModel: 'product' | 'fashion' | 'service'; priceTypes: boolean }> {
   const claims = await claimsOrThrow()
   if (!claims.tenant_id) throw new Error('Tenant não identificado.')
   return withClaims(claims, async (tx) => {
-    const [tenant] = await tx.select({ businessModel: tenants.businessModel }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
+    const [tenant] = await tx.select({ businessModel: tenants.businessModel, priceTypes: tenants.priceTypesEnabled }).from(tenants).where(eq(tenants.id, claims.tenant_id!)).limit(1)
     const model = tenant?.businessModel
-    return { businessModel: model === 'service' || model === 'fashion' ? model : 'product' }
+    return { businessModel: model === 'service' || model === 'fashion' ? model : 'product', priceTypes: tenant?.priceTypes === true && model !== 'service' }
   })
 }
 
@@ -174,7 +174,7 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
       throw new Error('Não repita combinações de tamanho/cor nem códigos SKU.')
     }
   }
-  const normalizedTiers = [...input.priceTiers]
+  const normalizedTiers = [...(context.priceTypes ? [] : input.priceTiers)]
     .map((tier) => ({ label: tier.label.trim(), minQuantity: Number(tier.minQuantity), unitPrice: Number(tier.unitPrice) }))
     .sort((a, b) => a.minQuantity - b.minQuantity)
   if (normalizedTiers.some((tier) => !tier.label || !Number.isInteger(tier.minQuantity) || tier.minQuantity < 1 || !Number.isFinite(tier.unitPrice) || tier.unitPrice < 0)) {
@@ -195,8 +195,8 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     brand: context.businessModel === 'fashion' ? input.brand : null,
     audience: context.businessModel === 'fashion' ? input.audience : null,
     promotionalPrice: context.businessModel === 'fashion' && input.promotionalPrice !== null ? String(input.promotionalPrice) : null,
-    priceWholesale: context.businessModel === 'fashion' && input.priceWholesale !== null ? String(input.priceWholesale) : null,
-    priceReseller: context.businessModel === 'fashion' && input.priceReseller !== null ? String(input.priceReseller) : null,
+    priceWholesale: context.priceTypes && input.priceWholesale !== null ? String(input.priceWholesale) : null,
+    priceReseller: context.priceTypes && input.priceReseller !== null ? String(input.priceReseller) : null,
     tags: input.tags,
     characteristics: input.characteristics,
     priceTiers: normalizedTiers,

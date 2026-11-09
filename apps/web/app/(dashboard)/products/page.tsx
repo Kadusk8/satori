@@ -79,6 +79,7 @@ type FilterStatus = 'all' | 'available' | 'unavailable' | 'featured' | 'running_
 
 export default function ProductsPage() {
   const [businessModel, setBusinessModel] = useState<'product' | 'fashion' | 'service'>('product')
+  const [priceTypes, setPriceTypes] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [registeredCategories, setRegisteredCategories] = useState<string[]>([])
@@ -109,7 +110,7 @@ export default function ProductsPage() {
     loadProducts().finally(() => setIsLoading(false))
   }, [loadProducts])
 
-  useEffect(() => { getCatalogContext().then((ctx) => setBusinessModel(ctx.businessModel)).catch(() => {}) }, [])
+  useEffect(() => { getCatalogContext().then((ctx) => { setBusinessModel(ctx.businessModel); setPriceTypes(ctx.priceTypes) }).catch(() => {}) }, [])
 
   useEffect(() => {
     listProductCategories()
@@ -435,6 +436,7 @@ export default function ProductsPage() {
           uploadPreset={CLOUDINARY_UPLOAD_PRESET}
           categories={registeredCategories}
         businessModel={businessModel}
+        priceTypes={priceTypes}
           onSave={handleSave}
           onClose={() => setShowForm(false)}
         />

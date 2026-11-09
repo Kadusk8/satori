@@ -52,6 +52,7 @@ export const tenants = pgTable(
 
     businessSegment: text('business_segment'),
     businessModel: text('business_model').notNull().default('product'),
+    priceTypesEnabled: boolean('price_types_enabled').notNull().default(false),
     businessDescription: text('business_description'),
     ownerName: text('owner_name'),
     ownerEmail: text('owner_email'),

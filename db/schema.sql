@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS tenants (
 
   business_segment     TEXT CHECK (business_segment IN ('clinica','loja','servicos','restaurante','outro')),
   business_model       TEXT NOT NULL DEFAULT 'product' CHECK (business_model IN ('product','fashion','service')),
+  -- Liga os preços Varejo/Atacado/Revenda no cadastro de produtos do tenant.
+  price_types_enabled  BOOLEAN NOT NULL DEFAULT false,
   business_description TEXT,
   owner_name           TEXT,
   owner_email          TEXT,

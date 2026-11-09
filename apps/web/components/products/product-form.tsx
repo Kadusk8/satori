@@ -62,6 +62,7 @@ interface ProductFormProps {
   uploadPreset: string
   categories: string[]
   businessModel: 'product' | 'fashion' | 'service'
+  priceTypes: boolean
   onSave: (data: Omit<Product, 'id'> & { id?: string }) => Promise<void>
   onClose: () => void
 }
@@ -72,6 +73,7 @@ export function ProductForm({
   uploadPreset,
   categories,
   businessModel,
+  priceTypes,
   onSave,
   onClose,
 }: ProductFormProps) {
@@ -162,14 +164,14 @@ export function ProductForm({
         brand: businessModel === 'fashion' ? data.brand ?? null : null,
         audience: businessModel === 'fashion' ? data.audience ?? null : null,
         promotionalPrice: businessModel === 'fashion' && data.promotionalPrice ? parseBRLPrice(data.promotionalPrice) : null,
-        priceWholesale: businessModel === 'fashion' && data.priceWholesale ? parseBRLPrice(data.priceWholesale) : null,
-        priceReseller: businessModel === 'fashion' && data.priceReseller ? parseBRLPrice(data.priceReseller) : null,
+        priceWholesale: priceTypes && data.priceWholesale ? parseBRLPrice(data.priceWholesale) : null,
+        priceReseller: priceTypes && data.priceReseller ? parseBRLPrice(data.priceReseller) : null,
         variants: businessModel === 'fashion' ? variants : [],
         tags: data.tags
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
         characteristics,
-        priceTiers: businessModel === 'product' ? priceTiers : [],
+        priceTiers: priceTypes ? [] : priceTiers,
         images: images.map((img) => ({
           url: img.url,
           thumbnailUrl: img.thumbnailUrl,
@@ -306,9 +308,9 @@ export function ProductForm({
           </div>
 
           {/* Preço */}
-          <div className={businessModel === 'fashion' ? 'grid grid-cols-1 sm:grid-cols-3 gap-4' : 'grid grid-cols-2 gap-4'}>
+          <div className={priceTypes ? 'grid grid-cols-1 sm:grid-cols-3 gap-4' : 'grid grid-cols-2 gap-4'}>
             <div>
-              <label className="block text-sm font-medium mb-1.5">{businessModel === 'fashion' ? 'Preço Varejo (R$)' : 'Preço (R$)'}</label>
+              <label className="block text-sm font-medium mb-1.5">{priceTypes ? 'Preço Varejo (R$)' : 'Preço (R$)'}</label>
               <Input
                 {...register('price')}
                 placeholder="57.900,00"
@@ -316,7 +318,7 @@ export function ProductForm({
                 inputMode="decimal"
               />
             </div>
-            {businessModel === 'fashion' && (
+            {priceTypes && (
               <>
                 <div>
                   <label className="block text-sm font-medium mb-1.5">Preço Atacado (R$)</label>
@@ -328,7 +330,7 @@ export function ProductForm({
                 </div>
               </>
             )}
-            {businessModel !== 'fashion' && <div>
+            {!priceTypes && <div>
               <label className="block text-sm font-medium mb-1.5">
                 Exibição do preço{' '}
                 <span className="text-muted-foreground font-normal">(sobrescreve)</span>
@@ -340,7 +342,7 @@ export function ProductForm({
             </div>}
           </div>
 
-          {businessModel === 'product' && (
+          {businessModel !== 'service' && !priceTypes && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div>
