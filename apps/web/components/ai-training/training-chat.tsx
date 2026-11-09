@@ -92,6 +92,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
     setStarting(true)
     try {
       const res = await startTrainingSession()
+      if ('error' in res) { toast.error(res.error); return }
       setSessionId(res.sessionId)
       setMsgs(res.messages)
       setFeedback([])
@@ -109,6 +110,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
     setBusy(true)
     try {
       const res = await sendTrainingMessage({ sessionId, ...payload })
+      if ('error' in res) { toast.error(res.error); return }
       setMsgs(res.messages)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao falar com a IA.')
@@ -173,6 +175,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
     setSavingFeedback(true)
     try {
       const item = await saveTrainingFeedback({ sessionId, aiMessageId, desiredResponse: feedbackText })
+      if ('error' in item) { toast.error(item.error); return }
       setFeedback((prev) => [...prev, item])
       setFeedbackFor(null)
       setFeedbackText('')
@@ -189,6 +192,7 @@ export function TrainingChat({ businessName, businessModel }: TrainingChatProps)
     setFinishing(true)
     try {
       const res = await finishTrainingSession({ sessionId, generalNotes: notes })
+      if ('error' in res) { toast.error(res.error); return }
       setDoneCount(res.feedbackCount)
       setFinishOpen(false)
       setPhase('done')

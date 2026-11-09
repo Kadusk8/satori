@@ -9,8 +9,10 @@ import {
 import { getDbClaims } from '@/lib/auth/session'
 import { sendEmail } from '@/lib/email/resend'
 
-const BACKEND_URL = process.env.BACKEND_URL
-const BACKEND_TOKEN = process.env.BACKEND_TOKEN
+// No Coolify o valor às vezes é salvo com aspas literais ('https://...'): limpa antes de usar.
+const cleanEnv = (v: string | undefined) => v?.trim().replace(/^['"]+|['"]+$/g, '').trim() || undefined
+const BACKEND_URL = cleanEnv(process.env.BACKEND_URL)?.replace(/\/$/, '')
+const BACKEND_TOKEN = cleanEnv(process.env.BACKEND_TOKEN)
 const STALE_SESSION_MS = 2 * 60 * 60 * 1000
 
 export interface TrainingMessage {
@@ -58,6 +60,20 @@ function validateCloudinaryAudioUrl(raw: string): string {
     url.pathname.startsWith(`/${cloud}/video/upload/`)
   if (!ok) throw new Error('Áudio inválido.')
   return url.toString()
+}
+
+export type ActionError = { error: string }
+
+// Em produção o Next esconde a mensagem de qualquer erro lançado numa server action. Pra o dono
+// ver o motivo real (ex: "A IA não conseguiu responder agora"), as ações do teste devolvem o erro
+// como dado em vez de lançar.
+async function guard<T>(label: string, fn: () => Promise<T>): Promise<T | ActionError> {
+  try {
+    return await fn()
+  } catch (err) {
+    console.error(`[ai-training] ${label}:`, err instanceof Error ? err.stack ?? err.message : err)
+    return { error: err instanceof Error ? err.message : 'Erro inesperado.' }
+  }
 }
 
 function esc(v: string): string {
@@ -142,7 +158,11 @@ async function dropSandbox(tx: Parameters<Parameters<typeof withAdmin>[0]>[0], c
   await tx.delete(contacts).where(and(eq(contacts.id, conv.contactId), eq(contacts.isSandbox, true)))
 }
 
-export async function startTrainingSession(): Promise<{ sessionId: string; messages: TrainingMessage[] }> {
+export async function startTrainingSession(): Promise<{ sessionId: string; messages: TrainingMessage[] } | ActionError> {
+  return guard('start', () => startTrainingSessionImpl())
+}
+
+async function startTrainingSessionImpl(): Promise<{ sessionId: string; messages: TrainingMessage[] }> {
   const { tenantId, userId } = await trainerOrThrow()
 
   const sessionId = await withAdmin(async (tx) => {
@@ -179,6 +199,14 @@ export async function startTrainingSession(): Promise<{ sessionId: string; messa
 }
 
 export async function sendTrainingMessage(input: {
+  sessionId: string
+  text?: string
+  audioUrl?: string
+}): Promise<{ messages: TrainingMessage[] } | ActionError> {
+  return guard('send', () => sendTrainingMessageImpl(input))
+}
+
+async function sendTrainingMessageImpl(input: {
   sessionId: string
   text?: string
   audioUrl?: string
@@ -227,6 +255,14 @@ export async function saveTrainingFeedback(input: {
   sessionId: string
   aiMessageId: string
   desiredResponse: string
+}): Promise<TrainingFeedbackItem | ActionError> {
+  return guard('feedback', () => saveTrainingFeedbackImpl(input))
+}
+
+async function saveTrainingFeedbackImpl(input: {
+  sessionId: string
+  aiMessageId: string
+  desiredResponse: string
 }): Promise<TrainingFeedbackItem> {
   const { tenantId } = await trainerOrThrow()
   const session = await ownSession(tenantId, input.sessionId)
@@ -252,7 +288,11 @@ export async function saveTrainingFeedback(input: {
   return { id: row.id, customerMessage: row.customerMessage, aiResponse: row.aiResponse, desiredResponse: row.desiredResponse, createdAt: row.createdAt.toISOString() }
 }
 
-export async function finishTrainingSession(input: { sessionId: string; generalNotes: string }): Promise<{ feedbackCount: number }> {
+export async function finishTrainingSession(input: { sessionId: string; generalNotes: string }): Promise<{ feedbackCount: number } | ActionError> {
+  return guard('finish', () => finishTrainingSessionImpl(input))
+}
+
+async function finishTrainingSessionImpl(input: { sessionId: string; generalNotes: string }): Promise<{ feedbackCount: number }> {
   const { tenantId } = await trainerOrThrow()
   const session = await ownSession(tenantId, input.sessionId)
   if (session.status !== 'active') return { feedbackCount: 0 }
