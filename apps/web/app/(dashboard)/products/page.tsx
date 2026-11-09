@@ -31,6 +31,8 @@ interface DBProduct {
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
   promotional_price: number | null
+  price_wholesale: number | null
+  price_reseller: number | null
   variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
@@ -57,6 +59,8 @@ function mapProduct(row: DBProduct): Product {
     brand: row.brand,
     audience: row.audience,
     promotionalPrice: row.promotional_price,
+    priceWholesale: row.price_wholesale,
+    priceReseller: row.price_reseller,
     variants: row.variants ?? [],
     tags: row.tags ?? [],
     characteristics: row.characteristics ?? [],
@@ -159,6 +163,8 @@ export default function ProductsPage() {
         brand: data.brand,
         audience: data.audience,
         promotionalPrice: data.promotionalPrice,
+        priceWholesale: data.priceWholesale,
+        priceReseller: data.priceReseller,
         variants: data.variants,
         tags: data.tags,
         characteristics: data.characteristics,

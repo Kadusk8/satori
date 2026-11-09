@@ -23,6 +23,8 @@ const schema = z.object({
   brand: z.string().optional(),
   audience: z.enum(['female', 'male', 'kids', 'unisex']).optional(),
   promotionalPrice: z.string().optional(),
+  priceWholesale: z.string().optional(),
+  priceReseller: z.string().optional(),
   tags: z.string().optional(), // CSV
   isAvailable: z.boolean(),
   isFeatured: z.boolean(),
@@ -134,6 +136,8 @@ export function ProductForm({
       brand: product?.brand ?? '',
       audience: product?.audience ?? undefined,
       promotionalPrice: product?.promotionalPrice != null ? String(product.promotionalPrice) : '',
+      priceWholesale: product?.priceWholesale != null ? String(product.priceWholesale) : '',
+      priceReseller: product?.priceReseller != null ? String(product.priceReseller) : '',
       tags: product?.tags.join(', ') ?? '',
       isAvailable: product?.isAvailable ?? true,
       isFeatured: product?.isFeatured ?? false,
@@ -158,6 +162,8 @@ export function ProductForm({
         brand: businessModel === 'fashion' ? data.brand ?? null : null,
         audience: businessModel === 'fashion' ? data.audience ?? null : null,
         promotionalPrice: businessModel === 'fashion' && data.promotionalPrice ? parseBRLPrice(data.promotionalPrice) : null,
+        priceWholesale: businessModel === 'fashion' && data.priceWholesale ? parseBRLPrice(data.priceWholesale) : null,
+        priceReseller: businessModel === 'fashion' && data.priceReseller ? parseBRLPrice(data.priceReseller) : null,
         variants: businessModel === 'fashion' ? variants : [],
         tags: data.tags
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
@@ -302,7 +308,7 @@ export function ProductForm({
           {/* Preço */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1.5">Preço (R$)</label>
+              <label className="block text-sm font-medium mb-1.5">{businessModel === 'fashion' ? 'Preço Varejo (R$)' : 'Preço (R$)'}</label>
               <Input
                 {...register('price')}
                 placeholder="57.900,00"
@@ -321,6 +327,19 @@ export function ProductForm({
               />
             </div>
           </div>
+
+          {businessModel === 'fashion' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Preço Atacado (R$)</label>
+                <Input {...register('priceWholesale')} placeholder="49,90" type="text" inputMode="decimal" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Preço Revenda (R$)</label>
+                <Input {...register('priceReseller')} placeholder="39,90" type="text" inputMode="decimal" />
+              </div>
+            </div>
+          )}
 
           {businessModel !== 'service' && (
             <div className="space-y-2">

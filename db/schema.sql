@@ -805,6 +805,9 @@ CREATE TABLE IF NOT EXISTS products (
   -- produto certo mesmo quando isso não está na descrição.
   characteristics   TEXT[] NOT NULL DEFAULT '{}',
   price_tiers       JSONB NOT NULL DEFAULT '[]',
+  -- Tipos de preço (só modo fashion): Varejo = coluna price; Atacado e Revenda abaixo.
+  price_wholesale   NUMERIC(12,2) CHECK (price_wholesale IS NULL OR price_wholesale >= 0),
+  price_reseller    NUMERIC(12,2) CHECK (price_reseller IS NULL OR price_reseller >= 0),
 
   images JSONB NOT NULL DEFAULT '[]',
 

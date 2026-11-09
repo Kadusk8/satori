@@ -17,6 +17,8 @@ export interface Product {
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
   promotionalPrice: number | null
+  priceWholesale: number | null
+  priceReseller: number | null
   variants: Array<{ id?: string; size: string; color: string; sku: string; stock: number }>
   tags: string[]
   characteristics: string[]
@@ -153,6 +155,15 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
               </span>
             ))}
           </div>
+        )}
+
+        {(product.priceWholesale !== null || product.priceReseller !== null) && (
+          <p className="text-[11px] text-muted-foreground">
+            {[
+              product.priceWholesale !== null ? `Atacado: ${formatPrice(product.priceWholesale, null)}` : null,
+              product.priceReseller !== null ? `Revenda: ${formatPrice(product.priceReseller, null)}` : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
         )}
 
         {product.priceTiers.length > 0 && (

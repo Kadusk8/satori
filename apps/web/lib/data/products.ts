@@ -19,6 +19,8 @@ export interface DBProductRow {
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
   promotional_price: number | null
+  price_wholesale: number | null
+  price_reseller: number | null
   variants: ProductVariantInput[]
   tags: string[]
   characteristics: string[]
@@ -58,6 +60,8 @@ export interface ProductInput {
   brand: string | null
   audience: 'female' | 'male' | 'kids' | 'unisex' | null
   promotionalPrice: number | null
+  priceWholesale: number | null
+  priceReseller: number | null
   variants: ProductVariantInput[]
   tags: string[]
   characteristics: string[]
@@ -89,6 +93,8 @@ function toRow(p: typeof products.$inferSelect, variants: ProductVariantInput[] 
     brand: p.brand,
     audience: p.audience as DBProductRow['audience'],
     promotional_price: p.promotionalPrice === null ? null : Number(p.promotionalPrice),
+    price_wholesale: p.priceWholesale === null ? null : Number(p.priceWholesale),
+    price_reseller: p.priceReseller === null ? null : Number(p.priceReseller),
     variants,
     tags: p.tags ?? [],
     characteristics: p.characteristics ?? [],
@@ -189,6 +195,8 @@ export async function saveProduct(input: ProductInput): Promise<{ id: string }> 
     brand: context.businessModel === 'fashion' ? input.brand : null,
     audience: context.businessModel === 'fashion' ? input.audience : null,
     promotionalPrice: context.businessModel === 'fashion' && input.promotionalPrice !== null ? String(input.promotionalPrice) : null,
+    priceWholesale: context.businessModel === 'fashion' && input.priceWholesale !== null ? String(input.priceWholesale) : null,
+    priceReseller: context.businessModel === 'fashion' && input.priceReseller !== null ? String(input.priceReseller) : null,
     tags: input.tags,
     characteristics: input.characteristics,
     priceTiers: normalizedTiers,

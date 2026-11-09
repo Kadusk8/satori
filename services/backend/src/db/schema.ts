@@ -146,6 +146,8 @@ export const products = pgTable('products', {
   audience: text('audience'),
   promotionalPrice: numeric('promotional_price'),
   priceTiers: jsonb('price_tiers').notNull().default([]),
+  priceWholesale: numeric('price_wholesale'),
+  priceReseller: numeric('price_reseller'),
   tags: text('tags').array().notNull().default([]),
   images: jsonb('images').notNull(),
   characteristics: text('characteristics').array().notNull().default([]),

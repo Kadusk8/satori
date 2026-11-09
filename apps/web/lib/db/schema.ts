@@ -399,6 +399,8 @@ export const products = pgTable(
     tags: text('tags').array().notNull().default([]),
     characteristics: text('characteristics').array().notNull().default([]),
     priceTiers: jsonb('price_tiers').notNull().default([]),
+    priceWholesale: numeric('price_wholesale'),
+    priceReseller: numeric('price_reseller'),
     images: jsonb('images').notNull().default([]),
     isAvailable: boolean('is_available').notNull().default(true),
     isFeatured: boolean('is_featured').notNull().default(false),
