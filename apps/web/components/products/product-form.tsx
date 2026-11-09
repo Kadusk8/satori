@@ -169,7 +169,7 @@ export function ProductForm({
           ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
         characteristics,
-        priceTiers,
+        priceTiers: businessModel === 'product' ? priceTiers : [],
         images: images.map((img) => ({
           url: img.url,
           thumbnailUrl: img.thumbnailUrl,
@@ -306,7 +306,7 @@ export function ProductForm({
           </div>
 
           {/* Preço */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className={businessModel === 'fashion' ? 'grid grid-cols-1 sm:grid-cols-3 gap-4' : 'grid grid-cols-2 gap-4'}>
             <div>
               <label className="block text-sm font-medium mb-1.5">{businessModel === 'fashion' ? 'Preço Varejo (R$)' : 'Preço (R$)'}</label>
               <Input
@@ -316,7 +316,19 @@ export function ProductForm({
                 inputMode="decimal"
               />
             </div>
-            <div>
+            {businessModel === 'fashion' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Preço Atacado (R$)</label>
+                  <Input {...register('priceWholesale')} placeholder="49,90" type="text" inputMode="decimal" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Preço Revenda (R$)</label>
+                  <Input {...register('priceReseller')} placeholder="39,90" type="text" inputMode="decimal" />
+                </div>
+              </>
+            )}
+            {businessModel !== 'fashion' && <div>
               <label className="block text-sm font-medium mb-1.5">
                 Exibição do preço{' '}
                 <span className="text-muted-foreground font-normal">(sobrescreve)</span>
@@ -325,23 +337,10 @@ export function ProductForm({
                 {...register('priceDisplay')}
                 placeholder="A partir de R$ 99,90"
               />
-            </div>
+            </div>}
           </div>
 
-          {businessModel === 'fashion' && (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Preço Atacado (R$)</label>
-                <Input {...register('priceWholesale')} placeholder="49,90" type="text" inputMode="decimal" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Preço Revenda (R$)</label>
-                <Input {...register('priceReseller')} placeholder="39,90" type="text" inputMode="decimal" />
-              </div>
-            </div>
-          )}
-
-          {businessModel !== 'service' && (
+          {businessModel === 'product' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div>
