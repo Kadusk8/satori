@@ -388,6 +388,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   id               UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id        UUID    NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   whatsapp_number  TEXT    NOT NULL,
+  -- Contato da conversa de teste ("Teste com a IA"); apagado ao encerrar a sessão.
+  is_sandbox       BOOLEAN NOT NULL DEFAULT false,
   whatsapp_name    TEXT,
   custom_name      TEXT,
   email            TEXT,
@@ -555,6 +557,59 @@ CREATE POLICY "super_admin_full_access" ON product_categories
 CREATE POLICY "service_role_full_access" ON product_categories
   FOR ALL USING (auth.role() = 'service_role');
 
+-- ================================================================
+-- TABELAS: ai_training_sessions / ai_training_feedback (Teste com a IA)
+-- ================================================================
+CREATE TABLE IF NOT EXISTS ai_training_sessions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+  -- conversa de teste (apagada ao encerrar; sem FK de propósito)
+  conversation_id UUID,
+  status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','finished','abandoned')),
+  general_notes   TEXT,
+  -- cópia da conversa tirada ao encerrar: [{role,content,contentType,mediaUrl,at}]
+  transcript      JSONB NOT NULL DEFAULT '[]',
+  started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at     TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_training_sessions_tenant ON ai_training_sessions (tenant_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_training_feedback (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id       UUID NOT NULL REFERENCES ai_training_sessions(id) ON DELETE CASCADE,
+  tenant_id        UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  -- o que o cliente (dono) disse, o que a IA respondeu e como ele queria que fosse
+  customer_message TEXT,
+  ai_response      TEXT,
+  desired_response TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','applied','dismissed')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_training_feedback_tenant ON ai_training_feedback (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_training_feedback_session ON ai_training_feedback (session_id);
+
+ALTER TABLE ai_training_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_training_feedback ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "tenant_isolation" ON ai_training_sessions
+    FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+CREATE POLICY "super_admin_full_access" ON ai_training_sessions
+    FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+CREATE POLICY "service_role_full_access" ON ai_training_sessions
+    FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "tenant_isolation" ON ai_training_feedback
+    FOR ALL USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID);
+CREATE POLICY "super_admin_full_access" ON ai_training_feedback
+    FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
+CREATE POLICY "service_role_full_access" ON ai_training_feedback
+    FOR ALL USING (auth.role() = 'service_role');
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ai_training_sessions, ai_training_feedback TO authenticated, service_role;
+
 
 -- ================================================================
 -- TABELA: ai_agents
@@ -689,6 +744,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       UUID NOT NULL REFERENCES tenants(id)  ON DELETE CASCADE,
   contact_id      UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  -- Conversa de teste ("Teste com a IA"): nunca aparece em kanban/chat/métricas.
+  is_sandbox      BOOLEAN NOT NULL DEFAULT false,
   ai_agent_id     UUID REFERENCES ai_agents(id),
   kanban_stage_id UUID REFERENCES kanban_stages(id),
   assigned_to     UUID REFERENCES users(id),

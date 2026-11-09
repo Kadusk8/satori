@@ -139,6 +139,7 @@ export async function getTenantDashboardMetrics(): Promise<DashboardMetrics> {
       .where(
         and(
           eq(conversations.tenantId, claims.tenant_id!),
+          eq(conversations.isSandbox, false),
           gte(conversations.lastMessageAt, todayUtc)
         )
       )
@@ -166,6 +167,7 @@ export async function getTenantDashboardMetrics(): Promise<DashboardMetrics> {
       .where(
         and(
           eq(conversations.tenantId, claims.tenant_id!),
+          eq(conversations.isSandbox, false),
           gte(conversations.lastMessageAt, todayUtc),
           isNull(conversations.assignedTo)
         )
@@ -271,6 +273,7 @@ export async function getTenantDashboardMetrics(): Promise<DashboardMetrics> {
       .where(
         and(
           eq(conversations.tenantId, claims.tenant_id!),
+          eq(conversations.isSandbox, false),
           gte(conversations.lastMessageAt, todayUtc)
         )
       )
@@ -313,6 +316,7 @@ export async function getTenantDashboardMetrics(): Promise<DashboardMetrics> {
       .where(
         and(
           eq(conversations.tenantId, claims.tenant_id!),
+          eq(conversations.isSandbox, false),
           gte(conversations.lastMessageAt, todayUtc),
           eq(sql<string>`${conversations.metadata}->>'source'`, 'ctwa_ad')
         )

@@ -13,6 +13,9 @@
 import { eq } from 'drizzle-orm'
 import { db, getDecryptedEvolutionKey } from '../db/index.js'
 import { tenants } from '../db/schema.js'
+import { getSandbox } from './sandbox.js'
+import { uploadAudio } from './cloudinary.js'
+import { randomUUID } from 'node:crypto'
 
 export interface EvolutionClient {
   url: string
@@ -31,6 +34,30 @@ export interface EvolutionClient {
  * Retorna um cliente Evolution Go configurado com as credenciais do tenant.
  */
 export async function getEvolutionClient(tenantId: string, encryptionKey?: string | null): Promise<EvolutionClient> {
+  // Simulador de teste: nada vai pro WhatsApp. O áudio TTS da resposta é guardado (Cloudinary)
+  // pra a tela de teste tocar; texto e mídia já são lidos da tabela messages.
+  const sandbox = getSandbox()
+  if (sandbox) {
+    return {
+      url: 'sandbox',
+      apiKey: 'sandbox',
+      instanceName: 'sandbox',
+      async sendText() { return null },
+      async sendMedia() { return null },
+      async sendAudio(_number: string, audioBase64: string) {
+        try {
+          sandbox.audioUrl = await uploadAudio(tenantId, `sandbox-${randomUUID()}`, Buffer.from(audioBase64, 'base64'), 'audio/mpeg')
+        } catch (err) {
+          console.error('[sandbox] Falha ao subir áudio da resposta:', err)
+        }
+        return null
+      },
+      async sendLocation() { return null },
+      async sendPresence() { /* sem "digitando…" no teste */ },
+      async checkConnection() { return { state: 'sandbox', connected: true } },
+      async connectAndSetWebhook() { /* não se aplica */ },
+    }
+  }
   const rows = await db
     .select({
       evolutionApiUrl: tenants.evolutionApiUrl,

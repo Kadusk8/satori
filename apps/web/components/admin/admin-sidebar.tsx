@@ -11,6 +11,7 @@ import {
   BarChart3,
   Settings,
   CreditCard,
+  Bot,
   LogOut,
   ChevronRight,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ const navItems = [
   { label: 'Empresas',      href: '/admin/tenants',   icon: Building2 },
   { label: 'Analytics',     href: '/admin/analytics', icon: BarChart3 },
   { label: 'Planos',        href: '/admin/plans',     icon: CreditCard },
+  { label: 'Treinamento IA', href: '/admin/training',  icon: Bot },
   { label: 'Configurações', href: '/admin/settings',  icon: Settings },
 ]
 

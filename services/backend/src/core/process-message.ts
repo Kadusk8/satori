@@ -26,6 +26,7 @@ import {
 } from './tools.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
+import { getSandbox, humanDelay, isSandbox } from '../shared/sandbox.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -50,6 +51,7 @@ async function recordQualityFlag(
   flagType: 'leaked_marker' | 'search_fallback_listall' | 'promised_image_no_tool' | 'escalation_stale' | 'redundant_spec_prose',
   detail?: string | null
 ): Promise<void> {
+  if (isSandbox()) return
   try {
     await pool.query(
       `insert into ai_quality_flags (tenant_id, conversation_id, flag_type, detail)
@@ -1504,7 +1506,7 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
       const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
       const composingMs = Math.min(6000, Math.max(1200, mergedCaption.length * 20 + Math.floor(Math.random() * 600)))
       await evo.sendPresence(contactNumber, 'composing', composingMs)
-      await new Promise<void>((r) => setTimeout(r, composingMs + 200))
+      await humanDelay(composingMs + 200)
       await evo.sendMedia(contactNumber, deferredImage.imageUrl, mergedCaption)
     } catch (sendErr) {
       console.error('[process-message] Erro ao enviar foto+legenda (mensagem única):', sendErr)
@@ -1561,7 +1563,7 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
           const jitter = Math.floor(Math.random() * 700)
           const composingMs = Math.min(6000, Math.max(1000, part.length * 25 + jitter))
           await evo.sendPresence(contactNumber, 'composing', composingMs)
-          await new Promise<void>((r) => setTimeout(r, composingMs + 200))
+          await humanDelay(composingMs + 200)
           await evo.sendText(contactNumber, part)
         }
       } catch (sendErr) {
@@ -1570,9 +1572,9 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
     }
 
     const savedAiMsg = await pool.query<{ id: string; created_at: Date }>(
-      `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, ai_tool_calls)
-       values ($1, $2, $3, 'ai', $4, $5, $6) returning id, created_at`,
-      [tenantId, conversationId, contactId, finalText, sentContentType, allToolCalls.length > 0 ? JSON.stringify(allToolCalls) : null]
+      `insert into messages (tenant_id, conversation_id, contact_id, sender_type, content, content_type, ai_tool_calls, media_url)
+       values ($1, $2, $3, 'ai', $4, $5, $6, $7) returning id, created_at`,
+      [tenantId, conversationId, contactId, finalText, sentContentType, allToolCalls.length > 0 ? JSON.stringify(allToolCalls) : null, sentContentType === 'audio' ? getSandbox()?.audioUrl ?? null : null]
     )
     const aiMsgRow = savedAiMsg.rows[0]
     if (aiMsgRow) {
@@ -1591,7 +1593,7 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
   // Envia imagem diferida após a resposta principal
   if (deferredImage) {
     try {
-      await new Promise<void>((r) => setTimeout(r, 4000))
+      await humanDelay(4000)
       const evo = await getEvolutionClient(tenantId, ENCRYPTION_KEY)
       await evo.sendMedia(contactNumber, deferredImage.imageUrl, deferredImage.caption)
       const savedImgMsg = await pool.query<{ id: string; created_at: Date }>(
@@ -1639,7 +1641,7 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
       try {
         // Se a foto de destaque foi enviada agora, ela já saiu acima (delay de 4s) —
         // um respiro curto pra as fotos adicionais não colidirem com ela.
-        if (deferredImage) await new Promise<void>((r) => setTimeout(r, 1500))
+        if (deferredImage) await humanDelay(1500)
         await executeTool(ctx, 'send_more_product_images', { product_id: moreImagesProductId })
       } catch (err) {
         console.error('[process-message] Erro no envio determinístico de mais fotos:', err)
@@ -1651,7 +1653,7 @@ ${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mensagem\nUse com
   // ou "ok/valeu" sem pergunta nossa pendente); esses follow-ups pendentes já foram cancelados
   // acima.
   const aiScheduledFollowUp = allToolCalls.some((c) => c.name === 'schedule_follow_up')
-  if (agentFollowUpEnabled && !wasEscalated && finalText && !aiScheduledFollowUp && !customerEndedConversation) {
+  if (!isSandbox() && agentFollowUpEnabled && !wasEscalated && finalText && !aiScheduledFollowUp && !customerEndedConversation) {
     try {
       const countRes = await pool.query<{ count: string }>(
         `select count(*) from follow_ups where conversation_id = $1 and status not in ('cancelled','max_reached')`,

@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { contacts } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
@@ -30,7 +30,7 @@ export default async function ContactsPage() {
         totalConversations: sql<number>`(select count(*)::int from conversations c where c.contact_id = ${contacts.id})`,
       })
       .from(contacts)
-      .where(eq(contacts.tenantId, claims.tenant_id!))
+      .where(and(eq(contacts.tenantId, claims.tenant_id!), eq(contacts.isSandbox, false)))
       .orderBy(desc(contacts.lastContactAt))
   )
 

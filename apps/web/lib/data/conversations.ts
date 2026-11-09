@@ -86,6 +86,7 @@ export async function listKanban(): Promise<{
       .where(
         and(
           eq(conversations.tenantId, claims.tenant_id!),
+          eq(conversations.isSandbox, false),
           ne(conversations.status, 'closed'),
           // Vendedor só vê as suas + escaladas sem dono ainda (fallback de time
           // pequeno) — nunca as que a IA ainda está atendendo sem dono nem as

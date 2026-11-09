@@ -4,6 +4,7 @@ import cron from 'node-cron'
 import { webhookEvolutionRoutes } from './routes/webhook-evolution.js'
 import { sendWhatsappRoutes } from './routes/send-whatsapp.js'
 import { metaCapiRoutes } from './routes/meta-capi.js'
+import { sandboxRoutes } from './routes/sandbox.js'
 import { runScheduleReminder } from './cron/schedule-reminder.js'
 import { runProcessFollowUps } from './cron/process-follow-ups.js'
 import { runResetMonthlyMessageCounts } from './cron/reset-monthly-counts.js'
@@ -34,6 +35,7 @@ app.get('/health', async () => ({ ok: true }))
 await app.register(webhookEvolutionRoutes)
 await app.register(sendWhatsappRoutes)
 await app.register(metaCapiRoutes)
+await app.register(sandboxRoutes)
 
 // Lembretes de agendamento: a cada 15 minutos (equivalente ao pg_cron antigo)
 cron.schedule('*/15 * * * *', () => {

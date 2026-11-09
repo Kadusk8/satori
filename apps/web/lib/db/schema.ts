@@ -167,6 +167,7 @@ export const contacts = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
     whatsappNumber: text('whatsapp_number').notNull(),
+    isSandbox: boolean('is_sandbox').notNull().default(false),
     whatsappName: text('whatsapp_name'),
     customName: text('custom_name'),
     email: text('email'),
@@ -312,6 +313,7 @@ export const conversations = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
+    isSandbox: boolean('is_sandbox').notNull().default(false),
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contacts.id, { onDelete: 'cascade' }),
@@ -612,3 +614,34 @@ export type AuthUser = typeof authUsers.$inferSelect
 export type AiErrorLog = typeof aiErrorLogs.$inferSelect
 export type AiQualityFlag = typeof aiQualityFlags.$inferSelect
 export type PushSubscription = typeof pushSubscriptions.$inferSelect
+
+// "Teste com a IA": sessão em que o dono conversa com a IA numa tela estilo WhatsApp.
+export const aiTrainingSessions = pgTable('ai_training_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  conversationId: uuid('conversation_id'),
+  status: text('status').notNull().default('active'),
+  generalNotes: text('general_notes'),
+  transcript: jsonb('transcript').notNull().default([]),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+})
+
+// Pedido de mudança do dono: "a IA respondeu X, eu queria Y".
+export const aiTrainingFeedback = pgTable('ai_training_feedback', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id')
+    .notNull()
+    .references(() => aiTrainingSessions.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  customerMessage: text('customer_message'),
+  aiResponse: text('ai_response'),
+  desiredResponse: text('desired_response').notNull(),
+  status: text('status').notNull().default('new'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})

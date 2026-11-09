@@ -9,6 +9,7 @@ import { getEvolutionClient } from '../shared/evolution-client.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors } from './lead-routing.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
+import { isSandbox } from '../shared/sandbox.js'
 
 // Palavras genéricas de pedido (não são nome de modelo/produto) — usadas só pra decidir se a
 // query tem uma palavra ESPECÍFICA sobrando além da categoria já casada (ver tier 1 de busca
@@ -387,6 +388,11 @@ export async function toolBookAppointment(
   const endMinutes = h * 60 + m + duration
   const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`
 
+  // Simulador: confirma pra IA como se tivesse agendado, mas não grava nada na agenda real.
+  if (isSandbox()) {
+    return `✅ Agendamento confirmado! (SIMULAÇÃO — nada foi gravado na agenda)${resolved.serviceName ? `\n🛠️ Serviço: ${resolved.serviceName}` : ''}\n📅 Data: ${date}\n🕐 Horário: ${startTime}–${endTime}`
+  }
+
   try {
     const created = await db
       .insert(appointments)
@@ -449,6 +455,7 @@ export async function toolBookAppointment(
 export async function toolCancelAppointment(tenantId: string, input: Record<string, unknown>): Promise<string> {
   const appointmentId = String(input.appointment_id ?? '')
   if (!appointmentId) return 'ID do agendamento é obrigatório.'
+  if (isSandbox()) return '✅ Agendamento cancelado com sucesso. (SIMULAÇÃO — nada foi alterado na agenda)'
 
   await db
     .update(appointments)
@@ -466,6 +473,15 @@ export async function toolEscalateToHuman(
   const reason = String(input.reason ?? '')
   const summary = String(input.summary ?? '')
   const priority = String(input.priority ?? 'normal')
+
+  // Simulador: não aciona vendedor, não muda status nem notifica ninguém. A IA responde como
+  // responderia na passagem real, e o dono vê o texto da transferência.
+  if (isSandbox()) {
+    return {
+      result: 'Perfeito! Já vou passar seus dados aqui pra nossa equipe de vendas dar sequência, e em seguida te chamam por aqui mesmo 🙌',
+      escalated: false,
+    }
+  }
 
   // 1) Tenta round-robin entre vendedores online. O trigger de banco
   // sync_conversation_status_to_kanban já move o card pra 'aguardando_humano'
@@ -712,6 +728,7 @@ export async function toolScheduleFollowUp(
 ): Promise<string> {
   const delayHours = Number(input.delay_hours ?? agentFollowUpDelayHours)
   const context = String(input.context ?? '')
+  if (isSandbox()) return '✅ Follow-up agendado! (SIMULAÇÃO — nenhuma mensagem será enviada)'
 
   const existingRes = await pool.query(
     `select id from follow_ups where conversation_id = $1 and status = 'pending' limit 1`,
