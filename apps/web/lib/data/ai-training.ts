@@ -42,6 +42,23 @@ async function superAdminOrThrow() {
   if (claims?.is_super_admin !== true) throw new Error('Acesso restrito.')
 }
 
+// O backend baixa essa URL pra transcrever o áudio, então só aceitamos arquivo do NOSSO
+// Cloudinary (host exato + pasta do nosso cloud + sem credenciais/porta). Qualquer outra
+// URL permitiria fazer o servidor buscar endereços internos (SSRF).
+function validateCloudinaryAudioUrl(raw: string): string {
+  const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+  let url: URL
+  try { url = new URL(raw) } catch { throw new Error('Áudio inválido.') }
+  const ok =
+    !!cloud &&
+    url.protocol === 'https:' &&
+    url.hostname === 'res.cloudinary.com' &&
+    url.port === '' && url.username === '' && url.password === '' &&
+    url.pathname.startsWith(`/${cloud}/video/upload/`)
+  if (!ok) throw new Error('Áudio inválido.')
+  return url.toString()
+}
+
 async function ownSession(tenantId: string, sessionId: string) {
   const [session] = await withAdmin((tx) =>
     tx.select().from(aiTrainingSessions)
@@ -124,7 +141,7 @@ export async function sendTrainingMessage(input: {
   if (session.status !== 'active' || !session.conversationId) throw new Error('Esta sessão de teste já foi encerrada.')
 
   const text = input.text?.trim() ?? ''
-  const audioUrl = input.audioUrl && /^https:\/\//i.test(input.audioUrl) ? input.audioUrl : null
+  const audioUrl = input.audioUrl ? validateCloudinaryAudioUrl(input.audioUrl) : null
   if (!text && !audioUrl) throw new Error('Digite uma mensagem ou grave um áudio.')
   if (text.length > 4000) throw new Error('Mensagem muito longa.')
   if (!BACKEND_URL) throw new Error('Serviço da IA indisponível no momento (BACKEND_URL não configurada).')
