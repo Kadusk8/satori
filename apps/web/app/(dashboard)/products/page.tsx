@@ -3,11 +3,12 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Plus, Search, LayoutGrid, LayoutList, Package, Loader2 } from 'lucide-react'
+import { Plus, Search, LayoutGrid, LayoutList, Package, Loader2, FileSpreadsheet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProductCard, type Product } from '@/components/products/product-card'
 import { ProductForm } from '@/components/products/product-form'
+import { ImportDialog } from '@/components/products/import-dialog'
 import { cn } from '@/lib/utils'
 import { getCatalogContext, listProducts, listProductCategories, saveProduct, deleteProduct, setProductAvailable } from '@/lib/data/products'
 import { toast } from 'sonner'
@@ -89,6 +90,7 @@ export default function ProductsPage() {
   const [filterCategory, setFilterCategory] = useState('Todas')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [showForm, setShowForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [formProduct, setFormProduct] = useState<Product | null>(null)
 
   // ── Carrega produtos ────────────────────────────────────────────────────────
@@ -249,11 +251,28 @@ export default function ProductsPage() {
             {products.length} no total
           </p>
         </div>
-        <Button onClick={openNew} className="gap-2">
-          <Plus className="h-4 w-4" />
-          {newItemLabel}
-        </Button>
+        <div className="flex items-center gap-2">
+          {businessModel === 'product' && (
+            <Button variant="outline" onClick={() => setShowImport(true)} className="gap-2">
+              <FileSpreadsheet className="h-4 w-4" />
+              Importar planilha
+            </Button>
+          )}
+          <Button onClick={openNew} className="gap-2">
+            <Plus className="h-4 w-4" />
+            {newItemLabel}
+          </Button>
+        </div>
       </div>
+
+      {businessModel === 'product' && (
+        <ImportDialog
+          open={showImport}
+          priceTypes={priceTypes}
+          onClose={() => setShowImport(false)}
+          onImported={() => { void loadProducts() }}
+        />
+      )}
 
       {/* Barra de filtros */}
       <div className="flex flex-wrap items-center gap-3">
