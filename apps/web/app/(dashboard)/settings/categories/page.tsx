@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { asc } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { productCategories } from '@/lib/db/schema'
 import { getSessionClaims, getDbClaims } from '@/lib/auth/session'
@@ -39,6 +39,8 @@ export default async function ProductCategoriesPage() {
         position: productCategories.position,
       })
       .from(productCategories)
+      // Filtro explícito por tenant: a RLS sozinha deixa o super admin enxergar todas as empresas
+      .where(eq(productCategories.tenantId, claims.tenantId!))
       .orderBy(asc(productCategories.position))
   )
 

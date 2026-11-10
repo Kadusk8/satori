@@ -423,7 +423,7 @@ export default function ProductsPage() {
                       ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.promotionalPrice)
                       : p.priceDisplay ?? (p.price != null
                       ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.price)
-                      : 'Sob consulta')}
+                      : '—')}
                   </td>
                   <td className="px-4 py-3">
                     <span className={cn(

@@ -120,8 +120,12 @@ export async function getCatalogContext(): Promise<{ businessModel: 'product' | 
 
 export async function listProductCategories(): Promise<string[]> {
   const claims = await claimsOrThrow()
+  if (!claims.tenant_id) throw new Error('Tenant não identificado.')
+  // Filtro explícito por tenant: a RLS sozinha deixa o super admin enxergar categorias de todas as empresas
   const rows = await withClaims(claims, (tx) =>
-    tx.select({ name: productCategories.name }).from(productCategories).orderBy(asc(productCategories.position))
+    tx.select({ name: productCategories.name }).from(productCategories)
+      .where(eq(productCategories.tenantId, claims.tenant_id!))
+      .orderBy(asc(productCategories.position))
   )
   return rows.map((r) => r.name)
 }

@@ -141,7 +141,7 @@ export function StepProductsServices() {
               <div className="space-y-1">
                 <label className="text-xs font-medium">Preço</label>
                 <Input
-                  placeholder="Ex: R$ 150,00 ou Sob consulta"
+                  placeholder="Ex: R$ 150,00 (opcional)"
                   value={product.price}
                   onChange={(e) => updateProduct(index, 'price', e.target.value)}
                 />

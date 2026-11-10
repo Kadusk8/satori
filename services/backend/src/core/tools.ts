@@ -251,7 +251,7 @@ export async function toolSearchServices(tenantId: string, input: Record<string,
   if (result.rows.length === 0) return 'Nenhum serviço cadastrado corresponde ao pedido. Não invente um serviço; peça outra preferência ou encaminhe à equipe.'
   return result.rows.map((service) => [
     `🛠️ *${service.name}*`,
-    service.price_display ? `💰 ${service.price_display}` : service.price ? `💰 R$ ${Number(service.price).toFixed(2)}` : '💰 Sob consulta',
+    service.price_display ? `💰 ${service.price_display}` : service.price ? `💰 R$ ${Number(service.price).toFixed(2)}` : '',
     `⏱️ Duração: ${service.duration_minutes} minutos`,
     service.short_description || service.description ? `📝 ${service.short_description || service.description}` : '',
     service.category ? `🏷️ ${service.category}` : '',

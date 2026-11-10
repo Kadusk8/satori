@@ -40,7 +40,7 @@ interface ProductCardProps {
 
 function formatPrice(price: number | null, display: string | null): string {
   if (display) return display
-  if (price == null) return 'Sob consulta'
+  if (price == null) return ''
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(price)
 }
 
@@ -132,9 +132,12 @@ export function ProductCard({ product, onEdit, onDelete, onToggleAvailability }:
             {product.promotionalPrice !== null && product.price !== null && (
               <span className="block text-[10px] text-muted-foreground line-through">{formatPrice(product.price, null)}</span>
             )}
-            <span className="block text-sm font-semibold text-primary">
-              {formatPrice(product.promotionalPrice ?? product.price, product.promotionalPrice === null ? product.priceDisplay : null)}
-            </span>
+            {/* Sem preço cadastrado não mostra nada (varejo pode não ter preço definido) */}
+            {(product.promotionalPrice ?? product.price) !== null || (product.promotionalPrice === null && product.priceDisplay) ? (
+              <span className="block text-sm font-semibold text-primary">
+                {formatPrice(product.promotionalPrice ?? product.price, product.promotionalPrice === null ? product.priceDisplay : null)}
+              </span>
+            ) : null}
           </span>
         </div>
 
