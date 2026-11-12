@@ -10,6 +10,7 @@ import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors, findPreviousVendedor, findVendedorByName } from './lead-routing.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { isSandbox } from '../shared/sandbox.js'
+import { captionPriceLine, parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
 
 // Palavras genéricas de pedido (não são nome de modelo/produto) — usadas só pra decidir se a
 // query tem uma palavra ESPECÍFICA sobrando além da categoria já casada (ver tier 1 de busca
@@ -39,12 +40,20 @@ interface ProductRow {
   images: unknown
   characteristics: string[] | null
   price_tiers: Array<{ label: string; minQuantity: number; unitPrice: number }> | null
+  price_wholesale: string | null
+  price_reseller: string | null
+}
+
+/** Empresa com preços por perfil (Varejo/Atacado/Revenda) ligados — o preço depende da quantidade do pedido. */
+async function getPriceTypesEnabled(tenantId: string): Promise<boolean> {
+  const res = await pool.query<{ price_types_enabled: boolean }>(`select price_types_enabled from tenants where id = $1`, [tenantId])
+  return res.rows[0]?.price_types_enabled === true
 }
 
 async function queryProducts(whereSql: string, params: unknown[], orderLimitSql: string): Promise<ProductRow[]> {
   const res = await pool.query<ProductRow>(
     `select p.id, p.name, p.short_description, p.description, p.price_display, p.price, p.category,
-            p.additional_categories, p.subcategory, p.brand, p.audience, p.promotional_price, p.images, p.characteristics, p.price_tiers,
+            p.additional_categories, p.subcategory, p.brand, p.audience, p.promotional_price, p.images, p.characteristics, p.price_tiers, p.price_wholesale, p.price_reseller,
             coalesce((select json_agg(json_build_object('size', v.size, 'color', v.color, 'sku', v.sku, 'stock', v.stock) order by v.color, v.size)
                       from product_variants v where v.product_id = p.id), '[]'::json) as variants
      from products p
@@ -198,6 +207,8 @@ export async function toolSearchProducts(
 
   if (data.length === 0) return 'Nenhum produto cadastrado no momento.'
 
+  const priceTypes = await getPriceTypesEnabled(tenantId)
+
   return data
     .map((p) => {
       const images = Array.isArray(p.images) ? p.images : []
@@ -209,7 +220,10 @@ export async function toolSearchProducts(
       const availableVariants = (p.variants ?? []).filter((variant) => variant.stock > 0)
       return [
         `📦 *${p.name}*`,
-        p.promotional_price ? `💰 De R$ ${Number(p.price ?? 0).toFixed(2)} por R$ ${Number(p.promotional_price).toFixed(2)}` : p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
+        // Com preços por perfil ligados, o texto livre (price_display) e o preço único NÃO valem: o valor depende da quantidade.
+        priceTypes
+          ? profilePricesBlock(p)
+          : p.promotional_price ? `💰 De R$ ${Number(p.price ?? 0).toFixed(2)} por R$ ${Number(p.promotional_price).toFixed(2)}` : p.price_display ? `💰 ${p.price_display}` : p.price ? `💰 R$ ${Number(p.price).toFixed(2)}` : '',
         desc ? `📝 ${desc}` : '',
         p.category ? `🏷️ ${p.category}${p.subcategory ? ` / ${p.subcategory}` : ''}` : '',
         additionalCategories.length > 0 ? `🏷️ Outras categorias: ${additionalCategories.join(', ')}` : '',
@@ -217,7 +231,7 @@ export async function toolSearchProducts(
         p.audience ? `👤 Público: ${{ female: 'feminino', male: 'masculino', kids: 'infantil', unisex: 'unissex' }[p.audience] ?? p.audience}` : '',
         availableVariants.length > 0 ? `📏 Variações disponíveis: ${availableVariants.map((variant) => `${variant.color} ${variant.size} (estoque: ${variant.stock})`).join(', ')}` : '',
         characteristics.length > 0 ? `🔧 Características: ${characteristics.join(', ')}` : '',
-        priceTiers.length > 0 ? `📊 Preços por quantidade: ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ unidades = R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join('; ')}. Aplique a faixa de maior quantidade mínima que o pedido atingir; abaixo do menor mínimo, diga que o valor precisa ser consultado.` : '',
+        !priceTypes && priceTiers.length > 0 ? `📊 Preços por quantidade: ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ unidades = R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join('; ')}. Aplique a faixa de maior quantidade mínima que o pedido atingir; abaixo do menor mínimo, diga que o valor precisa ser consultado.` : '',
         hasImage ? `🖼️ [tem imagem — use send_product_image com id: ${p.id}]` : '',
         `ID: ${p.id}`,
       ]
@@ -543,7 +557,7 @@ export interface DeferredImage {
   caption: string
 }
 
-export async function resolveProductImageData(tenantId: string, productId: string): Promise<DeferredImage | null> {
+export async function resolveProductImageData(tenantId: string, productId: string, quantity: number | null = null): Promise<DeferredImage | null> {
   if (!productId) return null
 
   const rows = await db
@@ -556,6 +570,8 @@ export async function resolveProductImageData(tenantId: string, productId: strin
       price: products.price,
       priceDisplay: products.priceDisplay,
       priceTiers: products.priceTiers,
+      priceWholesale: products.priceWholesale,
+      priceReseller: products.priceReseller,
     })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
@@ -588,10 +604,14 @@ export async function resolveProductImageData(tenantId: string, productId: strin
   // inclui na legenda uma por linha — assim todo card mostra os dados completos mesmo se a
   // descrição estiver pobre (ex: descrição = só o nome).
   const characteristics = Array.isArray(product.characteristics) ? product.characteristics : []
+  // Preços por perfil: a legenda mostra só o preço do perfil da quantidade informada (sem quantidade, sem preço).
+  const priceTypes = await getPriceTypesEnabled(tenantId)
   const caption = [
     `📦 *${product.name}*`,
-    priceText ? `💰 ${priceText}` : '',
-    priceTiers.length > 0 ? `📊 ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ un. — R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join(' | ')}` : '',
+    priceTypes
+      ? captionPriceLine({ price: product.price, price_wholesale: product.priceWholesale, price_reseller: product.priceReseller }, quantity)
+      : priceText ? `💰 ${priceText}` : '',
+    !priceTypes && priceTiers.length > 0 ? `📊 ${priceTiers.map((tier) => `${tier.label}: ${tier.minQuantity}+ un. — R$ ${Number(tier.unitPrice).toFixed(2)} cada`).join(' | ')}` : '',
     buildImageCaptionText(product.description, product.shortDescription),
     characteristics.length > 0 ? characteristics.map((c) => `▪️ ${c}`).join('\n') : '',
   ]
@@ -630,7 +650,7 @@ export async function toolSendProductImage(
   input: Record<string, unknown>
 ): Promise<string> {
   const productId = String(input.product_id ?? '')
-  const imageData = await resolveProductImageData(tenantId, productId)
+  const imageData = await resolveProductImageData(tenantId, productId, parseQuantity(input.quantity))
   if (!imageData) return 'Produto não encontrado ou sem imagem cadastrada.'
 
   try {

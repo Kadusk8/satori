@@ -29,6 +29,7 @@ import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { getSandbox, humanDelay, isSandbox } from '../shared/sandbox.js'
 import { listActiveVendors } from './lead-routing.js'
+import { parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -71,6 +72,9 @@ async function loadOwnerRules(tenantId: string): Promise<string> {
 
 /** Frases em que a IA promete passar o cliente pra equipe (usado pra detectar promessa sem a tool). */
 const HANDOFF_PROMISE_RE = /\b(?:vou|vamos|irei|já vou)\s+(?:te\s+|lhe\s+)?(?:encaminhar|passar|transferir|direcionar)\b[^.!?]{0,60}\b(?:equipe|time|pessoal|vendas|vendedor|vendedora|setor)\b|\bj[áa]\s+(?:te\s+)?(?:chamam|chama|entram?\s+em\s+contato)\b|\b(?:eles|a\s+equipe|o\s+time)\b[^.!?]{0,40}\b(?:entrar[ãa]o?|v[ãa]o)\s+(?:te\s+)?(?:chamar|entrar\s+em\s+contato)\b/i
+
+// Empresas com preço por perfil: o valor NÃO é fixo, depende da quantidade total do pedido.
+const PRICE_TYPES_RULE = `\n## Preço por quantidade (esta loja — vale mais que a regra "PREÇO — dado fixo" acima)\nO preço NÃO é fixo: depende da quantidade TOTAL de peças do pedido (todos os modelos somados). Varejo = 1 a 9 peças, Atacado = 10 a 29, Revenda = 30 ou mais. Os resultados de search_products trazem os três valores — use SÓ o do perfil do cliente. Se ele ainda não disse a quantidade, pergunte ("você pretende levar quantas peças, mais ou menos?") ANTES de falar preço. Ao chamar send_product_image, passe quantity com o total que o cliente já informou; se ele ainda não informou, não passe (a foto vai sem preço e você pergunta a quantidade). Se mudar a quantidade, reclassifique e use o novo preço. Nunca invente preço nem use o de outro perfil.\n`
 
 // Regra de comportamento quando o cliente pede "o vendedor": quem atende já é a "pessoa da equipe",
 // então primeiro esclarece se ele quer um vendedor específico, em vez de escalar de cara.
@@ -191,6 +195,7 @@ interface ConversationRow {
   blocked_labels: string[]
   t_name: string
   business_model: 'product' | 'fashion' | 'service'
+  price_types_enabled: boolean
   business_hours: BusinessHours
   timezone: string
   evolution_instance_name: string | null
@@ -545,7 +550,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
              where wla.tenant_id = ct.tenant_id and wla.labeled = true
                and wla.jid in (ct.whatsapp_lid, ct.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
-            t.name as t_name, t.business_model, t.business_hours, t.timezone, t.evolution_instance_name,
+            t.name as t_name, t.business_model, t.price_types_enabled, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key,
             t.latitude, t.longitude
      from conversations c
@@ -585,6 +590,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
 
   const tenantId = conv.tenant_id
   const isServiceBusiness = conv.business_model === 'service'
+  const priceTypesEnabled = conv.price_types_enabled === true
   const contactId = conv.contact_id
   const contactNumber = conv.whatsapp_number
 
@@ -782,12 +788,14 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   let focusFromAdReferral = false
   if (!isServiceBusiness && focusCandidate) {
     const focusRows = await db
-      .select({ name: products.name, price: products.price, priceDisplay: products.priceDisplay })
+      .select({ name: products.name, price: products.price, priceDisplay: products.priceDisplay, priceWholesale: products.priceWholesale, priceReseller: products.priceReseller })
       .from(products)
       .where(and(eq(products.id, focusCandidate.id), eq(products.tenantId, tenantId), eq(products.isAvailable, true)))
       .limit(1)
     if (focusRows[0]) {
-      const priceText = focusRows[0].priceDisplay ?? (focusRows[0].price != null ? `R$ ${Number(focusRows[0].price).toFixed(2)}` : null)
+      const priceText = priceTypesEnabled
+        ? profilePricesBlock({ price: focusRows[0].price, price_wholesale: focusRows[0].priceWholesale, price_reseller: focusRows[0].priceReseller })
+        : focusRows[0].priceDisplay ?? (focusRows[0].price != null ? `R$ ${Number(focusRows[0].price).toFixed(2)}` : null)
       focusProduct = { id: focusCandidate.id, name: focusRows[0].name, priceText }
     }
   }
@@ -817,7 +825,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')
 
-  const ownerRules = (await loadOwnerRules(tenantId)) + (await loadSalesTeamBlock(tenantId))
+  const ownerRules = (await loadOwnerRules(tenantId)) + (await loadSalesTeamBlock(tenantId)) + (priceTypesEnabled ? PRICE_TYPES_RULE : '')
   const productSystemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
 
@@ -1104,7 +1112,7 @@ ${ownerRules}${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mens
 
       if (tu.name === 'send_product_image') {
         const productId = String(tu.input.product_id ?? '')
-        const imageData = await resolveProductImageData(tenantId, productId)
+        const imageData = await resolveProductImageData(tenantId, productId, parseQuantity(tu.input.quantity))
         if (imageData) {
           deferredImage = imageData
           deferredImageProductId = productId

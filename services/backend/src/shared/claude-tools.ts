@@ -115,7 +115,14 @@ export const AI_TOOLS: Tool[] = [
     description: 'Envia a imagem em destaque (a principal/capa) de um produto específico para o cliente. Use após recomendar um produto que tem imagem — nunca envia as demais fotos, só a de destaque.',
     input_schema: {
       type: 'object',
-      properties: { product_id: { type: 'string', description: 'ID do produto' } },
+      properties: {
+        product_id: { type: 'string', description: 'ID do produto' },
+        quantity: {
+          type: 'integer',
+          description:
+            'Só pra lojas com preço por quantidade (Varejo/Atacado/Revenda): total de peças do pedido que o CLIENTE já informou. A legenda da foto mostra o preço do perfil dessa quantidade. Se ele ainda não disse a quantidade, NÃO envie este campo (a foto vai sem preço).',
+        },
+      },
       required: ['product_id'],
     },
   },
