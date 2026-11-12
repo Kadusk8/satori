@@ -7,7 +7,7 @@ import { db, pool } from '../db/index.js'
 import { appointments, conversations, kanbanStages, products } from '../db/schema.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
-import { assignNextVendedor, countRegisteredVendors } from './lead-routing.js'
+import { assignNextVendedor, countRegisteredVendors, findPreviousVendedor } from './lead-routing.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { isSandbox } from '../shared/sandbox.js'
 
@@ -486,7 +486,9 @@ export async function toolEscalateToHuman(
   // 1) Tenta round-robin entre vendedores online. O trigger de banco
   // sync_conversation_status_to_kanban já move o card pra 'aguardando_humano'
   // sozinho quando o status muda — não setar kanban_stage_id aqui.
-  const vendor = await assignNextVendedor(tenantId)
+  // Cliente que já foi atendida por um vendedor volta pra ele (fidelidade); só sem histórico
+  // (ou vendedor desativado) entra no rodízio. Voltar pro anterior não avança o ponteiro do rodízio.
+  const vendor = (await findPreviousVendedor(tenantId, conversationId)) ?? (await assignNextVendedor(tenantId))
   if (vendor) {
     await db
       .update(conversations)

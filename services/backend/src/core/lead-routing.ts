@@ -39,6 +39,35 @@ export async function assignNextVendedor(tenantId: string): Promise<EligibleVend
   })
 }
 
+/**
+ * Vendedor que já atendeu este contato antes: o da conversa real mais recente (fora do simulador)
+ * que teve dono. Só vale se ele ainda for vendedor ativo do mesmo tenant — se foi desativado ou
+ * virou outro papel, devolve null e o chamador cai no rodízio. Não olha se está online: a
+ * cliente prefere que a recompra volte pro mesmo vendedor mesmo que ele demore a responder.
+ */
+export async function findPreviousVendedor(tenantId: string, conversationId: string): Promise<EligibleVendor | null> {
+  const res = await db.execute(sql`
+    select u.id, u.full_name
+    from conversations cur
+    join conversations prev
+      on prev.contact_id = cur.contact_id
+     and prev.tenant_id = cur.tenant_id
+     and prev.id <> cur.id
+     and prev.is_sandbox = false
+     and prev.assigned_to is not null
+    join users u
+      on u.id = prev.assigned_to
+     and u.tenant_id = cur.tenant_id
+     and u.role = 'operator'
+     and u.active = true
+    where cur.id = ${conversationId} and cur.tenant_id = ${tenantId}
+    order by prev.created_at desc
+    limit 1
+  `)
+  const row = res.rows[0] as { id: string; full_name: string } | undefined
+  return row ? { id: row.id, fullName: row.full_name } : null
+}
+
 /** Total de vendedores cadastrados e ativos no tenant (online ou não) — usado pro fallback de time pequeno. */
 export async function countRegisteredVendors(tenantId: string): Promise<number> {
   const res = await db.execute(sql`
