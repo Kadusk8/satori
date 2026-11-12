@@ -94,7 +94,7 @@ export const AI_TOOLS: Tool[] = [
   {
     name: 'escalate_to_human',
     description:
-      'Encaminha o cliente pra equipe de vendas (financiamento, simulação, avaliação de troca, desconto/negociação, ou algo que você não resolve). O sistema já gera a mensagem natural de handoff pro cliente — você NÃO precisa (nem deve) escrever "vou transferir" ou "vou chamar um atendente"; só chame a ferramenta.',
+      'Encaminha o cliente pra equipe de vendas (financiamento, simulação, avaliação de troca, desconto/negociação, ou algo que você não resolve) — MAS só quando não houver uma orientação do dono que já responda aquele tema (se houver, responda com ela em vez de escalar). O sistema já gera a mensagem natural de handoff pro cliente — você NÃO precisa (nem deve) escrever "vou transferir" ou "vou chamar um atendente"; só chame a ferramenta.',
     input_schema: {
       type: 'object',
       properties: {

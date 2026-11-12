@@ -60,7 +60,7 @@ async function loadOwnerRules(tenantId: string): Promise<string> {
       .filter(Boolean)
       .map((r) => `- ${r}`)
     if (lines.length === 0) return ''
-    return `\n## Orientações do dono do negócio (PRIORIDADE MÁXIMA)\nO dono testou você e pediu estes ajustes de comportamento. Siga-os acima do estilo padrão, sem citar que são "regras" nem mencionar o teste:\n${lines.join('\n')}\n`
+    return `\n## Orientações do dono do negócio (PRIORIDADE MÁXIMA)\nO dono testou você e pediu estes ajustes de comportamento. Siga-os acima do estilo padrão, sem citar que são "regras" nem mencionar o teste.\n\nCOMO APLICAR: cada orientação abaixo trata de um TEMA (a dúvida ou situação do cliente). A frase entre aspas é só UM exemplo de como o cliente pode falar — a orientação vale para QUALQUER jeito de ele tocar no mesmo tema: palavra solta (ex: só "Desconto"), sinônimo, frase curta, variação ou erro de digitação. Quando o tema da mensagem ATUAL casar com uma orientação, responda com o conteúdo COMPLETO dela (adaptando só o mínimo ao contexto, sem cortar informação). Isso vale mais que qualquer regra padrão, inclusive a de chamar escalate_to_human: se já existe orientação para o tema, NÃO escale — responda com ela. Só encaminhe à equipe se, DEPOIS dessa resposta, o cliente insistir ou pedir algo que a orientação não cobre.\n\nOrientações:\n${lines.join('\n')}\n`
   } catch (err) {
     console.error('[process-message] Falha ao carregar orientações do dono:', err instanceof Error ? err.message : err)
     return ''
