@@ -101,6 +101,11 @@ export const AI_TOOLS: Tool[] = [
         reason: { type: 'string', description: 'Motivo da escalação' },
         summary: { type: 'string', description: 'Resumo do que foi tratado até agora' },
         priority: { type: 'string', enum: ['normal', 'high', 'urgent'], description: 'Prioridade' },
+        vendor_name: {
+          type: 'string',
+          description:
+            'Só quando o cliente pediu um vendedor ESPECÍFICO pelo nome: o nome como ele falou (use só nomes da lista "Equipe de vendas"). Deixe vazio nos demais casos.',
+        },
       },
       required: ['reason', 'summary'],
     },

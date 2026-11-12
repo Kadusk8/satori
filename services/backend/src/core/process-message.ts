@@ -20,6 +20,7 @@ import {
   executeTool,
   resolveProductImageData,
   toolSearchProducts,
+  toolEscalateToHuman,
   formatBusinessHours,
   type DeferredImage,
   type ToolContext,
@@ -27,6 +28,7 @@ import {
 import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { getSandbox, humanDelay, isSandbox } from '../shared/sandbox.js'
+import { listActiveVendors } from './lead-routing.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -63,6 +65,26 @@ async function loadOwnerRules(tenantId: string): Promise<string> {
     return `\n## Orientações do dono do negócio (PRIORIDADE MÁXIMA)\nO dono testou você e pediu estes ajustes de comportamento. Siga-os acima do estilo padrão, sem citar que são "regras" nem mencionar o teste.\n\nCOMO APLICAR: cada orientação abaixo trata de um TEMA (a dúvida ou situação do cliente). A frase entre aspas é só UM exemplo de como o cliente pode falar — a orientação vale para QUALQUER jeito de ele tocar no mesmo tema: palavra solta (ex: só "Desconto"), sinônimo, frase curta, variação ou erro de digitação. Quando o tema da mensagem ATUAL casar com uma orientação, responda com o conteúdo COMPLETO dela (adaptando só o mínimo ao contexto, sem cortar informação). Isso vale mais que qualquer regra padrão, inclusive a de chamar escalate_to_human: se já existe orientação para o tema, NÃO escale — responda com ela. Só encaminhe à equipe se, DEPOIS dessa resposta, o cliente insistir ou pedir algo que a orientação não cobre.\n\nOrientações:\n${lines.join('\n')}\n`
   } catch (err) {
     console.error('[process-message] Falha ao carregar orientações do dono:', err instanceof Error ? err.message : err)
+    return ''
+  }
+}
+
+/** Frases em que a IA promete passar o cliente pra equipe (usado pra detectar promessa sem a tool). */
+const HANDOFF_PROMISE_RE = /\b(?:vou|vamos|irei|já vou)\s+(?:te\s+|lhe\s+)?(?:encaminhar|passar|transferir|direcionar)\b[^.!?]{0,60}\b(?:equipe|time|pessoal|vendas|vendedor|vendedora|setor)\b|\bj[áa]\s+(?:te\s+)?(?:chamam|chama|entram?\s+em\s+contato)\b|\b(?:eles|a\s+equipe|o\s+time)\b[^.!?]{0,40}\b(?:entrar[ãa]o?|v[ãa]o)\s+(?:te\s+)?(?:chamar|entrar\s+em\s+contato)\b/i
+
+// Regra de comportamento quando o cliente pede "o vendedor": quem atende já é a "pessoa da equipe",
+// então primeiro esclarece se ele quer um vendedor específico, em vez de escalar de cara.
+const SALES_REQUEST_RULE = `- PEDIDO PARA FALAR COM VENDEDOR/ATENDENTE: você é quem está atendendo o cliente agora, como uma pessoa da equipe. Se ele disser algo vago tipo "quero falar com o vendedor", "tem alguém aí?", "quero falar com a vendedora", NÃO escale de cara: responda natural, como atendente, algo como "Você já está falando comigo 😊 Posso te ajudar por aqui, ou quer falar com algum vendedor específico? Se for, me diz o nome". Se ele citar o nome de um vendedor da lista "Equipe de vendas", chame escalate_to_human com vendor_name preenchido. Se ele confirmar que quer falar com a equipe/uma pessoa, ou já disse que é pra fechar pedido, negociar, pagar ou resolver algo que você não resolve, escale (sem vendor_name). Se ele perguntar quais vendedores existem, diga só os nomes da lista. Se ele perguntar sinceramente se está falando com um robô/IA, não negue (regra de honestidade acima). ATENÇÃO: encaminhar pra equipe SÓ acontece se você CHAMAR a ferramenta escalate_to_human — escrever "vou te encaminhar" / "já te chamam" sem chamar a ferramenta não faz nada e o cliente fica sem atendimento. Sempre que for dizer isso, chame a ferramenta na mesma resposta.`
+
+/** Lista de vendedores ativos pro prompt — só pra reconhecer pedido por nome; vazio se não houver nenhum. */
+async function loadSalesTeamBlock(tenantId: string): Promise<string> {
+  try {
+    const vendors = await listActiveVendors(tenantId)
+    if (vendors.length === 0) return ''
+    const names = vendors.map((v) => v.fullName).join(', ')
+    return `\n## Equipe de vendas\nVendedores: ${names}. Use esta lista SÓ pra reconhecer quando o cliente pedir um vendedor pelo nome (passe o nome em vendor_name na escalate_to_human) ou perguntar quem são. Nunca invente nomes fora desta lista.\n`
+  } catch (err) {
+    console.error('[process-message] Falha ao carregar equipe de vendas:', err instanceof Error ? err.message : err)
     return ''
   }
 }
@@ -795,7 +817,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
     .map((p) => `${p.name}${p.price_display ? ` (${p.price_display})` : p.price ? ` (R$ ${p.price})` : ''}`)
     .join(', ')
 
-  const ownerRules = await loadOwnerRules(tenantId)
+  const ownerRules = (await loadOwnerRules(tenantId)) + (await loadSalesTeamBlock(tenantId))
   const productSystemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
 Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
 
@@ -826,6 +848,7 @@ Sua função é vender: entender o que o cliente quer → buscar nos produtos �
 - NUNCA se apresente como "assistente virtual", "inteligência artificial", "bot" ou "IA" por conta própria — converse como uma pessoa de verdade atendendo pelo WhatsApp da loja.
 - Se o cliente perguntar diretamente "você é um robô?" / "isso é IA?" / "é um bot?" — não negue nem finja ser humano. Admita de forma leve e natural, sem soar formal (ex: "sou o assistente virtual daqui, mas te ajudo igual um consultor de verdade 😉"). Nunca minta dizendo que é uma pessoa.
 - TRANSFERÊNCIA/HANDOFF — CRÍTICO: quando for passar o cliente pra alguém da equipe (financiamento, avaliação de troca, desconto, negociação, dúvida que você não resolve), NUNCA diga "vou transferir para um atendente humano", "transferindo o atendimento", "um operador vai te atender", "motivo:", nem nada nesse formato — isso entrega na hora que quem falava era um robô. Fale como um vendedor de verdade passando pro colega: "já vou passar aqui pra nossa equipe de vendas dar sequência", "vou te encaminhar pro pessoal de vendas que cuida disso e já te chamam". Trate como "equipe/área de vendas", nunca como "atendente" ou "humano".
+${SALES_REQUEST_RULE}
 - PALAVRAS/FORMATOS PROIBIDOS (denunciam robô): "Como posso ajudá-lo?", "estou à disposição", "fico à disposição", "estou por aqui", "em que posso ser útil", "processar sua solicitação", "Motivo:", "atendente humano", "prezado(a)", listar "Campo: valor" como um formulário. Fale simples e direto, como no WhatsApp.
 - NÃO ENCERRE TODA MENSAGEM COM OFERTA DE AJUDA (regra forte — o modelo erra muito nisso): repetir no fim de CADA resposta "se precisar de mais informações ou quiser agendar uma visita, é só me avisar!", "estou à disposição!", "estou por aqui!", "é só me chamar!" é a MARCA REGISTRADA de um robô — nenhum vendedor de verdade assina toda mensagem assim. Na MAIORIA das mensagens, termine no próprio conteúdo: ou numa pergunta objetiva que empurra a venda ("quer que eu já veja um horário pra você ver o carro?", "posso te passar as condições de financiamento?"), ou só na informação, sem rodapé. Um convite tipo "qualquer coisa me chama" pode aparecer de vez em quando, NUNCA como assinatura fixa de todas as respostas.
 - DESCRIÇÃO ESPECÍFICA, NUNCA GENÉRICA: ao apresentar um carro, fale dos dados REAIS dele (ano, km, cor, câmbio, algum diferencial concreto do cadastro). É PROIBIDO usar frases-coringa que servem pra qualquer carro — "robusto e versátil", "ótimo custo-benefício", "ideal pra quem busca conforto e espaço", "conhecido pela eficiência". Isso não vende e soa como texto gerado. Prefira "essa Strada é 2022, só 109 mil km, câmbio manual" a "a Strada é conhecida pela robustez e versatilidade".
@@ -901,6 +924,7 @@ Você atende clientes interessados nos serviços da empresa. Entenda a necessida
 - Se o cliente pedir algo que você não consegue confirmar com os dados disponíveis, use escalate_to_human.
 
 ## Humanização
+${SALES_REQUEST_RULE}
 - Fale como alguém da equipe no WhatsApp, sem textos longos, formulários ou listas desnecessárias.
 - Se perguntarem diretamente se você é IA, responda com honestidade e naturalidade.
 - Não encerre toda mensagem com frases repetidas como "estou à disposição".
@@ -1239,6 +1263,33 @@ ${ownerRules}${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mens
   // texto alega indisponibilidade sem nenhuma tool chamada neste turno, força uma busca de
   // verdade (com as palavras da mensagem atual, ou busca geral se ela não tiver nenhuma — ex:
   // "quero" sozinho) e monta a resposta a partir do resultado real.
+  // Segurança determinística: a IA PROMETEU passar o cliente pra equipe ("vou te encaminhar", "já te
+  // chamam") mas não chamou escalate_to_human — o cliente ficaria esperando alguém que nunca foi
+  // acionado. Faz a escalada de verdade e usa o texto natural de handoff no lugar da promessa.
+  // Não dispara em pergunta/oferta ("posso te encaminhar?"), no modo autônomo (sem vendedor) nem
+  // quando a escalada já aconteceu neste turno.
+  if (
+    agent.can_escalate &&
+    !conv.autonomous_mode &&
+    !wasEscalated &&
+    finalText &&
+    !finalText.trim().endsWith('?') &&
+    !allToolCalls.some((c) => c.name === 'escalate_to_human') &&
+    HANDOFF_PROMISE_RE.test(finalText)
+  ) {
+    const customerText = (lastCustomerMsg?.content ?? '').slice(0, 300)
+    const forcedInput = {
+      reason: 'Cliente pediu pra falar com a equipe de vendas / fechar pedido (escalada automática: a IA prometeu encaminhar sem chamar a ferramenta).',
+      summary: `Última mensagem do cliente: "${customerText}"`,
+      priority: 'normal',
+    }
+    const forced = await toolEscalateToHuman(tenantId, conversationId, forcedInput)
+    allToolCalls.push({ name: 'escalate_to_human', input: forcedInput, result: forced.result })
+    if (forced.escalated) wasEscalated = true
+    finalText = forced.result
+    await recordQualityFlag(tenantId, conversationId, 'escalation_stale', 'IA prometeu encaminhar sem chamar a ferramenta')
+  }
+
   if (!isServiceBusiness && !wasEscalated && finalText && allToolCalls.length === 0 && agent.can_search_products && /n[ãa]o temos\b/i.test(finalText)) {
     const currentKeywords = extractCustomerKeywords(lastCustomerMsg?.content)
     const forcedQuery = currentKeywords.slice(0, 3).join(' ')

@@ -68,6 +68,37 @@ export async function findPreviousVendedor(tenantId: string, conversationId: str
   return row ? { id: row.id, fullName: row.full_name } : null
 }
 
+function normalizeName(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/** Vendedores ativos do tenant (online ou não), em ordem de cadastro. */
+export async function listActiveVendors(tenantId: string): Promise<EligibleVendor[]> {
+  const res = await db.execute(sql`
+    select id, full_name from users
+    where tenant_id = ${tenantId} and role = 'operator' and active = true
+    order by created_at asc
+  `)
+  return (res.rows as Array<{ id: string; full_name: string }>).map((r) => ({ id: r.id, fullName: r.full_name }))
+}
+
+/**
+ * Vendedor que o cliente pediu pelo nome. Casa sem acento/maiúscula: nome completo exato primeiro,
+ * depois primeiro nome. Se o nome for ambíguo (dois vendedores com o mesmo primeiro nome) ou não
+ * existir, devolve null — o chamador segue o roteamento normal em vez de chutar um deles.
+ */
+export async function findVendedorByName(tenantId: string, name: string): Promise<EligibleVendor | null> {
+  const wanted = normalizeName(name)
+  if (!wanted) return null
+  const vendors = await listActiveVendors(tenantId)
+
+  const exact = vendors.filter((v) => normalizeName(v.fullName) === wanted)
+  if (exact.length === 1) return exact[0]
+
+  const byFirst = vendors.filter((v) => normalizeName(v.fullName).split(' ')[0] === wanted.split(' ')[0])
+  return byFirst.length === 1 ? byFirst[0] : null
+}
+
 /** Total de vendedores cadastrados e ativos no tenant (online ou não) — usado pro fallback de time pequeno. */
 export async function countRegisteredVendors(tenantId: string): Promise<number> {
   const res = await db.execute(sql`
