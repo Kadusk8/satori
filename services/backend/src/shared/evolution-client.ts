@@ -14,6 +14,7 @@ import { and, eq } from 'drizzle-orm'
 import { db, getDecryptedEvolutionKey } from '../db/index.js'
 import { contacts, tenants } from '../db/schema.js'
 import { getSandbox } from './sandbox.js'
+import { sendWithLidRetry } from './lid-retry.js'
 import { uploadAudio } from './cloudinary.js'
 import { randomUUID } from 'node:crypto'
 
@@ -86,27 +87,21 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
   const url = tenant.evolutionApiUrl.replace(/\/$/, '')
   const instanceName = tenant.evolutionInstanceName ?? ''
 
-  // O Evolution Go tira o 9 dos celulares BR com DDD >= 31 antes de checar se o número existe no
-  // WhatsApp. Contas cadastradas COM o 9 (comuns) então falham com "not registered on WhatsApp"
-  // mesmo tendo acabado de nos escrever. Se o envio pelo número falhar assim, tenta de novo pelo
-  // LID do contato (guardado no webhook), que não passa por essa normalização. Só roda no erro,
-  // então não muda o caminho de quem já recebe normal.
-  async function withLidRetry<T>(number: string, send: (target: string) => Promise<T>): Promise<T> {
-    try {
-      return await send(number)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (!/not registered on WhatsApp/i.test(msg) || number.includes('@')) throw err
-      const rows = await db
-        .select({ lid: contacts.whatsappLid })
-        .from(contacts)
-        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.whatsappNumber, number)))
-        .limit(1)
-      const lid = rows[0]?.lid
-      if (!lid) throw err
-      console.warn(`[evolution-client] ${number} recusado ("not registered"); reenviando pelo LID`)
-      return await send(lid)
-    }
+  // Reenvio pelo LID quando o Evolution recusa o número (ver shared/lid-retry.ts).
+  function withLidRetry<T>(number: string, send: (target: string) => Promise<T>): Promise<T> {
+    return sendWithLidRetry(
+      number,
+      send,
+      async (n) => {
+        const rows = await db
+          .select({ lid: contacts.whatsappLid })
+          .from(contacts)
+          .where(and(eq(contacts.tenantId, tenantId), eq(contacts.whatsappNumber, n)))
+          .limit(1)
+        return rows[0]?.lid ?? null
+      },
+      (n) => console.warn(`[evolution-client] ${n} recusado ("not registered"); reenviando pelo LID`)
+    )
   }
 
   function headers(): Record<string, string> {
