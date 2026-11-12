@@ -30,6 +30,7 @@ import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { getSandbox, humanDelay, isSandbox } from '../shared/sandbox.js'
 import { listActiveVendors } from './lead-routing.js'
 import { parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
+import { shouldReplaceDeferredImage, stripImagePlaceholders } from '../shared/turn-guards.js'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 const MAX_TOOL_LOOPS = 5
@@ -74,7 +75,7 @@ async function loadOwnerRules(tenantId: string): Promise<string> {
 const HANDOFF_PROMISE_RE = /\b(?:vou|vamos|irei|já vou)\s+(?:te\s+|lhe\s+)?(?:encaminhar|passar|transferir|direcionar)\b[^.!?]{0,60}\b(?:equipe|time|pessoal|vendas|vendedor|vendedora|setor)\b|\bj[áa]\s+(?:te\s+)?(?:chamam|chama|entram?\s+em\s+contato)\b|\b(?:eles|a\s+equipe|o\s+time)\b[^.!?]{0,40}\b(?:entrar[ãa]o?|v[ãa]o)\s+(?:te\s+)?(?:chamar|entrar\s+em\s+contato)\b/i
 
 // Empresas com preço por perfil: o valor NÃO é fixo, depende da quantidade total do pedido.
-const PRICE_TYPES_RULE = `\n## Preço por quantidade (esta loja — vale mais que a regra "PREÇO — dado fixo" acima)\nO preço NÃO é fixo: depende da quantidade TOTAL de peças do pedido (todos os modelos somados). Varejo = 1 a 9 peças, Atacado = 10 a 29, Revenda = 30 ou mais. Os resultados de search_products trazem os três valores — use SÓ o do perfil do cliente. Se ele ainda não disse a quantidade, pergunte ("você pretende levar quantas peças, mais ou menos?") ANTES de falar preço. Ao chamar send_product_image, passe quantity com o total que o cliente já informou; se ele ainda não informou, não passe (a foto vai sem preço e você pergunta a quantidade). Se mudar a quantidade, reclassifique e use o novo preço. Nunca invente preço nem use o de outro perfil.\n`
+const PRICE_TYPES_RULE = `\n## Preço por quantidade (esta loja — vale mais que a regra "PREÇO — dado fixo" acima)\nO preço NÃO é fixo: depende da quantidade TOTAL de peças do pedido (todos os modelos somados). Varejo = 1 a 9 peças, Atacado = 10 a 29, Revenda = 30 ou mais. Os resultados de search_products trazem os três valores — use SÓ o do perfil do cliente. Se ele ainda não disse a quantidade, pergunte ("você pretende levar quantas peças, mais ou menos?") ANTES de falar preço. Ao chamar send_product_image, passe quantity com o total que o cliente já informou; se ele ainda não informou, não passe (a foto vai sem preço e você pergunta a quantidade). Se mudar a quantidade, reclassifique e use o novo preço. Nunca invente preço nem use o de outro perfil. Fale de preço SÓ dos produtos que o cliente já escolheu/pediu; NUNCA liste nem ofereça outros produtos do catálogo que ele não pediu, e não reenvie foto de produto que já mostrou.\n`
 
 // Regra de comportamento quando o cliente pede "o vendedor": quem atende já é a "pessoa da equipe",
 // então primeiro esclarece se ele quer um vendedor específico, em vez de escalar de cara.
@@ -1114,8 +1115,12 @@ ${ownerRules}${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mens
         const productId = String(tu.input.product_id ?? '')
         const imageData = await resolveProductImageData(tenantId, productId, parseQuantity(tu.input.quantity))
         if (imageData) {
-          deferredImage = imageData
-          deferredImageProductId = productId
+          // Uma foto por resposta: chamadas extras (reenvio do produto anterior, itens da busca que o
+          // cliente não pediu) não substituem a escolhida — só o top da busca mais recente substitui.
+          if (shouldReplaceDeferredImage(deferredImage !== null, productId, lastSearchProductsWithImages[0]?.id ?? null)) {
+            deferredImage = imageData
+            deferredImageProductId = productId
+          }
           deferredImageIsExplicit = true
           imageSent = true
           result = 'ok'
@@ -1394,7 +1399,7 @@ ${ownerRules}${isFirstAiResponse && agent.greeting_message ? `\n## Primeira mens
   // (ex: "![Nome](url)"), mesmo com a regra de prompt proibindo isso — nunca deixa de
   // ser texto quebrado no WhatsApp, então removemos aqui antes de enviar.
   if (finalText) {
-    finalText = finalText.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    finalText = stripImagePlaceholders(finalText.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim())
   }
 
   // Rede de segurança: o marcador interno "[tem imagem — use send_product_image com
