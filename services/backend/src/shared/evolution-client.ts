@@ -10,9 +10,9 @@
 // - Toda resposta de sucesso vem como { message: "success", data: {...} }.
 // - O ID da mensagem enviada vem em data.Info.ID.
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, getDecryptedEvolutionKey } from '../db/index.js'
-import { tenants } from '../db/schema.js'
+import { contacts, tenants } from '../db/schema.js'
 import { getSandbox } from './sandbox.js'
 import { uploadAudio } from './cloudinary.js'
 import { randomUUID } from 'node:crypto'
@@ -86,6 +86,29 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
   const url = tenant.evolutionApiUrl.replace(/\/$/, '')
   const instanceName = tenant.evolutionInstanceName ?? ''
 
+  // O Evolution Go tira o 9 dos celulares BR com DDD >= 31 antes de checar se o número existe no
+  // WhatsApp. Contas cadastradas COM o 9 (comuns) então falham com "not registered on WhatsApp"
+  // mesmo tendo acabado de nos escrever. Se o envio pelo número falhar assim, tenta de novo pelo
+  // LID do contato (guardado no webhook), que não passa por essa normalização. Só roda no erro,
+  // então não muda o caminho de quem já recebe normal.
+  async function withLidRetry<T>(number: string, send: (target: string) => Promise<T>): Promise<T> {
+    try {
+      return await send(number)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!/not registered on WhatsApp/i.test(msg) || number.includes('@')) throw err
+      const rows = await db
+        .select({ lid: contacts.whatsappLid })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, tenantId), eq(contacts.whatsappNumber, number)))
+        .limit(1)
+      const lid = rows[0]?.lid
+      if (!lid) throw err
+      console.warn(`[evolution-client] ${number} recusado ("not registered"); reenviando pelo LID`)
+      return await send(lid)
+    }
+  }
+
   function headers(): Record<string, string> {
     return { 'Content-Type': 'application/json', apikey: apiKey }
   }
@@ -96,25 +119,29 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
     instanceName,
 
     async sendText(number: string, text: string): Promise<string | null> {
-      const res = await fetch(`${url}/send/text`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ number, text }),
+      return withLidRetry(number, async (target) => {
+        const res = await fetch(`${url}/send/text`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ number: target, text }),
+        })
+        if (!res.ok) throw new Error(`Evolution Go send/text: ${await res.text()}`)
+        const data = (await res.json()) as any
+        return data?.data?.Info?.ID ?? null
       })
-      if (!res.ok) throw new Error(`Evolution Go send/text: ${await res.text()}`)
-      const data = (await res.json()) as any
-      return data?.data?.Info?.ID ?? null
     },
 
     async sendMedia(number: string, mediaUrl: string, caption?: string, mediaType: 'image' | 'video' | 'document' | 'audio' = 'image'): Promise<string | null> {
-      const res = await fetch(`${url}/send/media`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ number, url: mediaUrl, type: mediaType, caption: caption ?? '' }),
+      return withLidRetry(number, async (target) => {
+        const res = await fetch(`${url}/send/media`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ number: target, url: mediaUrl, type: mediaType, caption: caption ?? '' }),
+        })
+        if (!res.ok) throw new Error(`Evolution Go send/media: ${await res.text()}`)
+        const data = (await res.json()) as any
+        return data?.data?.Info?.ID ?? null
       })
-      if (!res.ok) throw new Error(`Evolution Go send/media: ${await res.text()}`)
-      const data = (await res.json()) as any
-      return data?.data?.Info?.ID ?? null
     },
 
     async sendAudio(number: string, audioBase64: string): Promise<string | null> {
@@ -122,19 +149,21 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
       // data: URI inline — por isso mandamos o áudio decodificado como arquivo.
       const bytes = Buffer.from(audioBase64, 'base64')
 
-      const form = new FormData()
-      form.append('number', number)
-      form.append('type', 'audio')
-      form.append('file', new Blob([bytes], { type: 'audio/ogg' }), 'audio.ogg')
+      return withLidRetry(number, async (target) => {
+        const form = new FormData()
+        form.append('number', target)
+        form.append('type', 'audio')
+        form.append('file', new Blob([bytes], { type: 'audio/ogg' }), 'audio.ogg')
 
-      const res = await fetch(`${url}/send/media`, {
-        method: 'POST',
-        headers: { apikey: apiKey }, // sem Content-Type: o fetch define o boundary do multipart sozinho
-        body: form,
+        const res = await fetch(`${url}/send/media`, {
+          method: 'POST',
+          headers: { apikey: apiKey }, // sem Content-Type: o fetch define o boundary do multipart sozinho
+          body: form,
+        })
+        if (!res.ok) throw new Error(`Evolution Go send/media (audio): ${await res.text()}`)
+        const data = (await res.json()) as any
+        return data?.data?.Info?.ID ?? null
       })
-      if (!res.ok) throw new Error(`Evolution Go send/media (audio): ${await res.text()}`)
-      const data = (await res.json()) as any
-      return data?.data?.Info?.ID ?? null
     },
 
     // Confirmado contra o OpenAPI oficial (Evolution-Go/send-message.yaml,
@@ -142,14 +171,16 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
     // longitude, name?, address? } — nomes/tipos exatos, sem "type" nem "url"
     // (diferente de /send/media).
     async sendLocation(number: string, latitude: number, longitude: number, name?: string, address?: string): Promise<string | null> {
-      const res = await fetch(`${url}/send/location`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ number, latitude, longitude, name, address }),
+      return withLidRetry(number, async (target) => {
+        const res = await fetch(`${url}/send/location`, {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ number: target, latitude, longitude, name, address }),
+        })
+        if (!res.ok) throw new Error(`Evolution Go send/location: ${await res.text()}`)
+        const data = (await res.json()) as any
+        return data?.data?.Info?.ID ?? null
       })
-      if (!res.ok) throw new Error(`Evolution Go send/location: ${await res.text()}`)
-      const data = (await res.json()) as any
-      return data?.data?.Info?.ID ?? null
     },
 
     async sendPresence(number: string, presence: 'composing' | 'recording' | 'paused', _delayMs = 3000): Promise<void> {
