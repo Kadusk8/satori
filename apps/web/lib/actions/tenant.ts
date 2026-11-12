@@ -10,7 +10,16 @@ import { getDbClaims } from '@/lib/auth/session'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
+// Toda ação deste arquivo roda com withAdmin (ignora o RLS) e mexe em qualquer empresa pelo id
+// recebido. Ações do Next podem ser chamadas direto (sem passar pela tela), então a checagem
+// de super admin tem que estar DENTRO de cada uma — o layout do /admin não protege a ação.
+async function requireSuperAdmin(): Promise<void> {
+  const claims = await getDbClaims()
+  if (!claims?.is_super_admin) throw new Error('Apenas o super admin pode alterar empresas.')
+}
+
 export async function updateTenantStatus(tenantId: string, status: 'active' | 'suspended' | 'cancelled') {
+  await requireSuperAdmin()
   await withAdmin((tx) => tx.update(tenants).set({ status }).where(eq(tenants.id, tenantId)))
   revalidatePath(`/admin/tenants/${tenantId}`)
   revalidatePath('/admin/tenants')
@@ -123,6 +132,7 @@ export async function updateTenantBusinessHours(tenantId: string, data: {
   timezone: string
   appointmentDurationMinutes: number
 }) {
+  await requireSuperAdmin()
   await withAdmin((tx) =>
     tx
       .update(tenants)
@@ -144,6 +154,7 @@ export async function updateAgent(agentId: string, data: {
   out_of_hours_message?: string
   personality?: string
 }, tenantId: string) {
+  await requireSuperAdmin()
   const patch = {
     name: data.name,
     systemPrompt: data.system_prompt,
@@ -163,6 +174,7 @@ export async function updateTenantLLM(tenantId: string, data: {
   llmApiKey: string
   agentId: string
 }) {
+  await requireSuperAdmin()
   // A chave e o provedor ficam no próprio agente (BYOK por agente) — cada
   // agente do tenant pode usar um provedor/chave diferente.
   await withAdmin((tx) =>
@@ -185,6 +197,7 @@ export async function updateTenantAudio(tenantId: string, data: {
   audioResponseEnabled: boolean
   elevenLabsApiKey?: string
 }) {
+  await requireSuperAdmin()
   await withAdmin(async (tx) => {
     await tx
       .update(aiAgents)
@@ -215,6 +228,7 @@ export async function updateTenantMetaCapi(tenantId: string, data: {
   metaCapiEnabled: boolean
   metaAccessToken?: string
 }) {
+  await requireSuperAdmin()
   const metaDatasetId = data.metaDatasetId.trim()
 
   await withAdmin((tx) =>
@@ -257,6 +271,7 @@ async function syncEvolutionWebhook(tenantId: string, evolutionApiUrl: string, e
 // registro automático do onboarding falhou, ou a instância foi recriada) e
 // atualiza o status de conexão. Usado pelo botão "Reconectar" no admin.
 export async function reconnectEvolution(tenantId: string): Promise<{ connected: boolean; webhookUrl: string }> {
+  await requireSuperAdmin()
   const row = await withAdmin(async (tx) => {
     const res = await tx.execute(sql`
       select evolution_api_url, webhook_secret,
@@ -285,6 +300,7 @@ export async function updateEvolutionConnection(tenantId: string, data: {
   evolutionInstanceName: string
   evolutionApiKey?: string
 }): Promise<{ connected: boolean; webhookUrl: string }> {
+  await requireSuperAdmin()
   const evolutionApiUrl = data.evolutionApiUrl.trim().replace(/\/$/, '')
   const evolutionInstanceName = data.evolutionInstanceName.trim()
   if (!evolutionApiUrl || !evolutionInstanceName) {
@@ -323,12 +339,14 @@ export async function updateEvolutionConnection(tenantId: string, data: {
 // Salva as etiquetas que bloqueiam a IA de responder automaticamente pra um
 // contato (CRM ou nativas do WhatsApp) — ver contact-block.ts no backend.
 export async function updateTenantBlockedLabels(tenantId: string, labels: string[]) {
+  await requireSuperAdmin()
   const cleaned = Array.from(new Set(labels.map((l) => l.trim().toLowerCase()).filter(Boolean))).slice(0, 30)
   await withAdmin((tx) => tx.update(tenants).set({ blockedLabels: cleaned, updatedAt: new Date() }).where(eq(tenants.id, tenantId)))
   revalidatePath(`/admin/tenants/${tenantId}`)
 }
 
 export async function deleteTenant(tenantId: string) {
+  await requireSuperAdmin()
   await withAdmin((tx) => tx.delete(tenants).where(eq(tenants.id, tenantId)))
   revalidatePath('/admin/tenants')
 }
