@@ -10,6 +10,30 @@ import { uploadAudio } from '../shared/cloudinary.js'
 import { processMessage } from './process-message.js'
 import { triggerEvent, tenantChannel, conversationChannel } from '../shared/realtime.js'
 import { isContactBlockedByTags } from '../shared/contact-block.js'
+import { createConnectionWatcher } from '../shared/connection-watch.js'
+import { buildConnectionAlert, sendAlertEmail } from '../shared/alert-email.js'
+import { getEvolutionClient } from '../shared/evolution-client.js'
+
+// Reação a quedas do WhatsApp: espera uma janela (o Evolution já tenta voltar sozinho), manda
+// reconectar uma vez e avisa por e-mail se não voltar ou se o aparelho foi deslogado.
+const connectionWatcher = createConnectionWatcher({
+  graceMs: Number(process.env.CONNECTION_GRACE_MS) || 150_000,
+  retryWaitMs: Number(process.env.CONNECTION_RETRY_WAIT_MS) || 20_000,
+  checkStatus: async (tenantId) => (await (await getEvolutionClient(tenantId, process.env.ENCRYPTION_KEY)).checkConnection()).connected,
+  reconnect: async (tenantId) => (await getEvolutionClient(tenantId, process.env.ENCRYPTION_KEY)).reconnect(),
+  setFlag: async (tenantId, connected) => {
+    await pool.query(`update tenants set whatsapp_connected = $1 where id = $2`, [connected, tenantId])
+  },
+  notify: async (tenantId, kind, detail) => {
+    const res = await pool.query<{ name: string }>(`select name from tenants where id = $1`, [tenantId])
+    const { subject, html } = buildConnectionAlert(kind, res.rows[0]?.name ?? 'empresa', tenantId, detail)
+    await sendAlertEmail(subject, html)
+  },
+  schedule: (fn, ms) => setTimeout(fn, ms),
+  cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+  sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+  log: (msg) => console.warn(`[connection-watch] ${msg}`),
+})
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -532,6 +556,12 @@ async function handleConnectionEvent(tenant: TenantRow, rawEventType: string, da
   const disconnected = t === 'loggedout' || t === 'logged_out' || t === 'disconnected' || data.state === 'close'
 
   await pool.query(`update tenants set whatsapp_connected = $1 where id = $2`, [disconnected ? false : connected, tenant.id])
+
+  // Reação ao evento (reconectar / avisar) — só pra empresa ativa e só pros 3 tipos que importam.
+  if (tenant.status === 'active') {
+    const kind = t === 'loggedout' || t === 'logged_out' ? 'logged_out' : t === 'disconnected' || data.state === 'close' ? 'disconnected' : t === 'connected' && connected ? 'connected' : null
+    if (kind) await connectionWatcher.onEvent(tenant.id, kind)
+  }
 }
 
 // Etiquetas nativas do WhatsApp (whatsmeow events.LabelEdit / events.LabelAssociationChat,

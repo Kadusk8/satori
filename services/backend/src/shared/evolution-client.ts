@@ -29,6 +29,8 @@ export interface EvolutionClient {
   sendPresence(number: string, presence: 'composing' | 'recording' | 'paused', delayMs?: number): Promise<void>
   checkConnection(): Promise<{ state: string; connected: boolean }>
   connectAndSetWebhook(webhookUrl: string): Promise<void>
+  /** Pede ao Evolution Go pra reconectar a instância (POST /instance/reconnect). */
+  reconnect(): Promise<void>
 }
 
 /**
@@ -57,6 +59,7 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
       async sendPresence() { /* sem "digitando…" no teste */ },
       async checkConnection() { return { state: 'sandbox', connected: true } },
       async connectAndSetWebhook() { /* não se aplica */ },
+      async reconnect() { /* não se aplica */ },
     }
   }
   const rows = await db
@@ -218,6 +221,11 @@ export async function getEvolutionClient(tenantId: string, encryptionKey?: strin
         body: JSON.stringify({ webhookUrl, subscribe: ['MESSAGE', 'CONNECTION', 'LABEL', 'CONTACT'] }),
       })
       if (!res.ok) throw new Error(`Evolution Go instance/connect: ${await res.text()}`)
+    },
+
+    async reconnect(): Promise<void> {
+      const res = await fetch(`${url}/instance/reconnect`, { method: 'POST', headers: headers() })
+      if (!res.ok) throw new Error(`Evolution Go instance/reconnect: ${await res.text()}`)
     },
   }
 }
