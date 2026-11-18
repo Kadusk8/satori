@@ -7,6 +7,7 @@ import { tenants, aiAgents, users, authUsers, products, tenantBusinessModelHisto
 import { encryptedColumn } from '@/lib/db/encryption'
 import { checkEvolutionConnection, setEvolutionWebhook } from '@/lib/evolution/client'
 import { getDbClaims } from '@/lib/auth/session'
+import { AI_SALES_MODES, type AiSalesModeSetting } from '@/lib/ai-sales-mode'
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? null
 
@@ -342,6 +343,14 @@ export async function updateTenantBlockedLabels(tenantId: string, labels: string
   await requireSuperAdmin()
   const cleaned = Array.from(new Set(labels.map((l) => l.trim().toLowerCase()).filter(Boolean))).slice(0, 30)
   await withAdmin((tx) => tx.update(tenants).set({ blockedLabels: cleaned, updatedAt: new Date() }).where(eq(tenants.id, tenantId)))
+  revalidatePath(`/admin/tenants/${tenantId}`)
+}
+
+// Modo da IA (vendedora x SDR) — ver services/backend/src/core/ai-sales-mode.ts.
+export async function updateTenantAiSalesMode(tenantId: string, mode: AiSalesModeSetting) {
+  await requireSuperAdmin()
+  if (!(AI_SALES_MODES as readonly string[]).includes(mode)) throw new Error('Modo inválido.')
+  await withAdmin((tx) => tx.update(tenants).set({ aiSalesMode: mode, updatedAt: new Date() }).where(eq(tenants.id, tenantId)))
   revalidatePath(`/admin/tenants/${tenantId}`)
 }
 

@@ -15,6 +15,7 @@ import { EvolutionEditor } from './evolution-editor'
 import { BlockedLabelsEditor } from './blocked-labels-editor'
 import { BusinessHoursEditor } from './business-hours-editor'
 import { MetaCapiEditor } from './meta-capi-editor'
+import { AiSalesModeEditor } from './ai-sales-mode-editor'
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default',
@@ -61,6 +62,7 @@ interface AdminTenantRow {
   evolution_api_url: string | null; evolution_instance_name: string | null
   webhook_secret: string
   blocked_labels: string[] | null
+  ai_sales_mode: string | null
   openai_api_key: string | null; gemini_api_key: string | null
   anthropic_api_key: string | null; elevenlabs_api_key: string | null
   meta_dataset_id: string | null; meta_access_token: string | null; meta_capi_enabled: boolean
@@ -323,7 +325,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Bot className="h-4 w-4 text-muted-foreground" />
-                Agente de IA (SDR)
+                Agente de IA
               </CardTitle>
               {agent && (
                 <AgentEditor agent={agent} tenantId={id} />
@@ -333,6 +335,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
           <CardContent className="space-y-2 text-sm">
             {agent ? (
               <>
+                <AiSalesModeEditor tenantId={id} currentMode={tenant.ai_sales_mode} />
                 <DetailRow label="Nome" value={agent.name} />
                 <DetailRow label="Personalidade" value={agent.personality ?? '—'} />
                 <DetailRow label="Status" value={agent.is_active ? 'Ativo' : 'Inativo'} valueClass={agent.is_active ? 'text-emerald-600 font-medium' : 'text-muted-foreground'} />
