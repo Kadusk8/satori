@@ -1690,6 +1690,35 @@ CREATE POLICY "service_role_full_access" ON client_score_rules
 
 
 -- ================================================================
+-- TABELA: push_subscriptions (Web Push / PWA) — migration 2026-11-18-push-subscriptions.sql
+-- ================================================================
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+  endpoint    TEXT NOT NULL UNIQUE,
+  keys_p256dh TEXT NOT NULL,
+  keys_auth   TEXT NOT NULL,
+  user_agent  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant_user ON push_subscriptions (tenant_id, user_id);
+
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "own_subscriptions" ON push_subscriptions;
+CREATE POLICY "own_subscriptions" ON push_subscriptions
+  FOR ALL
+  USING (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID AND user_id = auth.uid())
+  WITH CHECK (tenant_id = (auth.jwt() ->> 'tenant_id')::UUID AND user_id = auth.uid());
+
+DROP POLICY IF EXISTS "service_role_full_access" ON push_subscriptions;
+CREATE POLICY "service_role_full_access" ON push_subscriptions
+  FOR ALL USING (auth.role() = 'service_role');
+
+
+-- ================================================================
 -- GRANTS — no Supabase isso é feito automaticamente pela plataforma;
 -- no Neon precisa ser explícito, senão os roles não enxergam nada
 -- mesmo com RLS liberando as linhas (privilégio de tabela é uma
