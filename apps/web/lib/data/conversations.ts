@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
-import { conversations, contacts, aiAgents, users, kanbanStages } from '@/lib/db/schema'
+import { conversations, contacts, aiAgents, users, kanbanStages, tenants } from '@/lib/db/schema'
+import { normalizeAiSalesMode, type AiSalesModeSetting } from '@/lib/ai-sales-mode'
 import { getDbClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
 import { triggerEvent, tenantChannel } from '@/lib/realtime/server'
@@ -36,10 +37,18 @@ export async function listKanban(): Promise<{
   conversations: DBConversation[]
   tenantId: string
   viewer: KanbanViewer
+  aiSalesMode: AiSalesModeSetting
 }> {
   const claims = await claimsOrThrow()
 
   return withClaims(claims, async (tx) => {
+    const tenantRows = await tx
+      .select({ aiSalesMode: tenants.aiSalesMode })
+      .from(tenants)
+      .where(eq(tenants.id, claims.tenant_id!))
+      .limit(1)
+    const aiSalesMode = normalizeAiSalesMode(tenantRows[0]?.aiSalesMode)
+
     const viewerRows = await tx
       .select({ id: users.id, role: users.role, isAvailable: users.isAvailable })
       .from(users)
@@ -120,7 +129,7 @@ export async function listKanban(): Promise<{
       messages: r.last_message !== null ? [{ content: r.last_message }] : [],
     }))
 
-    return { stages: stageRows, conversations: convs, tenantId: claims.tenant_id!, viewer }
+    return { stages: stageRows, conversations: convs, tenantId: claims.tenant_id!, viewer, aiSalesMode }
   })
 }
 

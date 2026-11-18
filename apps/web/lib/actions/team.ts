@@ -9,6 +9,7 @@ import { upsertAuthUser } from '@/lib/auth/users'
 import { createToken } from '@/lib/auth/tokens'
 import { sendOperatorInviteEmail } from '@/lib/email/resend'
 import { isManager } from '@/lib/auth/permissions'
+import { AI_SALES_MODES, type AiSalesModeSetting } from '@/lib/ai-sales-mode'
 
 async function requireOwnerOrAdmin() {
   const claims = await getSessionClaims()
@@ -25,6 +26,17 @@ export async function updateAvailability(isAvailable: boolean): Promise<void> {
   const dbClaims = (await getDbClaims())!
   await withClaims(dbClaims, (tx) =>
     tx.update(users).set({ isAvailable }).where(eq(users.id, claims.userId!))
+  )
+  revalidatePath('/conversations')
+}
+
+/** Dono/admin escolhe o modo da IA do próprio tenant (vendedora, SDR ou automático). */
+export async function updateAiSalesMode(mode: AiSalesModeSetting): Promise<void> {
+  const { tenantId } = await requireOwnerOrAdmin()
+  if (!(AI_SALES_MODES as readonly string[]).includes(mode)) throw new Error('Modo inválido.')
+  const dbClaims = (await getDbClaims())!
+  await withClaims(dbClaims, (tx) =>
+    tx.update(tenants).set({ aiSalesMode: mode }).where(eq(tenants.id, tenantId))
   )
   revalidatePath('/conversations')
 }

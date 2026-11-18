@@ -8,6 +8,7 @@ import { appointments, conversations, kanbanStages, products } from '../db/schem
 import { getEvolutionClient } from '../shared/evolution-client.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors, findPreviousVendedor, findVendedorByName } from './lead-routing.js'
+import { normalizeAiSalesModeSetting } from './ai-sales-mode.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { isSandbox } from '../shared/sandbox.js'
 import { captionPriceLine, parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
@@ -523,9 +524,13 @@ export async function toolEscalateToHuman(
   }
 
   // 2) Ninguém online agora, mas a empresa já tem equipe cadastrada — a IA
-  // assume o fechamento sozinha em vez de deixar a conversa órfã.
+  // assume o fechamento sozinha em vez de deixar a conversa órfã. Exceção: modo
+  // "sempre SDR" (tenants.ai_sales_mode = 'sdr') — o dono quer que a IA nunca feche;
+  // o lead fica aguardando a equipe (passo 3).
   const totalVendors = await countRegisteredVendors(tenantId)
-  if (totalVendors >= 2) {
+  const salesModeRes = await pool.query<{ ai_sales_mode: string | null }>(`select ai_sales_mode from tenants where id = $1`, [tenantId])
+  const forcedSdr = normalizeAiSalesModeSetting(salesModeRes.rows[0]?.ai_sales_mode) === 'sdr'
+  if (totalVendors >= 1 && !forcedSdr) {
     await db
       .update(conversations)
       .set({ autonomousMode: true, aiSummary: summary, priority })
@@ -537,8 +542,8 @@ export async function toolEscalateToHuman(
     }
   }
 
-  // 3) Fallback: time pequeno demais (menos de 2 vendedores) — comportamento
-  // antigo, escala sem dono.
+  // 3) Fallback: sem vendedor cadastrado (o dono/admin atende) ou modo "sempre SDR" —
+  // escala sem dono, pra equipe pegar quando ficar disponível.
   await db
     .update(conversations)
     .set({ status: 'waiting_human', aiSummary: summary, priority })

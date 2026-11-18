@@ -99,6 +99,16 @@ export async function findVendedorByName(tenantId: string, name: string): Promis
   return byFirst.length === 1 ? byFirst[0] : null
 }
 
+/** Vendedores ativos do tenant: total cadastrado e quantos estão online — usado pra decidir o modo da IA (vendedora x SDR). */
+export async function countVendorsAvailability(tenantId: string): Promise<{ registered: number; online: number }> {
+  const res = await db.execute(sql`
+    select count(*)::int as registered, count(*) filter (where is_available)::int as online
+    from users where tenant_id = ${tenantId} and role = 'operator' and active = true
+  `)
+  const row = res.rows[0] as { registered: number; online: number } | undefined
+  return { registered: row?.registered ?? 0, online: row?.online ?? 0 }
+}
+
 /** Total de vendedores cadastrados e ativos no tenant (online ou não) — usado pro fallback de time pequeno. */
 export async function countRegisteredVendors(tenantId: string): Promise<number> {
   const res = await db.execute(sql`

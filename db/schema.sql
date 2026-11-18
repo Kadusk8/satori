@@ -291,6 +291,22 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS blocked_labels TEXT[] NOT NULL DEFA
 
 COMMENT ON COLUMN tenants.blocked_labels IS 'Etiquetas (CRM ou nativas do WhatsApp, lowercase) que travam a IA — contato com qualquer uma delas nunca recebe resposta automática nem tem o card de kanban movido.';
 
+-- ================================================================
+-- Modo de atuação da IA (vendedora x SDR) — migration 2026-11-18-ai-sales-mode.sql
+-- ================================================================
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS ai_sales_mode TEXT NOT NULL DEFAULT 'auto';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenants_ai_sales_mode_check') THEN
+    ALTER TABLE tenants
+      ADD CONSTRAINT tenants_ai_sales_mode_check CHECK (ai_sales_mode IN ('auto', 'seller', 'sdr'));
+  END IF;
+END $$;
+
+COMMENT ON COLUMN tenants.ai_sales_mode IS 'Modo da IA: auto (SDR com vendedor online no horário, vendedora caso contrário), seller (sempre vendedora), sdr (sempre SDR).';
+
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "tenant_isolation_select" ON tenants

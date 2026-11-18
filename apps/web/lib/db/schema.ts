@@ -76,6 +76,9 @@ export const tenants = pgTable(
     // nativas do WhatsApp) nunca recebem mensagem automática — ver
     // services/backend/src/shared/contact-block.ts.
     blockedLabels: text('blocked_labels').array().notNull().default([]),
+    // Modo da IA: 'auto' (SDR com vendedor online no horário, vendedora caso contrário),
+    // 'seller' (sempre vendedora), 'sdr' (sempre SDR) — ver services/backend/src/core/ai-sales-mode.ts.
+    aiSalesMode: text('ai_sales_mode').notNull().default('auto'),
     whatsappNumber: text('whatsapp_number'),
     whatsappConnectionType: text('whatsapp_connection_type').default('baileys'),
     whatsappConnected: boolean('whatsapp_connected').notNull().default(false),

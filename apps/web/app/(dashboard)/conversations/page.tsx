@@ -10,7 +10,10 @@ import { Filter, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { listKanban, moveConversation, type KanbanViewer } from '@/lib/data/conversations'
-import { updateAvailability } from '@/lib/actions/team'
+import { updateAvailability, updateAiSalesMode } from '@/lib/actions/team'
+import { isManager } from '@/lib/auth/permissions'
+import { AI_SALES_MODES, AI_SALES_MODE_DESCRIPTIONS, AI_SALES_MODE_LABELS, normalizeAiSalesMode, type AiSalesModeSetting } from '@/lib/ai-sales-mode'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
 
@@ -90,12 +93,15 @@ export default function ConversationsPage() {
   const [tenantId, setTenantId] = useState<string | null>(null)
   const [viewer, setViewer] = useState<KanbanViewer | null>(null)
   const [isTogglingAvailability, setIsTogglingAvailability] = useState(false)
+  const [aiSalesMode, setAiSalesMode] = useState<AiSalesModeSetting | null>(null)
+  const [isSavingAiSalesMode, setIsSavingAiSalesMode] = useState(false)
 
   // ── Carrega dados iniciais ────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
-      const { stages: stagesData, conversations: convsData, tenantId: tid, viewer: viewerData } = await listKanban()
+      const { stages: stagesData, conversations: convsData, tenantId: tid, viewer: viewerData, aiSalesMode: modeData } = await listKanban()
+      setAiSalesMode(modeData)
       const mappedStages = stagesData.map(mapStage)
       setStages(mappedStages)
       setConversations(convsData.map((c) => mapConversation(c as unknown as DBConversation, mappedStages)))
@@ -119,6 +125,22 @@ export default function ConversationsPage() {
       setIsTogglingAvailability(false)
     }
   }, [viewer])
+
+  const handleChangeAiSalesMode = useCallback(async (value: unknown) => {
+    const next = normalizeAiSalesMode(value)
+    const previous = aiSalesMode
+    setAiSalesMode(next)
+    setIsSavingAiSalesMode(true)
+    try {
+      await updateAiSalesMode(next)
+      toast.success(`Modo da IA: ${AI_SALES_MODE_LABELS[next]}`)
+    } catch (err) {
+      setAiSalesMode(previous)
+      toast.error('Erro ao mudar o modo da IA: ' + (err instanceof Error ? err.message : 'erro'))
+    } finally {
+      setIsSavingAiSalesMode(false)
+    }
+  }, [aiSalesMode])
 
   useEffect(() => {
     setIsLoading(true)
@@ -207,6 +229,29 @@ export default function ConversationsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {viewer && isManager(viewer.role) && aiSalesMode && (
+            <label
+              className="flex items-center gap-2 text-sm font-medium"
+              title={AI_SALES_MODE_DESCRIPTIONS[aiSalesMode]}
+            >
+              <span className="text-muted-foreground">Modo da IA</span>
+              <Select value={aiSalesMode} onValueChange={handleChangeAiSalesMode} disabled={isSavingAiSalesMode}>
+                <SelectTrigger className="h-8 w-[170px]">
+                  <SelectValue>{(v: unknown) => AI_SALES_MODE_LABELS[normalizeAiSalesMode(v)]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {AI_SALES_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      <div className="flex flex-col">
+                        <span>{AI_SALES_MODE_LABELS[m]}</span>
+                        <span className="text-xs text-muted-foreground max-w-[260px] whitespace-normal">{AI_SALES_MODE_DESCRIPTIONS[m]}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          )}
           {viewer && (
             <label className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
               <span className={viewer.isAvailable ? 'text-emerald-600' : 'text-muted-foreground'}>

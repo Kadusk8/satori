@@ -28,7 +28,8 @@ import {
 import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { triggerEvent, conversationChannel } from '../shared/realtime.js'
 import { getSandbox, humanDelay, isSandbox } from '../shared/sandbox.js'
-import { listActiveVendors } from './lead-routing.js'
+import { countVendorsAvailability, listActiveVendors } from './lead-routing.js'
+import { resolveAiSalesMode, type AiSalesMode } from './ai-sales-mode.js'
 import { parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
 import { shouldReplaceDeferredImage, stripImagePlaceholders } from '../shared/turn-guards.js'
 
@@ -197,6 +198,7 @@ interface ConversationRow {
   t_name: string
   business_model: 'product' | 'fashion' | 'service'
   price_types_enabled: boolean
+  ai_sales_mode: string | null
   business_hours: BusinessHours
   timezone: string
   evolution_instance_name: string | null
@@ -551,7 +553,7 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
              where wla.tenant_id = ct.tenant_id and wla.labeled = true
                and wla.jid in (ct.whatsapp_lid, ct.whatsapp_number || '@s.whatsapp.net')) as whatsapp_label_names,
             t.blocked_labels as blocked_labels,
-            t.name as t_name, t.business_model, t.price_types_enabled, t.business_hours, t.timezone, t.evolution_instance_name,
+            t.name as t_name, t.business_model, t.price_types_enabled, t.ai_sales_mode, t.business_hours, t.timezone, t.evolution_instance_name,
             t.openai_api_key, t.gemini_api_key, t.anthropic_api_key, t.elevenlabs_api_key,
             t.latitude, t.longitude
      from conversations c
@@ -631,6 +633,26 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   const businessHours = conv.business_hours
   const timezone = conv.timezone ?? 'America/Sao_Paulo'
   const withinBusinessHours = isWithinBusinessHours(businessHours, timezone)
+
+  // Modo da IA nesta mensagem: vendedora (conduz até o fechamento) ou SDR (qualifica e passa
+  // pro vendedor). Reavaliado a cada mensagem — depende de quem está online agora e do horário.
+  // Falha ao contar vendedores nunca derruba o atendimento: cai no comportamento de vendedora.
+  let salesMode: AiSalesMode = 'seller'
+  try {
+    const vendorsAvailability = await countVendorsAvailability(conv.tenant_id)
+    salesMode = resolveAiSalesMode({
+      setting: conv.ai_sales_mode,
+      registeredVendors: vendorsAvailability.registered,
+      onlineVendors: vendorsAvailability.online,
+      withinBusinessHours,
+      conversationInAutonomousClosing: conv.autonomous_mode,
+    })
+  } catch (err) {
+    console.error('[process-message] Falha ao resolver modo da IA (seguindo como vendedora):', err instanceof Error ? err.message : err)
+  }
+  // SDR só faz sentido em loja (produto/moda) e se a IA puder escalar — sem escalate_to_human
+  // ela não teria como passar o lead e o cliente ficaria sem fechamento.
+  const isSdrMode = salesMode === 'sdr' && conv.business_model !== 'service' && agent.can_escalate
 
   // Histórico (últimas 40 mensagens). ORDER BY DESC + LIMIT pega as mais
   // recentes; sem o DESC aqui, LIMIT pegaria as 40 MAIS ANTIGAS da conversa
@@ -828,7 +850,9 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
 
   const ownerRules = (await loadOwnerRules(tenantId)) + (await loadSalesTeamBlock(tenantId)) + (priceTypesEnabled ? PRICE_TYPES_RULE : '')
   const productSystemPrompt = `## Seu papel (regras de venda com prioridade máxima — mas a identidade, nome, gênero e qualquer fluxo de qualificação específico definidos em "Contexto do negócio e personalidade" abaixo sempre prevalecem sobre esta seção)
-Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.
+${isSdrMode
+    ? 'Sua função agora é ser a PRIMEIRA PESSOA do atendimento (pré-venda): entender o que o cliente quer → mostrar o que tem no catálogo → qualificar → passar pro vendedor fechar. Quem negocia e fecha é o vendedor (ver "Modo pré-venda (SDR)" mais abaixo, que tem prioridade sobre as regras de fechamento desta seção). Nunca deixe o cliente sem resposta sobre o produto que pediu.'
+    : 'Sua função é vender: entender o que o cliente quer → buscar nos produtos → gerar valor e despertar interesse → fechar a venda. Nunca deixe o cliente sem resposta sobre o produto que pediu.'}
 
 ## Regras de comportamento (obrigatórias)
 - SAUDAÇÃO SE RESPONDE COM SAUDAÇÃO: se a mensagem ATUAL do cliente é só um cumprimento ou abertura ("oi", "olá", "bom dia", "boa tarde", "boa noite", "tudo bem?", "e aí") SEM pedir nada, apenas cumprimente de forma calorosa e pergunte como pode ajudar. NÃO chame search_products, NÃO reenvie foto e NÃO re-ofereça nenhum produto que já foi mostrado antes — mesmo que a conversa anterior fosse sobre um carro específico. Reagir a um "boa tarde" reapresentando o último produto é a MARCA REGISTRADA de um robô travado; um vendedor de verdade só cumprimenta de volta e pergunta no que pode ajudar.
@@ -879,6 +903,28 @@ momento. Não prometa transferência ("vou chamar alguém", "já te transfiro") 
 do cliente. Mantenha a mesma disciplina das regras acima: negocie só dentro do catálogo real (nunca
 invente preço, prazo ou desconto fora do cadastrado), quebre objeções com benefícios concretos e
 conduza ativamente para o fechamento (forma de pagamento, confirmação do pedido).
+` : ''}${isSdrMode ? `
+## Modo pré-venda (SDR) — ativado agora (há vendedor disponível pra assumir)
+Esta seção tem prioridade sobre as regras de fechamento, negociação e "não escale de cara" acima.
+Você é quem recebe o cliente; o vendedor é quem negocia e fecha. Seu objetivo é entregar um lead
+quente e bem qualificado, rápido — não segure o cliente além do necessário.
+- MOSTRE O PRODUTO normalmente: busque no catálogo, mande a foto e o preço cadastrado de 1 ou 2 opções
+  que batem com o pedido. Isso continua igual — o cliente não pode ficar sem resposta.
+- QUALIFIQUE de forma natural, no meio da conversa (nunca como formulário, uma pergunta por vez, só o que
+  ainda não sabe): o que ele procura / pra que uso, forma de pagamento (à vista, cartão, financiamento,
+  troca), e quando pretende comprar. Se o "Contexto do negócio e personalidade" definir outras perguntas
+  de qualificação, use as dele.
+- NÃO NEGOCIE: não dê desconto, não feche condição, não simule financiamento, não confirme pedido nem
+  combine pagamento. Nesses assuntos, passe pro vendedor.
+- PASSE PRO VENDEDOR (chame escalate_to_human) assim que QUALQUER uma destas acontecer:
+  • o cliente demonstrar intenção de compra (quer fechar, reservar, visitar, saber como pagar);
+  • pedir desconto, negociação, financiamento, avaliação de troca ou condição especial;
+  • pedir pra falar com vendedor/atendente/alguém da equipe (aqui NÃO pergunte se já está falando com você — escale);
+  • você já tiver o básico da qualificação (o que quer + forma de pagamento ou prazo).
+- No campo summary do escalate_to_human, escreva o resumo da qualificação pro vendedor: produto(s) de
+  interesse, uso, forma de pagamento, prazo, objeções e qualquer detalhe útil. Use priority "high" se ele
+  quer comprar logo.
+- Ao passar, não escreva "vou te transferir" — só chame a ferramenta (o sistema manda a mensagem natural).
 ` : ''}
 
 ## Contexto atual
