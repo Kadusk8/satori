@@ -4,6 +4,7 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
 import { contacts } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { isManager } from '@/lib/auth/permissions'
 import { getClientSummaries, summaryOrEmpty } from '@/lib/data/client-history'
 import { ContactsTable } from './contacts-table'
 
@@ -66,7 +67,11 @@ export default async function ContactsPage() {
         </p>
       </div>
 
-      <ContactsTable initialContacts={initialContacts} tiers={rules.tiers.map((t) => t.name)} />
+      <ContactsTable
+        initialContacts={initialContacts}
+        tiers={rules.tiers.map((t) => t.name)}
+        canDelete={isManager(claims.user_role)}
+      />
     </div>
   )
 }

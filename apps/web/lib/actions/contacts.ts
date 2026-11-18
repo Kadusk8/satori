@@ -3,8 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { and, eq } from 'drizzle-orm'
 import { withClaims } from '@/lib/db'
-import { contacts } from '@/lib/db/schema'
+import { appointments, contacts, conversations, messages } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
+import { isManager } from '@/lib/auth/permissions'
+import { triggerEvent, tenantChannel } from '@/lib/realtime/server'
 
 async function claimsOrThrow() {
   const claims = await getDbClaims()
@@ -15,6 +17,40 @@ async function claimsOrThrow() {
 function revalidateContactPaths() {
   revalidatePath('/conversations')
   revalidatePath('/contacts')
+}
+
+/**
+ * Exclui o contato e todo o histórico dele no tenant — só dono/admin.
+ * messages.contact_id e appointments.contact_id são FK NO ACTION, e o Postgres checa a de
+ * messages antes de a cascata conversations → messages rodar — então apaga na ordem
+ * explícita: agendamentos → mensagens → conversas → contato (follow-ups saem em cascata).
+ * Se a pessoa mandar mensagem de novo, o webhook recria o contato do zero.
+ */
+export async function deleteContact(contactId: string): Promise<void> {
+  const claims = await claimsOrThrow()
+  if (!isManager(claims.user_role)) throw new Error('Só o dono ou um admin pode excluir contatos.')
+  const tenantId = claims.tenant_id!
+
+  await withClaims(claims, async (tx) => {
+    await tx
+      .delete(appointments)
+      .where(and(eq(appointments.contactId, contactId), eq(appointments.tenantId, tenantId)))
+    await tx
+      .delete(messages)
+      .where(and(eq(messages.contactId, contactId), eq(messages.tenantId, tenantId)))
+    await tx
+      .delete(conversations)
+      .where(and(eq(conversations.contactId, contactId), eq(conversations.tenantId, tenantId)))
+    const deleted = await tx
+      .delete(contacts)
+      .where(and(eq(contacts.id, contactId), eq(contacts.tenantId, tenantId)))
+      .returning({ id: contacts.id })
+    if (deleted.length === 0) throw new Error('Contato não encontrado.')
+  })
+
+  // Kanban aberto em outra aba some com o card do contato excluído.
+  await triggerEvent(tenantChannel(tenantId), 'conversation:changed', { contactId })
+  revalidateContactPaths()
 }
 
 /** Observação livre sobre o lead — qualquer usuário do tenant pode editar

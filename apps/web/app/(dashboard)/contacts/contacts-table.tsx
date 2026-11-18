@@ -10,6 +10,7 @@ import {
   Tag,
   StickyNote,
   Pencil,
+  Trash2,
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { cn, formatBRL } from '@/lib/utils'
 import { CLIENT_STATUS_LABEL, type ClientStatus } from '@/lib/client-score'
-import { updateContactName, updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
+import { deleteContact, updateContactName, updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 
 export interface Contact {
   id: string
@@ -91,7 +92,15 @@ function formatLastContact(dateStr: string) {
   return `${days} dias atrás`
 }
 
-export function ContactsTable({ initialContacts, tiers }: { initialContacts: Contact[]; tiers: string[] }) {
+export function ContactsTable({
+  initialContacts,
+  tiers,
+  canDelete,
+}: {
+  initialContacts: Contact[]
+  tiers: string[]
+  canDelete: boolean
+}) {
   const router = useRouter()
   const [contactList, setContactList] = useState(initialContacts)
   const [search, setSearch] = useState('')
@@ -99,6 +108,7 @@ export function ContactsTable({ initialContacts, tiers }: { initialContacts: Con
   const [statusFilter, setStatusFilter] = useState<ClientStatus | ''>('')
   const [tierFilter, setTierFilter] = useState('')
   const [editing, setEditing] = useState<Contact | null>(null)
+  const [deleting, setDeleting] = useState<Contact | null>(null)
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -121,6 +131,11 @@ export function ContactsTable({ initialContacts, tiers }: { initialContacts: Con
 
   function handleSaved(updated: Contact) {
     setContactList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+    router.refresh()
+  }
+
+  function handleDeleted(contactId: string) {
+    setContactList((prev) => prev.filter((c) => c.id !== contactId))
     router.refresh()
   }
 
@@ -290,6 +305,15 @@ export function ContactsTable({ initialContacts, tiers }: { initialContacts: Con
                       <MessageSquare className="h-3.5 w-3.5" />
                       Conversar
                     </a>
+                    {canDelete && (
+                      <button
+                        onClick={() => setDeleting(contact)}
+                        title="Excluir contato"
+                        className="inline-flex items-center rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -305,7 +329,63 @@ export function ContactsTable({ initialContacts, tiers }: { initialContacts: Con
       </div>
 
       <ContactEditDialog contact={editing} onOpenChange={(v) => !v && setEditing(null)} onSaved={handleSaved} />
+      <ContactDeleteDialog contact={deleting} onOpenChange={(v) => !v && setDeleting(null)} onDeleted={handleDeleted} />
     </>
+  )
+}
+
+function ContactDeleteDialog({
+  contact,
+  onOpenChange,
+  onDeleted,
+}: {
+  contact: Contact | null
+  onOpenChange: (open: boolean) => void
+  onDeleted: (contactId: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+
+  async function handleDelete() {
+    if (!contact) return
+    setLoading(true)
+    try {
+      await deleteContact(contact.id)
+      onDeleted(contact.id)
+      toast.success('Contato excluído')
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir contato')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={!!contact} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Excluir contato?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <p>
+            <span className="font-medium">{contact?.name}</span>{' '}
+            <span className="text-muted-foreground">({contact?.phone})</span> será excluído junto com todas as
+            conversas, mensagens, agendamentos e follow-ups dele.
+          </p>
+          <p className="text-muted-foreground">
+            Essa ação não pode ser desfeita. Se a pessoa mandar mensagem de novo, ela volta como um contato novo.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" onClick={handleDelete} disabled={loading}>
+            {loading ? 'Excluindo...' : 'Excluir'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
