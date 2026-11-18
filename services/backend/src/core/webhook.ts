@@ -16,7 +16,8 @@ import { getEvolutionClient } from '../shared/evolution-client.js'
 
 // Reação a quedas do WhatsApp: espera uma janela (o Evolution já tenta voltar sozinho), manda
 // reconectar uma vez e avisa por e-mail se não voltar ou se o aparelho foi deslogado.
-const connectionWatcher = createConnectionWatcher({
+// Exportado pro cron check-connections alimentar o mesmo estado (sem alerta duplicado).
+export const connectionWatcher = createConnectionWatcher({
   graceMs: Number(process.env.CONNECTION_GRACE_MS) || 150_000,
   retryWaitMs: Number(process.env.CONNECTION_RETRY_WAIT_MS) || 20_000,
   checkStatus: async (tenantId) => (await (await getEvolutionClient(tenantId, process.env.ENCRYPTION_KEY)).checkConnection()).connected,

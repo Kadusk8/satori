@@ -9,6 +9,7 @@ import { runScheduleReminder } from './cron/schedule-reminder.js'
 import { runProcessFollowUps } from './cron/process-follow-ups.js'
 import { runResetMonthlyMessageCounts } from './cron/reset-monthly-counts.js'
 import { runMonitorAiQuality } from './cron/monitor-ai-quality.js'
+import { runCheckConnections } from './cron/check-connections.js'
 
 if (!process.env.BACKEND_TOKEN) {
   console.warn(
@@ -52,6 +53,12 @@ cron.schedule('0 * * * *', () => {
 // db/schema.sql por depender de pg_net/pg_cron indisponíveis no Neon).
 cron.schedule('0 0 1 * *', () => {
   runResetMonthlyMessageCounts().catch((err) => app.log.error({ err }, '[cron] reset-monthly-counts falhou'))
+})
+
+// Status real do WhatsApp de cada empresa ativa: a cada 2 minutos. Rede de segurança pro
+// caso do Evolution Go cair sem mandar (ou sem conseguir tratar) o evento de desconexão.
+cron.schedule('*/2 * * * *', () => {
+  runCheckConnections().catch((err) => app.log.error({ err }, '[cron] check-connections falhou'))
 })
 
 // Monitor de qualidade da IA: 1x/dia às 9:00 AM (WORKSTREAM B)
