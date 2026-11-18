@@ -11,6 +11,8 @@ import { parseWhatsAppExport } from '@/lib/whatsapp-export-parser'
 
 export interface ChatConversation {
   id: string; status: string; priority: string
+  /** Resumo da qualificação escrito pela IA ao passar o lead pro vendedor. */
+  ai_summary: string | null
   ai_agents: { name: string } | null
   contacts: { id: string; whatsapp_name: string | null; custom_name: string | null; whatsapp_number: string }
   users: { id: string; full_name: string } | null
@@ -34,6 +36,7 @@ export async function getChat(conversationId: string): Promise<{ conversation: C
         id: conversations.id,
         status: conversations.status,
         priority: conversations.priority,
+        ai_summary: conversations.aiSummary,
         agent_name: aiAgents.name,
         contact_id: contacts.id,
         whatsapp_name: contacts.whatsappName,
@@ -64,6 +67,7 @@ export async function getChat(conversationId: string): Promise<{ conversation: C
       id: r.id,
       status: r.status,
       priority: r.priority,
+      ai_summary: r.ai_summary,
       ai_agents: r.agent_name ? { name: r.agent_name } : null,
       contacts: { id: r.contact_id, whatsapp_name: r.whatsapp_name, custom_name: r.custom_name, whatsapp_number: r.whatsapp_number },
       users: r.assigned_id ? { id: r.assigned_id, full_name: r.assigned_name! } : null,
@@ -135,6 +139,8 @@ export async function closeConversation(conversationId: string): Promise<void> {
 
 export interface DrawerDetail {
   id: string; status: string; started_at: string; last_message_at: string
+  priority: string
+  ai_summary: string | null
   ai_agents: { name: string } | null
   contacts: {
     id: string; whatsapp_number: string; whatsapp_name: string | null; custom_name: string | null
@@ -153,6 +159,9 @@ export async function getConversationDrawer(conversationId: string): Promise<{ d
         status: conversations.status,
         started_at: conversations.startedAt,
         last_message_at: conversations.lastMessageAt,
+        priority: conversations.priority,
+        ai_summary: conversations.aiSummary,
+        assigned_to: conversations.assignedTo,
         agent_name: aiAgents.name,
         c_id: contacts.id,
         c_number: contacts.whatsappNumber,
@@ -172,10 +181,20 @@ export async function getConversationDrawer(conversationId: string): Promise<{ d
 
     if (!rows[0]) return null
     const r = rows[0]
+
+    // Mesma regra do getChat: vendedor só abre conversa própria ou sem dono já escalada.
+    if (!isManager(claims.user_role)) {
+      const isMine = r.assigned_to === claims.sub
+      const isUnownedEscalated = !r.assigned_to && (r.status === 'waiting_human' || r.status === 'human_handling')
+      if (!isMine && !isUnownedEscalated) return null
+    }
+
     const iso = (d: Date | string | null) => (d === null ? null : (d instanceof Date ? d : new Date(d)).toISOString())
     const detail: DrawerDetail = {
       id: r.id,
       status: r.status,
+      priority: r.priority,
+      ai_summary: r.ai_summary,
       started_at: iso(r.started_at)!,
       last_message_at: iso(r.last_message_at)!,
       ai_agents: r.agent_name ? { name: r.agent_name } : null,

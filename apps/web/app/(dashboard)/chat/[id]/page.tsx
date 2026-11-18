@@ -23,6 +23,7 @@ import { ImportHistoryDialog } from '@/components/chat/import-history-dialog'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { cn } from '@/lib/utils'
 import { getChat, getMessagesSince, assumeConversation, closeConversation } from '@/lib/data/chat'
+import { AiSummaryCard } from '@/components/chat/ai-summary-card'
 import { returnConversationToAI } from '@/lib/data/conversations'
 import { getPusherClient, conversationChannel } from '@/lib/realtime/client'
 import { toast } from 'sonner'
@@ -43,6 +44,7 @@ interface DBConversation {
   id: string
   status: string
   priority: string
+  ai_summary: string | null
   ai_agents: { name: string } | null
   contacts: {
     id: string
@@ -436,6 +438,13 @@ export default function ChatPage() {
           </Button>
         </div>
       </div>
+
+      {/* Resumo da qualificação feito pela IA ao passar o lead — fixo acima das mensagens */}
+      <AiSummaryCard
+        summary={conversation.ai_summary}
+        priority={conversation.priority}
+        className="mx-6 mt-4 shrink-0"
+      />
 
       {/* Mensagens */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">

@@ -9,7 +9,8 @@ import { getEvolutionClient } from '../shared/evolution-client.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
 import { assignNextVendedor, countRegisteredVendors, findPreviousVendedor, findVendedorByName } from './lead-routing.js'
 import { normalizeAiSalesModeSetting } from './ai-sales-mode.js'
-import { triggerEvent, conversationChannel } from '../shared/realtime.js'
+import { triggerEvent, conversationChannel, tenantChannel } from '../shared/realtime.js'
+import { sendPushNotification } from '../shared/push-sender.js'
 import { isSandbox } from '../shared/sandbox.js'
 import { captionPriceLine, parseQuantity, profilePricesBlock } from '../shared/price-profile.js'
 
@@ -480,6 +481,58 @@ export async function toolCancelAppointment(tenantId: string, input: Record<stri
   return '✅ Agendamento cancelado com sucesso.'
 }
 
+/**
+ * Avisa na hora que a IA passou um lead: atualiza o kanban em tempo real e manda push.
+ * Com vendedor definido, o push vai só pra ele (é o único vendedor que enxerga a conversa);
+ * sem dono, vai pra todo mundo do tenant (conversa sem dono aguardando aparece pra todos).
+ * Nunca derruba a escalada — falha só é logada.
+ */
+async function notifyEscalation(
+  tenantId: string,
+  conversationId: string,
+  vendorId: string | null,
+  summary: string,
+  priority: string
+): Promise<void> {
+  try {
+    await triggerEvent(tenantChannel(tenantId), 'conversation:changed', { conversationId })
+
+    const contactRes = await pool.query<{ name: string }>(
+      `select coalesce(ct.custom_name, ct.whatsapp_name, ct.whatsapp_number) as name
+       from conversations c join contacts ct on ct.id = c.contact_id
+       where c.id = $1 and c.tenant_id = $2`,
+      [conversationId, tenantId]
+    )
+    const contactName = contactRes.rows[0]?.name ?? 'cliente'
+
+    let targetUserIds: string[]
+    if (vendorId) {
+      targetUserIds = [vendorId]
+    } else {
+      const usersRes = await pool.query<{ id: string }>(
+        `select id from users where tenant_id = $1 and active = true`,
+        [tenantId]
+      )
+      targetUserIds = usersRes.rows.map((r) => r.id)
+    }
+    if (targetUserIds.length === 0) return
+
+    const hot = priority === 'high' || priority === 'urgent'
+    const title = vendorId
+      ? `${hot ? '🔥 Lead quente' : 'Novo lead'} pra você: ${contactName}`
+      : `${hot ? '🔥 ' : ''}Lead aguardando atendimento: ${contactName}`
+    const body = summary.trim() || 'A IA passou esse cliente pra equipe de vendas.'
+
+    await sendPushNotification(tenantId, targetUserIds, {
+      title,
+      body: body.length > 160 ? body.slice(0, 157) + '...' : body,
+      conversationId,
+    })
+  } catch (err) {
+    console.error('[tools] Falha ao notificar escalada:', err instanceof Error ? err.message : err)
+  }
+}
+
 export async function toolEscalateToHuman(
   tenantId: string,
   conversationId: string,
@@ -513,6 +566,7 @@ export async function toolEscalateToHuman(
       .update(conversations)
       .set({ status: 'waiting_human', assignedTo: vendor.id, autonomousMode: false, aiSummary: summary, priority })
       .where(eq(conversations.id, conversationId))
+    await notifyEscalation(tenantId, conversationId, vendor.id, summary, priority)
 
     const firstName = vendor.fullName.split(' ')[0]
     return {
@@ -548,6 +602,7 @@ export async function toolEscalateToHuman(
     .update(conversations)
     .set({ status: 'waiting_human', aiSummary: summary, priority })
     .where(eq(conversations.id, conversationId))
+  await notifyEscalation(tenantId, conversationId, null, summary, priority)
 
   return {
     // Handoff natural — sem "atendente humano"/"Motivo:"/"IA". Framing de "equipe de vendas".

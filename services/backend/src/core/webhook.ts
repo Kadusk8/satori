@@ -521,12 +521,19 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
 
   // Notificação Push
   try {
+    // Push só pra quem enxerga a conversa no painel: o vendedor dono; sem dono, dono/admin
+    // sempre e vendedores só se ela já foi escalada (a que a IA está atendendo não aparece
+    // pra vendedor — mandar push dela pra ele abriria uma conversa que ele não pode ver).
     let targetUserIds: string[] = []
     if (existingConvRows[0]?.assignedTo) {
       targetUserIds = [existingConvRows[0].assignedTo]
     } else {
-      const activeUsers = await db.select({ id: users.id }).from(users).where(eq(users.tenantId, tenantId))
-      targetUserIds = activeUsers.map(u => u.id)
+      const visibleToOperators = conversationStatus === 'waiting_human' || conversationStatus === 'human_handling'
+      const activeUsers = await db
+        .select({ id: users.id, role: users.role })
+        .from(users)
+        .where(and(eq(users.tenantId, tenantId), eq(users.active, true)))
+      targetUserIds = activeUsers.filter((u) => u.role !== 'operator' || visibleToOperators).map((u) => u.id)
     }
 
     if (targetUserIds.length > 0) {

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MessageBubble } from '@/components/chat/message-bubble'
 import type { ChatMessage } from '@/components/chat/message-bubble'
 import { getConversationDrawer, assumeConversation } from '@/lib/data/chat'
+import { AiSummaryCard } from '@/components/chat/ai-summary-card'
 import { listVendors, reassignConversation } from '@/lib/data/conversations'
 import { updateContactNotes, updateContactTags } from '@/lib/actions/contacts'
 import { cn } from '@/lib/utils'
@@ -46,6 +47,8 @@ interface ConversationDetail {
   status: string
   started_at: string
   last_message_at: string
+  priority: string
+  ai_summary: string | null
   ai_agents: { name: string } | null
   contacts: ContactDetail
 }
@@ -340,6 +343,15 @@ export function ConversationDrawer({ conversation, onClose, isManager = false }:
                 </button>
               ))}
             </div>
+
+            {/* Resumo da qualificação feito pela IA ao passar o lead */}
+            {!isLoading && detail && (
+              <AiSummaryCard
+                summary={detail.ai_summary}
+                priority={detail.priority}
+                className="mx-4 mt-3 shrink-0"
+              />
+            )}
 
             {/* Conteúdo */}
             <div className="flex-1 overflow-y-auto">
