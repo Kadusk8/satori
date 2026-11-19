@@ -3,6 +3,7 @@
 import { Suspense, useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { resetPasswordWithToken } from '../actions'
+import { SatoriMark, SatoriWordmark } from '@/components/brand/satori-logo'
 
 function ResetPasswordForm() {
   const router = useRouter()
@@ -314,8 +315,8 @@ function ResetPasswordForm() {
 
       <div className="auth-container">
         <div className="auth-logo">
-          <div className="auth-logo-icon">⚡</div>
-          <span className="auth-logo-text">Satori</span>
+          <SatoriMark className="h-11 w-11" />
+          <SatoriWordmark className="h-4 w-auto text-white" />
         </div>
 
         <div className="auth-card">

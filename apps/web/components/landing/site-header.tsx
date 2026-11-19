@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { motion, useScroll, useMotionValueEvent } from 'framer-motion'
 import { useState } from 'react'
+import { SatoriLogo } from '@/components/brand/satori-logo'
 
 export function SiteHeader() {
   const { scrollY } = useScroll()
@@ -22,10 +23,7 @@ export function SiteHeader() {
     >
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5 sm:px-10">
         <Link href="/" className="inline-flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#22d3ee]">
-            <span className="text-[10px] font-black tracking-wider text-black">S</span>
-          </span>
-          <span className="text-sm font-black tracking-[0.2em] text-foreground">SATORI</span>
+          <SatoriLogo markClassName="h-8 w-8" wordClassName="h-3.5 w-auto" />
         </Link>
         <Link
           href="/login"

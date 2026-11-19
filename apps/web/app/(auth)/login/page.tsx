@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { login } from '../actions'
+import { SatoriMark, SatoriWordmark } from '@/components/brand/satori-logo'
 
 function LoginForm() {
   const [error, setError] = useState<string | null>(null)
@@ -381,8 +382,8 @@ function LoginForm() {
 
       <div className="auth-container">
         <div className="auth-logo">
-          <div className="auth-logo-icon">⚡</div>
-          <span className="auth-logo-text">Satori</span>
+          <SatoriMark className="h-11 w-11" />
+          <SatoriWordmark className="h-4 w-auto text-white" />
         </div>
 
         <div className="auth-card">

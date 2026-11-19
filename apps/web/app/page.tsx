@@ -5,6 +5,7 @@ import { CtaButton } from '@/components/landing/cta-button'
 import { ImpactStrip } from '@/components/landing/impact-strip'
 import { SegmentCard } from '@/components/landing/segment-card'
 import { Reveal, RevealGroup, RevealItem } from '@/components/landing/reveal'
+import { SatoriLogo } from '@/components/brand/satori-logo'
 
 const WHATSAPP_NUMBER = '5562999350398'
 const waHref = (msg: string) => `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`
@@ -105,12 +106,7 @@ const FAQ = [
 
 function WordMark({ className = '' }: { className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 ${className}`}>
-      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#22d3ee]">
-        <span className="text-[10px] font-black tracking-wider text-black">S</span>
-      </span>
-      <span className="text-sm font-black tracking-[0.2em] text-foreground">SATORI</span>
-    </span>
+    <SatoriLogo className={className} markClassName="h-8 w-8" />
   )
 }
 

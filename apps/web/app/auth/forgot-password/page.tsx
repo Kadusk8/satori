@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { requestPasswordReset } from '../actions'
+import { SatoriMark, SatoriWordmark } from '@/components/brand/satori-logo'
 
 export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false)
@@ -300,8 +301,8 @@ export default function ForgotPasswordPage() {
 
       <div className="auth-container">
         <div className="auth-logo">
-          <div className="auth-logo-icon">⚡</div>
-          <span className="auth-logo-text">Satori</span>
+          <SatoriMark className="h-11 w-11" />
+          <SatoriWordmark className="h-4 w-auto text-white" />
         </div>
 
         <div className="auth-card">

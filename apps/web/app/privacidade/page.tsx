@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SatoriLogo } from '@/components/brand/satori-logo'
 
 export const metadata = {
   title: 'Política de Privacidade — SATORI',
@@ -9,10 +10,7 @@ export default function PrivacidadePage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-6 sm:px-10">
         <Link href="/" className="inline-flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#22d3ee]">
-            <span className="text-[10px] font-black tracking-wider text-black">S</span>
-          </span>
-          <span className="text-sm font-black tracking-[0.2em]">SATORI</span>
+          <SatoriLogo markClassName="h-8 w-8" />
         </Link>
         <Link href="/" className="text-[13px] font-medium text-muted-foreground hover:text-foreground">
           Voltar

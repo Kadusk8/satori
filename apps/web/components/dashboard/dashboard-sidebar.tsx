@@ -15,6 +15,7 @@ import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { SatoriMark, SatoriWordmark, SatoriLogo } from '@/components/brand/satori-logo'
 
 function NotificationBadge({ count }: { count: number }) {
   if (count === 0) return null
@@ -94,11 +95,9 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="flex h-14 items-center gap-3 px-4 border-b border-border/60 shrink-0">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shrink-0">
-          <span className="text-primary-foreground font-black text-[11px] tracking-wider">S</span>
-        </div>
+        <SatoriMark className="h-8 w-8 shrink-0" />
         <div className="leading-none">
-          <span className="text-sm font-black tracking-widest text-foreground">SATORI</span>
+          <SatoriWordmark className="h-3.5 w-auto text-foreground" />
           <p className="text-[10px] text-muted-foreground tracking-widest uppercase mt-0.5">Painel</p>
         </div>
       </div>
@@ -201,12 +200,7 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
           </SheetContent>
         </Sheet>
         
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary shrink-0 ml-2">
-          <span className="text-primary-foreground font-black text-[11px] tracking-wider">S</span>
-        </div>
-        <div className="leading-none">
-          <span className="text-sm font-black tracking-widest text-foreground">SATORI</span>
-        </div>
+        <SatoriLogo className="ml-2" markClassName="h-7 w-7" />
       </div>
     </>
   )
