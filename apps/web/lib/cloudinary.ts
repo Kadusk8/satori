@@ -9,19 +9,21 @@ export interface UploadedFile {
   url: string
   publicId: string
   fileName: string
+  /** Só em vídeos: duração em segundos informada pelo Cloudinary. */
+  duration?: number
 }
 
 // Cloudinary não tem um resource_type "audio" de primeira classe — áudio sobe
 // como "video" (mesma convenção já usada no upload de áudio do WhatsApp no
 // backend, ver services/backend/src/shared/cloudinary.ts). Documentos/PDFs
 // exigem "raw", senão o Cloudinary tenta (e falha) interpretar como imagem.
-function resourceTypeFor(contentType: 'image' | 'audio' | 'document'): 'image' | 'video' | 'raw' {
-  if (contentType === 'audio') return 'video'
+function resourceTypeFor(contentType: 'image' | 'audio' | 'document' | 'video'): 'image' | 'video' | 'raw' {
+  if (contentType === 'audio' || contentType === 'video') return 'video'
   if (contentType === 'document') return 'raw'
   return 'image'
 }
 
-export async function uploadToCloudinary(file: File, contentType: 'image' | 'audio' | 'document', folder: string): Promise<UploadedFile> {
+export async function uploadToCloudinary(file: File, contentType: 'image' | 'audio' | 'document' | 'video', folder: string): Promise<UploadedFile> {
   const resourceType = resourceTypeFor(contentType)
 
   const formData = new FormData()
@@ -41,5 +43,6 @@ export async function uploadToCloudinary(file: File, contentType: 'image' | 'aud
     url: data.secure_url,
     publicId: data.public_id,
     fileName: file.name,
+    duration: typeof data.duration === 'number' ? data.duration : undefined,
   }
 }

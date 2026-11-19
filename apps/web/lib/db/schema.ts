@@ -19,6 +19,7 @@ import {
   time,
   uniqueIndex,
   index,
+  primaryKey,
 } from 'drizzle-orm/pg-core'
 
 // Identidade global (email + hash de senha). Substitui auth.users do Supabase.
@@ -650,3 +651,38 @@ export const aiTrainingFeedback = pgTable('ai_training_feedback', {
   ruleActive: boolean('rule_active').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Tutoriais em vídeo — conteúdo global da plataforma (sem tenant_id). Ver db/migrations/2026-11-19-tutoriais.sql.
+export const tutorialVideos = pgTable(
+  'tutorial_videos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    title: text('title').notNull(),
+    description: text('description'),
+    category: text('category').notNull().default('Geral'),
+    audience: text('audience').notNull().default('all'), // 'all' | 'manager'
+    videoUrl: text('video_url'), // null = "em breve"
+    posterUrl: text('poster_url'),
+    durationSeconds: integer('duration_seconds'),
+    position: integer('position').notNull().default(0),
+    published: boolean('published').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_tutorial_videos_position').on(t.position)],
+)
+
+export const tutorialProgress = pgTable(
+  'tutorial_progress',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    videoId: uuid('video_id')
+      .notNull()
+      .references(() => tutorialVideos.id, { onDelete: 'cascade' }),
+    watchedAt: timestamp('watched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.videoId] })],
+)

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, MessageSquare, Users, Package,
-  Calendar, Settings, LogOut, ChevronRight, MessagesSquare, UserCog, Menu, Bot
+  Calendar, Settings, LogOut, ChevronRight, MessagesSquare, UserCog, Menu, Bot, PlayCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -84,6 +84,7 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
     { label: 'Agenda',       href: '/appointments',  icon: Calendar,        badge: 0 },
     ...(isManagerRole ? [{ label: 'Equipe', href: '/team', icon: UserCog, badge: 0 }] : []),
     ...(isManagerRole ? [{ label: 'Testar a IA', href: '/ai-training', icon: Bot, badge: 0 }] : []),
+    { label: 'Tutoriais',    href: '/tutoriais', icon: PlayCircle, badge: 0 },
     { label: 'Configurações',href: '/settings', icon: Settings, badge: 0 },
   ]
 

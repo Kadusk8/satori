@@ -12,6 +12,7 @@ import {
   Settings,
   CreditCard,
   Bot,
+  PlayCircle,
   LogOut,
   ChevronRight,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ const navItems = [
   { label: 'Analytics',     href: '/admin/analytics', icon: BarChart3 },
   { label: 'Planos',        href: '/admin/plans',     icon: CreditCard },
   { label: 'Treinamento IA', href: '/admin/training',  icon: Bot },
+  { label: 'Tutoriais',     href: '/admin/tutoriais', icon: PlayCircle },
   { label: 'Configurações', href: '/admin/settings',  icon: Settings },
 ]
 
