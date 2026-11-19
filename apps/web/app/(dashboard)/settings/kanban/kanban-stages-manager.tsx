@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,6 +38,11 @@ interface Stage {
 export function KanbanStagesManager({ initialStages }: { initialStages: Stage[] }) {
   const router = useRouter()
   const [stages, setStages] = useState(initialStages)
+
+  // ressincroniza quando o servidor devolve a lista nova (router.refresh após criar/editar/excluir)
+  useEffect(() => {
+    setStages(initialStages)
+  }, [initialStages])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Stage | null>(null)

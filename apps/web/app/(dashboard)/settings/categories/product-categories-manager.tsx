@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,6 +29,11 @@ interface Category {
 export function ProductCategoriesManager({ initialCategories, itemLabel }: { initialCategories: Category[]; itemLabel: string }) {
   const router = useRouter()
   const [categories, setCategories] = useState(initialCategories)
+
+  // ressincroniza quando o servidor devolve a lista nova (router.refresh após criar/editar/excluir)
+  useEffect(() => {
+    setCategories(initialCategories)
+  }, [initialCategories])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<Category | null>(null)
