@@ -53,13 +53,18 @@ const CONTATOS = [
   ['Lucas Martins', 'aguardando_humano'], ['Camila Nogueira', 'em_atendimento'], ['Rodrigo Teixeira', 'em_atendimento'],
   ['Patrícia Gomes', 'agendado'], ['Bruno Carvalho', 'novo_lead'], ['Juliana Freitas', 'finalizado'], ['Thiago Barros', null],
 ]
+// Resumo que a IA deixa ao passar o lead para um humano
+const RESUMOS = {
+  'Fernanda Ribeiro': 'Cliente interessada no Relógio Cronógrafo Verde (R$ 369,90). Quer negociar o valor antes de fechar e pediu atendimento humano.',
+  'Lucas Martins': 'Cliente quer saber em quantas vezes pode parcelar a Bicicleta Urbana Vermelha (R$ 1.290,00). Aguarda confirmação do parcelamento por um atendente.',
+}
 const status = { ia_atendendo: 'ai_handling', novo_lead: 'ai_handling', agendado: 'ai_handling', aguardando_humano: 'waiting_human', em_atendimento: 'human_handling', finalizado: 'closed' }
 
 // [remetente, texto, minutos atrás]
 const PAPO = {
   'Mariana Costa': [['c', 'Oi! Vocês têm o tênis Urban Run no 38?', 42], ['a', 'Olá, Mariana! Temos sim, o Urban Run roxo está disponível do 36 ao 44. Quer ver a foto?', 41], ['c', 'Quero!', 40], ['a', 'Aqui está! Ele custa R$ 289,90. Posso reservar o seu 38?', 39]],
   'João Pedro Almeida': [['c', 'Boa tarde, quanto é a maleta executiva?', 25], ['a', 'Boa tarde, João Pedro! A Maleta Executiva em Couro custa R$ 459,00 e cabe notebook de até 14 polegadas.', 24]],
-  'Fernanda Ribeiro': [['c', 'Gostei do relógio cronógrafo verde, mas queria negociar o valor', 70], ['a', 'Que bom, Fernanda! Vou chamar um de nossos atendentes para conversar com você sobre as condições.', 69], ['s', 'Conversa escalada para um atendente humano.', 69]],
+  'Fernanda Ribeiro': [['c', 'Oi! Vi o relógio cronógrafo de vocês no anúncio', 95], ['a', 'Olá, Fernanda! Que bom ter você por aqui. Temos o Cronógrafo Couro e o Cronógrafo Verde. Qual chamou mais a sua atenção?', 94], ['c', 'O verde! Quanto está?', 92], ['a', 'O Relógio Cronógrafo Verde custa R$ 369,90. Olha como ele é:', 91], ['i', 'Relógio Cronógrafo Verde', 91], ['c', 'Gostei! Mas queria negociar o valor', 70], ['a', 'Que bom, Fernanda! Vou chamar um de nossos atendentes para conversar com você sobre as condições.', 69], ['s', 'Conversa escalada para um atendente humano.', 69]],
   'Lucas Martins': [['c', 'Vocês parcelam a bicicleta em quantas vezes?', 55], ['a', 'Boa pergunta, Lucas! Vou passar para um atendente confirmar o parcelamento certinho para você.', 54]],
   'Camila Nogueira': [['c', 'Oi, meu pedido já saiu para entrega?', 130], ['a', 'Oi, Camila! Vou chamar um atendente para consultar o seu pedido agora.', 129], ['h', 'Oi, Camila! Aqui é o Rafael. Seu pedido saiu hoje de manhã e chega até o fim do dia.', 120], ['c', 'Perfeito, obrigada!', 118]],
   'Rodrigo Teixeira': [['c', 'Queria trocar o tênis, ficou apertado', 200], ['a', 'Sem problema, Rodrigo! Vou chamar um atendente para combinar a troca.', 199], ['h', 'Oi, Rodrigo! É a Bianca. Pode trazer na loja que trocamos pelo tamanho certo.', 185]],
@@ -175,7 +180,7 @@ try {
     const msgs = PAPO[nome]
     const ultimo = Math.min(...msgs.map((m) => m[2]))
     const assign = stage === 'em_atendimento' ? uid[nome === 'Camila Nogueira' ? 'Rafael' : 'Bianca'] : null
-    const resumo = status[stage] === 'waiting_human' ? `${nome.split(' ')[0]} pediu atendimento humano. Contexto: ${msgs[0][1]}` : null
+    const resumo = status[stage] === 'waiting_human' ? (RESUMOS[nome] ?? null) : null
     const cv = await q(
       `insert into conversations (tenant_id, contact_id, ai_agent_id, kanban_stage_id, assigned_to, status, ai_summary, priority, started_at, last_message_at, closed_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
@@ -183,9 +188,10 @@ try {
         min(Math.max(...msgs.map((m) => m[2]))), min(ultimo), stage === 'finalizado' ? min(ultimo) : null])
     convId[nome] = cv.rows[0].id
     for (const [quem, texto, ha] of [...msgs].sort((a, b) => b[2] - a[2])) {
-      const tipo = { c: 'customer', a: 'ai', h: 'human', s: 'system' }[quem]
-      await q(`insert into messages (tenant_id, conversation_id, contact_id, sender_type, sender_id, content, content_type, is_read, created_at)
-               values ($1,$2,$3,$4,$5,$6,'text',true,$7)`, [tenantId, convId[nome], cid[nome], tipo, quem === 'h' ? assign : null, texto, min(ha)])
+      const tipo = { c: 'customer', a: 'ai', i: 'ai', h: 'human', s: 'system' }[quem]
+      const foto = quem === 'i' ? PRODUTOS.find((p) => p.n === texto)?.i.thumbnailUrl ?? null : null // 'i' = IA enviou a foto do produto
+      await q(`insert into messages (tenant_id, conversation_id, contact_id, sender_type, sender_id, content, content_type, media_url, is_read, created_at)
+               values ($1,$2,$3,$4,$5,$6,$7,$8,true,$9)`, [tenantId, convId[nome], cid[nome], tipo, quem === 'h' ? assign : null, texto, foto ? 'image' : 'text', foto, min(ha)])
     }
   }
 
