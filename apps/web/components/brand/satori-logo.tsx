@@ -1,23 +1,25 @@
 import { useId } from 'react'
 
-// Marca do Satori: ensō (círculo zen de um traço só) aberto como balão de conversa,
-// com uma faísca de IA saindo pela abertura. Cor chapada, sem degradê.
-// O nome "SATORI" é desenhado com traços (sem depender de fonte) e herda a cor do texto.
+// Marca do Satori: ícone ciano com um ensō (círculo zen de um traço só) aberto e uma bolinha na abertura.
+// Cor chapada, sem degradê. O nome "SATORI" é desenhado com traços (sem depender de fonte) e herda a cor do texto.
 export const SATORI_COR = '#4FC9E9'
+const SATORI_ESCURO = '#0d1117'
 
 export function SatoriMark({ className, title = 'Satori' }: { className?: string; title?: string }) {
   const mask = `satori-${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   return (
     <svg viewBox="0 0 120 120" className={className} role="img" aria-label={title} xmlns="http://www.w3.org/2000/svg">
-      <mask id={mask}>
-        <rect width="120" height="120" fill="#fff" />
-        <polygon points="60,58 77,-40 142,1" fill="#000" />
-      </mask>
-      <g mask={`url(#${mask})`}>
-        <path d="M16 60a44 44 0 1 0 88 0a44 44 0 1 0-88 0ZM30 56a34 34 0 1 0 68 0a34 34 0 1 0-68 0Z" fill={SATORI_COR} fillRule="evenodd" />
+      <rect width="120" height="120" rx="28" fill={SATORI_COR} />
+      <g transform="translate(18 18) scale(.7)">
+        <mask id={mask}>
+          <rect width="120" height="120" fill="#fff" />
+          <polygon points="60,58 77,-40 142,1" fill="#000" />
+        </mask>
+        <g mask={`url(#${mask})`}>
+          <path d="M16 60a44 44 0 1 0 88 0a44 44 0 1 0-88 0ZM30 56a34 34 0 1 0 68 0a34 34 0 1 0-68 0Z" fill={SATORI_ESCURO} fillRule="evenodd" />
+        </g>
+        <circle cx="92" cy="19" r="9" fill={SATORI_ESCURO} />
       </g>
-      <path d="M26 92 L10 116 L48 104 Z" fill={SATORI_COR} />
-      <path d="M93 5Q96.4 18.6 110 22Q96.4 25.4 93 39Q89.6 25.4 76 22Q89.6 18.6 93 5Z" fill={SATORI_COR} />
     </svg>
   )
 }
