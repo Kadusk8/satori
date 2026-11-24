@@ -313,7 +313,10 @@ CREATE POLICY "tenant_isolation_select" ON tenants
   FOR SELECT USING (id = (auth.jwt() ->> 'tenant_id')::UUID);
 
 CREATE POLICY "tenant_isolation_update" ON tenants
-  FOR UPDATE USING (id = (auth.jwt() ->> 'tenant_id')::UUID);
+  FOR UPDATE USING (
+    id = (auth.jwt() ->> 'tenant_id')::UUID
+    AND COALESCE(auth.jwt() ->> 'user_role', '') IN ('owner', 'admin')
+  );
 
 CREATE POLICY "super_admin_full_access" ON tenants
   FOR ALL USING ((auth.jwt() ->> 'is_super_admin')::BOOLEAN IS TRUE);
