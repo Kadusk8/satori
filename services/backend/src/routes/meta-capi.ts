@@ -3,9 +3,8 @@
 
 import { FastifyPluginAsync } from 'fastify'
 import { pool } from '../db/index.js'
+import { isValidBackendAuth } from '../shared/backend-token.js'
 import { sendConversionEvent } from '../shared/meta-capi-client.js'
-
-const BACKEND_TOKEN = process.env.BACKEND_TOKEN
 
 interface PurchaseEventBody {
   conversationId: string
@@ -17,10 +16,8 @@ export const metaCapiRoutes: FastifyPluginAsync = async (fastify) => {
     // Autenticação: só o próprio frontend (com BACKEND_TOKEN) pode disparar
     // eventos de conversão — mesmo padrão de /send-whatsapp. Sem isso, qualquer
     // um que alcance o serviço poderia forjar conversões e sondar conversationId.
-    if (BACKEND_TOKEN) {
-      if (req.headers.authorization !== `Bearer ${BACKEND_TOKEN}`) {
-        return reply.status(401).send({ error: 'Não autorizado' })
-      }
+    if (!isValidBackendAuth(req.headers.authorization)) {
+      return reply.status(401).send({ error: 'Não autorizado' })
     }
 
     const { conversationId, stageSlug } = req.body

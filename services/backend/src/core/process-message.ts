@@ -720,17 +720,18 @@ async function runProcessMessage(conversationId: string): Promise<{ success: boo
   // não só a do tenant: um agente com chave OpenAI própria (BYOK, usada com sucesso pro chat)
   // mas sem chave no nível do tenant ficava sempre caindo no fallback "não consegui escutar".
   const whisperKey = resolvedOpenaiKey ?? process.env.OPENAI_API_KEY ?? null
-  if (lastCustomerMsg && lastCustomerMsg.content_type === 'audio' && lastCustomerMsg.media_url && !lastCustomerMsg.content && whisperKey) {
-    // URL própria (Cloudinary, já baixada por nós) vs. URL direta da Evolution (precisa apikey)
-    const isOwnUpload = lastCustomerMsg.media_url.includes('res.cloudinary.com')
-    let audioDownloadHeaders: Record<string, string> | undefined
-    if (!isOwnUpload) {
-      const { getDecryptedEvolutionKey } = await import('../db/index.js')
-      const evoKey = await getDecryptedEvolutionKey(tenantId, ENCRYPTION_KEY)
-      if (evoKey) audioDownloadHeaders = { apikey: evoKey }
+  // Só transcreve áudio hospedado no nosso Cloudinary (host validado). URL de outra origem pode ter vindo
+  // do remetente: nunca é buscada, e a apikey da Evolution nunca é enviada a ela (SSRF/vazamento).
+  const isOwnAudioUrl = (() => {
+    try {
+      const u = new URL(lastCustomerMsg?.media_url ?? '')
+      return u.protocol === 'https:' && u.hostname === 'res.cloudinary.com'
+    } catch {
+      return false
     }
-
-    const transcript = await transcribeAudio(lastCustomerMsg.media_url, whisperKey, audioDownloadHeaders)
+  })()
+  if (lastCustomerMsg && lastCustomerMsg.content_type === 'audio' && lastCustomerMsg.media_url && !lastCustomerMsg.content && whisperKey && isOwnAudioUrl) {
+    const transcript = await transcribeAudio(lastCustomerMsg.media_url, whisperKey)
     if (transcript) {
       await db.update(messages).set({ content: transcript }).where(eq(messages.id, lastCustomerMsg.id))
       lastCustomerMsg.content = transcript

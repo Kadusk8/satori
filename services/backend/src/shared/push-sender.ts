@@ -66,7 +66,7 @@ export async function sendPushNotification(tenantId: string, userIds: string[], 
       } catch (err: any) {
         // Se a subscription expirou ou o usuário revogou (410 Gone)
         if (err.statusCode === 410 || err.statusCode === 404) {
-          console.log(`[push-sender] Removendo subscription expirada: ${sub.endpoint}`)
+          console.log('[push-sender] Removendo subscription expirada')
           await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, sub.endpoint))
         } else {
           console.error('[push-sender] Erro ao enviar notificação:', err)

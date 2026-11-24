@@ -1,9 +1,8 @@
 import type { FastifyInstance } from 'fastify'
+import { isValidBackendAuth } from '../shared/backend-token.js'
 import { pool } from '../db/index.js'
 import { processMessage } from '../core/process-message.js'
 import { runInSandbox } from '../shared/sandbox.js'
-
-const BACKEND_TOKEN = process.env.BACKEND_TOKEN
 
 interface SandboxProcessBody {
   tenantId?: string
@@ -14,11 +13,8 @@ interface SandboxProcessBody {
 // pelo painel do tenant. Nada vai pro WhatsApp nem pra agenda (ver shared/sandbox.ts).
 export async function sandboxRoutes(app: FastifyInstance) {
   app.post('/sandbox/process', async (request, reply) => {
-    if (BACKEND_TOKEN) {
-      const auth = request.headers.authorization
-      if (auth !== `Bearer ${BACKEND_TOKEN}`) {
-        return reply.code(401).send({ error: 'Não autorizado' })
-      }
+    if (!isValidBackendAuth(request.headers.authorization)) {
+      return reply.code(401).send({ error: 'Não autorizado' })
     }
 
     const { tenantId, conversationId } = (request.body ?? {}) as SandboxProcessBody

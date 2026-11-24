@@ -11,10 +11,10 @@ import { runResetMonthlyMessageCounts } from './cron/reset-monthly-counts.js'
 import { runMonitorAiQuality } from './cron/monitor-ai-quality.js'
 import { runCheckConnections } from './cron/check-connections.js'
 
+// Sem BACKEND_TOKEN as rotas internas ficariam abertas: aborta em vez de subir inseguro.
 if (!process.env.BACKEND_TOKEN) {
-  console.warn(
-    '[startup] BACKEND_TOKEN não configurado — POST /send-whatsapp vai aceitar chamadas sem autenticação. Configure BACKEND_TOKEN antes de expor este serviço publicamente.'
-  )
+  console.error('[startup] BACKEND_TOKEN é obrigatório — abortando.')
+  process.exit(1)
 }
 
 // bodyLimit acima do default (1MB) — a Evolution às vezes envia mídia (áudio/imagem)
@@ -22,7 +22,20 @@ if (!process.env.BACKEND_TOKEN) {
 // mesmo de chegar na nossa lógica. Sem isso, a Evolution ficava em loop de retry
 // infinito tentando entregar o mesmo evento pra sempre (visto em produção: mesmo
 // tenant, mesmo evento, repetindo a cada ~15-30s por horas).
-const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 })
+// - logger: o segredo do webhook vem em ?ts= — nunca vai pro log (redige a query string).
+// - trustProxy: process.env.TRUST_PROXY ?? 'loopback,linklocal,uniquelocal', // confia só em proxies de rede privada (Docker/Swarm)
+//   limit seria um balde único compartilhado por todos os tenants. Ajuste TRUST_PROXY se necessário.
+const app = Fastify({
+  logger: {
+    serializers: {
+      req(req) {
+        return { method: req.method, url: req.url?.split('?')[0], remoteAddress: req.ip }
+      },
+    },
+  },
+  trustProxy: process.env.TRUST_PROXY ?? 'loopback,linklocal,uniquelocal', // confia só em proxies de rede privada (Docker/Swarm)
+  bodyLimit: 25 * 1024 * 1024,
+})
 
 // Proteção básica contra brute-force do webhook_secret (?ts=) e abuso geral —
 // ambas as rotas são públicas (a Evolution Go não autentica webhooks de saída).

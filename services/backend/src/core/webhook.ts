@@ -430,7 +430,8 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
   }
 
   // Para áudio: busca a mídia na Evolution Go e sobe pro Cloudinary
-  let finalMediaUrl = mediaUrl
+  // Áudio: a URL do protobuf é controlada pelo remetente — nunca persiste; só vale a URL do nosso upload.
+  let finalMediaUrl: string | null = contentType === 'audio' ? null : mediaUrl
   if (contentType === 'audio' && tenant.evolution_api_url && tenant.evolution_api_key) {
     try {
       const evoUrl = tenant.evolution_api_url.replace(/\/$/, '')
@@ -467,7 +468,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
           const bytes = Buffer.from(base64, 'base64')
           finalMediaUrl = await uploadAudio(tenantId, envelope.id, bytes, mimeType)
         } else {
-          console.error('[webhook] Resposta de downloadmedia sem base64 reconhecível:', JSON.stringify(mediaBody).slice(0, 500))
+          console.error('[webhook] Resposta de downloadmedia sem base64 reconhecível:', Object.keys((mediaBody ?? {}) as object).join(','))
         }
       } else {
         console.error('[webhook] Erro downloadmedia:', await mediaRes.text())

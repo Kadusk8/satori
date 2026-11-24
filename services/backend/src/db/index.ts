@@ -53,7 +53,8 @@ class ServiceRoleClient extends Client {
 
 export const pool = new Pool({
   connectionString,
-  ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+  // DATABASE_SSL_VERIFY=true valida o certificado do Postgres (exige CA confiável); padrão mantém o comportamento antigo.
+  ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: process.env.DATABASE_SSL_VERIFY === 'true' } : undefined,
   max: 10,
   Client: ServiceRoleClient as unknown as typeof Client,
 })
