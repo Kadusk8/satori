@@ -35,7 +35,8 @@ const pool =
   globalForPool.__zap_pool ??
   new Pool({
     connectionString,
-    ssl: connectionString?.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    // DATABASE_SSL_VERIFY=true valida o certificado do Postgres (exige CA confiável); padrão mantém o comportamento antigo.
+    ssl: connectionString?.includes('sslmode=require') ? { rejectUnauthorized: process.env.DATABASE_SSL_VERIFY === 'true' } : undefined,
     max: 10,
   })
 if (process.env.NODE_ENV !== 'production') globalForPool.__zap_pool = pool

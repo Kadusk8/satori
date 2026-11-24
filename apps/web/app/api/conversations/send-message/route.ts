@@ -10,6 +10,19 @@ import { triggerEvent, tenantChannel, conversationChannel } from '@/lib/realtime
 const BACKEND_URL = process.env.BACKEND_URL
 const BACKEND_TOKEN = process.env.BACKEND_TOKEN
 
+// Só aceita mídia hospedada no Cloudinary do próprio projeto — a URL é repassada à Evolution, que a
+// busca de dentro da rede do servidor (evita SSRF e envio de conteúdo arbitrário).
+function isAllowedMediaUrl(raw: string): boolean {
+  const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+  if (!cloud) return false
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' && u.hostname === 'res.cloudinary.com' && u.pathname.startsWith(`/${cloud}/`)
+  } catch {
+    return false
+  }
+}
+
 export async function POST(request: NextRequest) {
   const claims = await getDbClaims()
   if (!claims?.tenant_id) {
@@ -27,6 +40,9 @@ export async function POST(request: NextRequest) {
   }
 
   const isMedia = Boolean(mediaUrl && contentType)
+  if (isMedia && !isAllowedMediaUrl(mediaUrl!)) {
+    return NextResponse.json({ error: 'URL de mídia não permitida' }, { status: 400 })
+  }
   if (!conversationId || (!isMedia && !sendLocation && !text?.trim())) {
     return NextResponse.json({ error: 'conversationId e (text, mediaUrl+contentType ou sendLocation) são obrigatórios' }, { status: 400 })
   }

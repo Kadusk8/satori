@@ -54,6 +54,12 @@ export const useWizardStore = create<WizardState>()(
     }),
     {
       name: 'wizard-onboarding',
+      // Credenciais nunca vão pro localStorage: o admin redigita se recarregar a página.
+      partialize: (state) => ({
+        ...state,
+        step2: { ...state.step2, evolutionApiKey: undefined },
+        step3: { ...state.step3, llmApiKey: undefined },
+      }),
     }
   )
 )

@@ -212,7 +212,7 @@ export async function updateTenantAudio(tenantId: string, data: {
     if (data.elevenLabsApiKey?.trim()) {
       await tx
         .update(tenants)
-        .set({ elevenlabsApiKey: data.elevenLabsApiKey.trim(), updatedAt: new Date() })
+        .set({ elevenlabsApiKey: encryptedColumn(data.elevenLabsApiKey.trim(), 'encrypt_llm_key'), updatedAt: new Date() })
         .where(eq(tenants.id, tenantId))
     }
   })
