@@ -2,6 +2,7 @@
 // substituindo supabase.auth.admin.createUser/updateUserById/listUsers.
 // Todos rodam com bypass (withAdmin) porque mexem em auth_users (só service_role).
 
+import crypto from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { withAdmin } from '@/lib/db'
 import { authUsers } from '@/lib/db/schema'
@@ -68,4 +69,17 @@ export async function setPasswordByEmail(email: string, newPassword: string): Pr
     `)
     return (res.rows?.length ?? 0) > 0
   })
+}
+
+/**
+ * Fingerprint do hash de senha atual (vazio se não houver usuário). Entra no token de
+ * reset/convite: ao definir a senha o hash muda e o link deixa de valer (uso único).
+ */
+export async function getPasswordFingerprint(email: string): Promise<string> {
+  const normalized = email.trim().toLowerCase()
+  const hash = await withAdmin(async (tx) => {
+    const res = await tx.execute(sql`select password_hash from ${authUsers} where lower(email) = ${normalized} limit 1`)
+    return (res.rows?.[0] as { password_hash: string | null } | undefined)?.password_hash ?? ''
+  })
+  return crypto.createHash('sha256').update(hash).digest('hex').slice(0, 16)
 }

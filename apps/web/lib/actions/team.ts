@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import { withAdmin, withClaims } from '@/lib/db'
 import { users, tenants } from '@/lib/db/schema'
 import { getSessionClaims, getDbClaims } from '@/lib/auth/session'
-import { upsertAuthUser } from '@/lib/auth/users'
+import { getPasswordFingerprint, upsertAuthUser } from '@/lib/auth/users'
 import { createToken } from '@/lib/auth/tokens'
 import { sendOperatorInviteEmail } from '@/lib/email/resend'
 import { isManager } from '@/lib/auth/permissions'
@@ -62,7 +62,7 @@ export async function inviteOperator(input: { email: string; fullName: string; r
   })
   void userId
 
-  const token = createToken(email, 'invite')
+  const token = createToken(email, 'invite', 24, await getPasswordFingerprint(email))
   await sendOperatorInviteEmail(email, token, companyName)
 
   revalidatePath('/team')

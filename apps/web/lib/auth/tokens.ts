@@ -10,6 +10,7 @@ interface TokenPayload {
   email: string
   purpose: TokenPurpose
   exp: number // epoch segundos
+  pf?: string // fingerprint do hash de senha atual: o token morre quando a senha muda (uso único)
 }
 
 function secret(): string {
@@ -27,18 +28,19 @@ function sign(data: string): string {
 }
 
 /** Gera um token assinado válido por `ttlHours` (padrão 24h). */
-export function createToken(email: string, purpose: TokenPurpose, ttlHours = 24): string {
+export function createToken(email: string, purpose: TokenPurpose, ttlHours = 24, passwordFingerprint = ''): string {
   const payload: TokenPayload = {
     email: email.trim().toLowerCase(),
     purpose,
     exp: Math.floor(Date.now() / 1000) + ttlHours * 3600,
+    pf: passwordFingerprint,
   }
   const body = b64url(JSON.stringify(payload))
   return `${body}.${sign(body)}`
 }
 
-/** Valida assinatura + expiração + propósito. Retorna o email ou null. */
-export function verifyToken(token: string, purpose: TokenPurpose): string | null {
+/** Valida assinatura + expiração + propósito. Retorna email e fingerprint de senha, ou null. */
+export function verifyTokenPayload(token: string, purpose: TokenPurpose): { email: string; pf: string } | null {
   const parts = token.split('.')
   if (parts.length !== 2) return null
   const [body, providedSig] = parts
@@ -53,8 +55,13 @@ export function verifyToken(token: string, purpose: TokenPurpose): string | null
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8')) as TokenPayload
     if (payload.purpose !== purpose) return null
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
-    return payload.email
+    return { email: payload.email, pf: payload.pf ?? '' }
   } catch {
     return null
   }
+}
+
+/** Valida assinatura + expiração + propósito. Retorna o email ou null (não checa uso prévio). */
+export function verifyToken(token: string, purpose: TokenPurpose): string | null {
+  return verifyTokenPayload(token, purpose)?.email ?? null
 }

@@ -11,7 +11,8 @@ const PUBLIC_PATHS = ['/', '/login']
 export const authConfig = {
   pages: { signIn: '/login' },
   trustHost: true,
-  session: { strategy: 'jwt' },
+  // Sessão curta: os claims são revalidados no callback jwt (ver auth.ts).
+  session: { strategy: 'jwt', maxAge: 12 * 60 * 60 },
   providers: [], // preenchido em auth.ts (Credentials)
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
