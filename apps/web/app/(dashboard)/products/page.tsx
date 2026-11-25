@@ -228,7 +228,7 @@ export default function ProductsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen text-muted-foreground text-sm gap-2">
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         Carregando {businessModel === 'service' ? 'serviços' : 'produtos'}...
       </div>

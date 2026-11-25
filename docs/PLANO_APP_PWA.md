@@ -1,7 +1,21 @@
 # Plano — App do Satori (iOS e Android) via PWA
 
-Data: 2026-11-25 · Status: **Fase 1 implementada** (não commitada nem deployada).
-Decisões 1–3 seguiram a recomendação. Fases 2 e 3 pendentes.
+Data: 2026-11-25 · Status: **Fases 1, 2 e 3 implementadas.** Fase 1 em produção
+(PR #8). Decisões 1–3 seguiram a recomendação. Falta só o teste manual nos celulares.
+
+Desvios do plano nas Fases 2 e 3 (corrigidos durante a implementação):
+- As páginas de chat, CRM e agenda usavam `h-screen` **dentro** do layout que já
+  tinha `h-screen` + cabeçalho mobile, e estouravam a tela (o campo do chat ficava
+  abaixo da dobra no celular). Trocado por `h-full` + `min-h-0` no layout.
+- Refresh ao voltar do segundo plano: as páginas são Client Components com carga
+  própria, então `router.refresh()` não adiantava. Hook `useOnAppResume` chama o
+  `loadData`/`loadChat` de cada tela (chat em modo silencioso, pra falha de rede
+  momentânea não expulsar o operador da conversa).
+- Manifest: `id` fixado em `/conversations` (não `/`), que é a identidade que os
+  apps já instalados receberam. Mudar criaria um app "órfão".
+- `beforeinstallprompt` é capturado por script inline no `<head>`, porque
+  costuma disparar antes da hidratação. O botão da sidebar perdia o evento.
+- `screenshots` do manifest ficaram de fora: precisam de capturas reais do painel.
 
 Achados extras durante a Fase 1, já corrigidos:
 - Vendedor **desativado** continuava recebendo push das conversas atribuídas a ele

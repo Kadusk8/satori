@@ -26,12 +26,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     : 'product'
 
   return (
-    <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-background">
+    // h-dvh: no iPhone, 100vh ignora a barra do Safari e o teclado — o campo do chat sumia.
+    // px-safe: no iPhone deitado, o notch fica nas laterais.
+    <div className="flex flex-col md:flex-row h-dvh overflow-hidden bg-background px-safe">
       <DashboardSidebar tenantId={claims.tenantId} userRole={claims.userRole} businessModel={businessModel} />
-      <main className="flex-1 flex flex-col h-full overflow-hidden bg-background">
+      <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-background">
         <NotificationPermissionBanner />
         <SessionRefresh />
-        <div className="flex-1 overflow-y-auto">
+        {/* min-h-0: sem isso o flex item não encolhe e as páginas com h-full
+            (chat, CRM, agenda) estouram a altura da tela. */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {children}
         </div>
       </main>
