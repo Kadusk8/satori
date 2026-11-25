@@ -13,6 +13,7 @@ import { isContactBlockedByTags } from '../shared/contact-block.js'
 import { createConnectionWatcher } from '../shared/connection-watch.js'
 import { buildConnectionAlert, sendAlertEmail } from '../shared/alert-email.js'
 import { getEvolutionClient } from '../shared/evolution-client.js'
+import { HUMAN_STATUSES, messagePushRecipients } from '../shared/push-recipients.js'
 
 // Reação a quedas do WhatsApp: espera uma janela (o Evolution já tenta voltar sozinho), manda
 // reconectar uma vez e avisa por e-mail se não voltar ou se o aparelho foi deslogado.
@@ -523,31 +524,32 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
 
   // Notificação Push
   try {
-    // Push só pra quem enxerga a conversa no painel: o vendedor dono; sem dono, dono/admin
-    // sempre e vendedores só se ela já foi escalada (a que a IA está atendendo não aparece
-    // pra vendedor — mandar push dela pra ele abriria uma conversa que ele não pode ver).
-    let targetUserIds: string[] = []
-    if (existingConvRows[0]?.assignedTo) {
-      targetUserIds = [existingConvRows[0].assignedTo]
-    } else {
-      const visibleToOperators = conversationStatus === 'waiting_human' || conversationStatus === 'human_handling'
+    // Regra de destinatários em shared/push-recipients.ts (só quando há humano envolvido).
+    const assignedTo = existingConvRows[0]?.assignedTo ?? null
+    const needsHuman = Boolean(assignedTo) || HUMAN_STATUSES.has(conversationStatus)
+    if (needsHuman) {
       const activeUsers = await db
-        .select({ id: users.id, role: users.role })
+        .select({ id: users.id })
         .from(users)
         .where(and(eq(users.tenantId, tenantId), eq(users.active, true)))
-      targetUserIds = activeUsers.filter((u) => u.role !== 'operator' || visibleToOperators).map((u) => u.id)
-    }
+      const targetUserIds = messagePushRecipients({
+        assignedTo,
+        conversationStatus,
+        activeUserIds: activeUsers.map((u) => u.id),
+      })
 
-    if (targetUserIds.length > 0) {
-      const contactName = envelope.pushName || phoneNumber
-      const bodyText = text || (contentType === 'image' ? '📷 Imagem recebida' : (contentType === 'audio' ? '🎵 Áudio recebido' : 'Nova mensagem'))
-      
-      const { sendPushNotification } = await import('../shared/push-sender.js')
-      sendPushNotification(tenantId, targetUserIds, {
-        title: `Mensagem de ${contactName}`,
-        body: bodyText.length > 100 ? bodyText.substring(0, 97) + '...' : bodyText,
-        conversationId,
-      }).catch(err => console.error('[webhook] Erro não tratado no push:', err))
+      if (targetUserIds.length > 0) {
+        const contactName = envelope.pushName || phoneNumber
+        const bodyText = text || (contentType === 'image' ? '📷 Imagem recebida' : (contentType === 'audio' ? '🎵 Áudio recebido' : 'Nova mensagem'))
+
+        const { sendPushNotification } = await import('../shared/push-sender.js')
+        sendPushNotification(tenantId, targetUserIds, {
+          title: `Mensagem de ${contactName}`,
+          body: bodyText.length > 100 ? bodyText.substring(0, 97) + '...' : bodyText,
+          conversationId,
+          kind: 'message',
+        }).catch(err => console.error('[webhook] Erro não tratado no push:', err))
+      }
     }
   } catch (err) {
     console.error('[webhook] Erro ao tentar disparar notificação push:', err)

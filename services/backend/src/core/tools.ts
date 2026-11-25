@@ -527,6 +527,7 @@ async function notifyEscalation(
       title,
       body: body.length > 160 ? body.slice(0, 157) + '...' : body,
       conversationId,
+      kind: 'escalation',
     })
   } catch (err) {
     console.error('[tools] Falha ao notificar escalada:', err instanceof Error ? err.message : err)
