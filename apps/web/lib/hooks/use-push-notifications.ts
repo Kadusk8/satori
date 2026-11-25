@@ -1,20 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-
-  const rawData = window.atob(base64)
-  const outputArray = new Uint8Array(rawData.length)
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i)
-  }
-  return outputArray
-}
+import * as pushClient from '@/lib/pwa/push-client'
 
 export function usePushNotifications() {
   const [isSupported, setIsSupported] = useState(false)
@@ -23,89 +11,69 @@ export function usePushNotifications() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-      setIsSupported(true)
-      setPermission(Notification.permission)
-
-      // Check current subscription
-      navigator.serviceWorker.ready.then((reg) => {
-        reg.pushManager.getSubscription().then((sub) => {
-          setIsSubscribed(!!sub)
-          setIsLoading(false)
-        })
-      })
-    } else {
+    let cancelled = false
+    if (!pushClient.isPushSupported()) {
       setIsLoading(false)
+      return
+    }
+    setPermission(Notification.permission)
+
+    // Sincroniza navegador ↔ banco a cada abertura (ver syncSubscription).
+    pushClient
+      .syncSubscription()
+      .then((result) => {
+        if (cancelled) return
+        setIsSupported(result !== 'unsupported')
+        setIsSubscribed(result === 'subscribed')
+        setPermission(Notification.permission)
+      })
+      .catch((err) => {
+        console.warn('[push] Falha ao verificar inscrição:', err)
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
-  const subscribe = async () => {
+  // Chamar direto do onClick: no iOS a permissão só é concedida a partir de um toque.
+  const subscribe = useCallback(async () => {
     setIsLoading(true)
     try {
-      if (Notification.permission === 'denied') {
-        toast.error('Notificações bloqueadas pelo navegador. Altere nas configurações.')
-        return false
-      }
-
-      const reg = await navigator.serviceWorker.ready
-      const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-
-      if (!vapidPublicKey) {
-        throw new Error('VAPID public key not found')
-      }
-
-      const subscription = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-      })
-
-      const res = await fetch('/api/push-subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(subscription),
-      })
-
-      if (!res.ok) throw new Error('Falha ao salvar no servidor')
-
-      setPermission(Notification.permission)
+      await pushClient.subscribe()
       setIsSubscribed(true)
       toast.success('Notificações ativadas!')
       return true
     } catch (err) {
-      console.error('[Push Subscribe]', err)
-      toast.error('Não foi possível ativar as notificações.')
+      if (err instanceof pushClient.PushPermissionError) {
+        if (err.permission === 'denied') {
+          toast.error('Notificações bloqueadas. Libere nas configurações do aparelho/navegador.')
+        }
+      } else {
+        console.error('[push] Falha ao inscrever:', err)
+        toast.error('Não foi possível ativar as notificações.')
+      }
       return false
     } finally {
+      setPermission(Notification.permission)
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  const unsubscribe = async () => {
+  const unsubscribe = useCallback(async () => {
     setIsLoading(true)
     try {
-      const reg = await navigator.serviceWorker.ready
-      const subscription = await reg.pushManager.getSubscription()
-
-      if (subscription) {
-        await fetch('/api/push-unsubscribe', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: subscription.endpoint }),
-        })
-        await subscription.unsubscribe()
-      }
-
+      await pushClient.unsubscribe()
       setIsSubscribed(false)
       toast.info('Notificações desativadas.')
       return true
-    } catch (err) {
-      console.error('[Push Unsubscribe]', err)
-      toast.error('Falha ao desativar notificações.')
-      return false
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
   return {
     isSupported,

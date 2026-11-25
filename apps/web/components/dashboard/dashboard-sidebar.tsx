@@ -15,6 +15,7 @@ import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { unsubscribe as unsubscribePush } from '@/lib/pwa/push-client'
 import { SatoriMark, SatoriWordmark, SatoriLogo } from '@/components/brand/satori-logo'
 
 function NotificationBadge({ count }: { count: number }) {
@@ -69,6 +70,9 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
   async function handleLogout() {
     try {
       setIsLoggingOut(true)
+      // Antes de encerrar a sessão (a API de unsubscribe exige login): sem isso, o
+      // próximo usuário deste aparelho receberia os pushes deste. Limitada a 3s.
+      await unsubscribePush()
       await logout()
     } catch (err) {
       if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) return

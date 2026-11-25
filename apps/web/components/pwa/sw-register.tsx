@@ -1,26 +1,58 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+
+function clearAppBadge() {
+  const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> }
+  nav.clearAppBadge?.().catch(() => {})
+}
 
 /**
- * Registra o service worker no browser.
+ * Registra o service worker e trata o que ele pede à página.
  * Componente invisível — renderiza null.
  */
 export function ServiceWorkerRegister() {
+  const router = useRouter()
+
   useEffect(() => {
-    if (typeof window === 'undefined') return
     if (!('serviceWorker' in navigator)) return
 
+    let updateTimer: ReturnType<typeof setInterval> | undefined
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
       .then((reg) => {
         // Auto-update: verifica a cada 60 minutos
-        setInterval(() => reg.update(), 60 * 60 * 1000)
+        updateTimer = setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000)
       })
       .catch((err) => {
         console.warn('[SW] Falha ao registrar service worker:', err)
       })
-  }, [])
+
+    // Clique na notificação com o app já aberto: o SW foca a janela e pede a navegação.
+    const onMessage = (event: MessageEvent) => {
+      const msg: unknown = event.data
+      if (typeof msg !== 'object' || msg === null) return
+      const { type, url } = msg as { type?: unknown; url?: unknown }
+      if (type !== 'satori:navigate' || typeof url !== 'string') return
+      if (!url.startsWith('/') || url.startsWith('//')) return
+      router.push(url)
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+
+    // Abriu/voltou pro app → zera a bolinha do ícone.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') clearAppBadge()
+    }
+    onVisible()
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      if (updateTimer) clearInterval(updateTimer)
+      navigator.serviceWorker.removeEventListener('message', onMessage)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [router])
 
   return null
 }

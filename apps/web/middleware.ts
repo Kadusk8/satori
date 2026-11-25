@@ -20,7 +20,13 @@ export function middleware(request: NextRequest) {
   if (request.nextUrl.pathname === '/' && request.nextUrl.hostname.startsWith('admin.')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
-  return NextResponse.next()
+
+  // Repassa o path atual pros Server Components (layouts não têm acesso à URL),
+  // usado pra montar ?callbackUrl= quando a sessão expira. Sobrescreve qualquer
+  // x-pathname vindo do cliente; o valor ainda é validado em safeCallbackPath.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-pathname', request.nextUrl.pathname + request.nextUrl.search)
+  return NextResponse.next({ request: { headers: requestHeaders } })
 }
 
 export const config = {

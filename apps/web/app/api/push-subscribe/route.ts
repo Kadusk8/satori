@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { withClaims } from '@/lib/db'
+import { and, eq, or, ne } from 'drizzle-orm'
+import { withAdmin, withClaims } from '@/lib/db'
 import { pushSubscriptions } from '@/lib/db/schema'
 import { getDbClaims } from '@/lib/auth/session'
 
@@ -25,11 +26,30 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { endpoint, keys } = body
 
-    if (!isAllowedPushEndpoint(endpoint) || !keys?.p256dh || !keys?.auth) {
+    const isKey = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 256
+    if (!isAllowedPushEndpoint(endpoint) || String(endpoint).length > 2048 || !isKey(keys?.p256dh) || !isKey(keys?.auth)) {
       return NextResponse.json({ error: 'Invalid subscription data' }, { status: 400 })
     }
 
-    const userAgent = request.headers.get('user-agent') || ''
+    const userAgent = (request.headers.get('user-agent') || '').slice(0, 500)
+    const userId = claims.sub
+    const tenantId = claims.tenant_id
+
+    // Mesmo navegador já inscrito por OUTRO usuário (aparelho compartilhado, logout
+    // que não conseguiu cancelar): a policy RLS bloqueia o UPDATE do upsert numa linha
+    // alheia, e a rota dava 500. Ter o endpoint prova posse do navegador (URL longa e
+    // não adivinhável, emitida pelo serviço de push pra este navegador), então a linha
+    // antiga é apagada — e o usuário anterior deixa de receber pushes neste aparelho.
+    await withAdmin(async (tx) => {
+      await tx
+        .delete(pushSubscriptions)
+        .where(
+          and(
+            eq(pushSubscriptions.endpoint, endpoint),
+            or(ne(pushSubscriptions.userId, userId), ne(pushSubscriptions.tenantId, tenantId))
+          )
+        )
+    })
 
     await withClaims(claims, async (tx) => {
       await tx

@@ -11,8 +11,11 @@ const PUBLIC_PATHS = ['/', '/login']
 export const authConfig = {
   pages: { signIn: '/login' },
   trustHost: true,
-  // Sessão curta: os claims são revalidados no callback jwt (ver auth.ts).
-  session: { strategy: 'jwt', maxAge: 12 * 60 * 60 },
+  // Sessão deslizante: expira após 7 dias SEM uso; cada uso renova (updateAge 1h).
+  // Antes era 12h fixas — no app instalado o operador caía no login toda manhã ao
+  // tocar no push. A segurança não depende da duração: os claims são revalidados
+  // a cada 5 min no callback jwt (auth.ts), então desativado/suspenso perde o acesso.
+  session: { strategy: 'jwt', maxAge: 7 * 24 * 60 * 60, updateAge: 60 * 60 },
   providers: [], // preenchido em auth.ts (Credentials)
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
