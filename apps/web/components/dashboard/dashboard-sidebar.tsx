@@ -57,7 +57,18 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
     getWaitingCount().then(setWaitingCount).catch(() => {})
 
     const pusherClient = getPusherClient()
-    if (!pusherClient) return
+    if (!pusherClient) {
+      // Sem Pusher configurado (é o caso hoje em produção): polling leve, como o
+      // CRM (8s) e o chat (5s) já fazem. Sem isso, o contador — que também é o
+      // número no ícone do app — ficava parado com o app aberto. Só com a aba
+      // visível, pra não gastar bateria em segundo plano.
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          getWaitingCount().then(setWaitingCount).catch(() => {})
+        }
+      }, 30_000)
+      return () => clearInterval(interval)
+    }
 
     const channel = pusherClient.subscribe(tenantChannel(tenantId))
     const handler = () => { getWaitingCount().then(setWaitingCount).catch(() => {}) }
