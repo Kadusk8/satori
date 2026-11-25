@@ -61,6 +61,8 @@ export function KanbanCard({ conversation, isDragging, onCardClick }: KanbanCard
       className={cn(
         'group rounded-lg border bg-background p-3 shadow-sm cursor-grab active:cursor-grabbing',
         'hover:border-primary/40 hover:shadow-md transition-all',
+        // Segurar pra arrastar no celular: sem seleção de texto nem menu de contexto do iOS.
+        'select-none [-webkit-touch-callout:none]',
         (isSortableDragging || isDragging) && 'opacity-40 ring-2 ring-primary',
         onCardClick && 'cursor-pointer'
       )}

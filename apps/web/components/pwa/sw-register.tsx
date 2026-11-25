@@ -3,11 +3,6 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-function clearAppBadge() {
-  const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> }
-  nav.clearAppBadge?.().catch(() => {})
-}
-
 /**
  * Registra o service worker e trata o que ele pede à página.
  * Componente invisível — renderiza null.
@@ -40,17 +35,11 @@ export function ServiceWorkerRegister() {
     }
     navigator.serviceWorker.addEventListener('message', onMessage)
 
-    // Abriu/voltou pro app → zera a bolinha do ícone.
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') clearAppBadge()
-    }
-    onVisible()
-    document.addEventListener('visibilitychange', onVisible)
+    // O número no ícone do app é mantido pela sidebar do dashboard (lib/pwa/app-badge.ts).
 
     return () => {
       if (updateTimer) clearInterval(updateTimer)
       navigator.serviceWorker.removeEventListener('message', onMessage)
-      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [router])
 

@@ -58,6 +58,10 @@ export const users = pgTable('users', {
   isAvailable: boolean('is_available').notNull(),
   active: boolean('active').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Preferências de push (migration 2026-11-25-push-preferences).
+  pushOnlyAssigned: boolean('push_only_assigned').notNull(),
+  pushQuietStart: time('push_quiet_start'),
+  pushQuietEnd: time('push_quiet_end'),
 })
 
 export const contacts = pgTable('contacts', {
