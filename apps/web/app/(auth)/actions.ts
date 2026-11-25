@@ -6,10 +6,13 @@ import { AuthError } from 'next-auth'
 import { signIn, signOut } from '@/auth'
 import { getClaimsForUser } from '@/lib/auth/claims'
 import { findAuthUserByEmail } from '@/lib/auth/users'
+import { safeCallbackPath } from '@/lib/auth/safe-redirect'
 
 export async function login(formData: FormData) {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
+  // Destino de onde o usuário veio (ex: toque no push → /chat/{id} com sessão expirada).
+  const callbackPath = safeCallbackPath(formData.get('callbackUrl'))
 
   try {
     await signIn('credentials', { email, password, redirect: false })
@@ -25,6 +28,9 @@ export async function login(formData: FormData) {
   const claims = user ? await getClaimsForUser(user.id) : null
 
   revalidatePath('/', 'layout')
+  // Os layouts de /admin e do dashboard reconferem o papel, então o callback
+  // não dá acesso a nada além do que o papel já permite.
+  if (callbackPath) redirect(callbackPath)
   if (claims?.is_super_admin) redirect('/admin')
   redirect('/dashboard')
 }

@@ -1,14 +1,21 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { getSessionClaims } from '@/lib/auth/session'
+import { safeCallbackPath } from '@/lib/auth/safe-redirect'
 import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar'
 import { NotificationPermissionBanner } from '@/components/pwa/notification-permission-banner'
+import { SessionRefresh } from '@/components/pwa/session-refresh'
 import { withClaims } from '@/lib/db'
 import { tenants } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const claims = await getSessionClaims()
-  if (!claims.userId) redirect('/login')
+  if (!claims.userId) {
+    // Mantém o destino (ex: /chat/{id} aberto pelo push) pra voltar pra ele depois do login.
+    const callbackPath = safeCallbackPath((await headers()).get('x-pathname'))
+    redirect(callbackPath ? `/login?callbackUrl=${encodeURIComponent(callbackPath)}` : '/login')
+  }
   // Super admin "puro" não tem tenant — manda pro painel admin.
   if (claims.isSuperAdmin && !claims.tenantId) redirect('/admin')
   const businessModel = claims.tenantId
@@ -23,6 +30,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <DashboardSidebar tenantId={claims.tenantId} userRole={claims.userRole} businessModel={businessModel} />
       <main className="flex-1 flex flex-col h-full overflow-hidden bg-background">
         <NotificationPermissionBanner />
+        <SessionRefresh />
         <div className="flex-1 overflow-y-auto">
           {children}
         </div>

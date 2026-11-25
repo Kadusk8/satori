@@ -1,16 +1,22 @@
 /// <reference lib="webworker" />
 
-// ─── Service Worker — SATORI PWA ────────────────────────────────────────────
+// ─── Service Worker — Satori PWA ────────────────────────────────────────────
 // Estratégias:
-//   • Precache: app shell (página de conversas + offline fallback)
-//   • Stale-while-revalidate: assets estáticos (/_next/static/)
-//   • Network-only: APIs e dados dinâmicos
-//   • Push: notificações nativas de novas mensagens
+//   • Precache: só a página /offline (nada autenticado vai pro cache — o
+//     aparelho pode ser compartilhado e o HTML do painel tem dados de clientes)
+//   • Stale-while-revalidate: assets estáticos (/_next/static/, com hash no nome)
+//   • Network-only: APIs, auth e todo o resto
+//   • Push: notificação nativa; SEMPRE exibe algo (o iOS revoga a inscrição de
+//     quem recebe push sem mostrar notificação)
+//
+// Ao alterar este arquivo, suba SW_VERSION — é o que descarta o cache antigo.
 
-const SW_VERSION = 'satori-sw-v1'
+const SW_VERSION = 'satori-sw-v2'
 const CACHE_NAME = `satori-shell-${SW_VERSION}`
 
-const SHELL_URLS = ['/conversations', '/offline']
+const SHELL_URLS = ['/offline']
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // ─── Install ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +45,9 @@ self.addEventListener('activate', (event) => {
 // ─── Fetch ───────────────────────────────────────────────────────────────────
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return
   const url = new URL(event.request.url)
+  if (url.origin !== self.location.origin) return
 
   // Network-only para APIs, dados dinâmicos e auth
   if (
@@ -56,14 +64,13 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Navigation requests: network-first com fallback offline
+  // Navegação: sempre rede; sem conexão, cai na página offline
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() =>
         caches.match('/offline').then((r) => r || new Response('Offline', { status: 503 }))
       )
     )
-    return
   }
 })
 
@@ -86,31 +93,42 @@ async function staleWhileRevalidate(request) {
 // ─── Push Notifications ──────────────────────────────────────────────────────
 
 self.addEventListener('push', (event) => {
-  if (!event.data) return
-
-  let data
-  try {
-    data = event.data.json()
-  } catch {
-    data = { title: 'Nova mensagem', body: event.data.text() }
+  let data = {}
+  if (event.data) {
+    try {
+      data = event.data.json()
+    } catch {
+      data = { body: event.data.text() }
+    }
   }
 
+  const conversationId = typeof data.conversationId === 'string' && UUID_RE.test(data.conversationId)
+    ? data.conversationId
+    : null
+
   const options = {
-    body: data.body || '',
+    body: typeof data.body === 'string' ? data.body : 'Você tem uma nova atualização no Satori.',
     icon: '/icons/icon-192.png',
     badge: '/icons/badge-72.png',
-    tag: data.conversationId || 'general',
+    // Mesma conversa substitui a notificação anterior em vez de empilhar
+    tag: conversationId || 'satori-geral',
     renotify: true,
     vibrate: [200, 100, 200],
     data: {
-      url: data.conversationId
-        ? `/chat/${data.conversationId}`
-        : '/conversations',
+      url: conversationId ? `/chat/${conversationId}` : '/conversations',
     },
   }
 
+  const title = typeof data.title === 'string' && data.title ? data.title : 'Satori'
+
   event.waitUntil(
-    self.registration.showNotification(data.title || 'SATORI', options)
+    Promise.all([
+      self.registration.showNotification(title, options),
+      // Bolinha no ícone do app (iOS 16.4+ instalado, Android). Zerada ao abrir o app.
+      self.navigator && 'setAppBadge' in self.navigator
+        ? self.navigator.setAppBadge().catch(() => {})
+        : Promise.resolve(),
+    ])
   )
 })
 
@@ -119,20 +137,22 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  const targetUrl = event.notification.data?.url || '/conversations'
+  const raw = event.notification.data && event.notification.data.url
+  const targetUrl = typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/conversations'
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Se já tem uma janela aberta, foca nela e navega
-      for (const client of clientList) {
-        if ('focus' in client) {
-          client.focus()
-          client.navigate(targetUrl)
-          return
-        }
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const client = clientList.find((c) => new URL(c.url).origin === self.location.origin)
+
+      if (client) {
+        // client.navigate() lança em janela não controlada e não é confiável no
+        // Safari — a própria página navega (listener em components/pwa/sw-register.tsx).
+        await client.focus().catch(() => {})
+        client.postMessage({ type: 'satori:navigate', url: targetUrl })
+        return
       }
-      // Senão, abre nova janela
-      return self.clients.openWindow(targetUrl)
-    })
+      await self.clients.openWindow(targetUrl)
+    })()
   )
 })

@@ -13,6 +13,9 @@ function LoginForm() {
     e.preventDefault()
     setError(null)
     const formData = new FormData(e.currentTarget)
+    // Lido direto da URL (sem useSearchParams, que exigiria Suspense na página).
+    const callbackUrl = new URLSearchParams(window.location.search).get('callbackUrl')
+    if (callbackUrl) formData.set('callbackUrl', callbackUrl)
 
     startTransition(async () => {
       const result = await login(formData)
