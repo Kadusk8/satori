@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { ServiceWorkerRegister } from "@/components/pwa/sw-register";
 import { iosStartupImages } from "@/lib/pwa/ios-splash";
 import { INSTALL_CAPTURE_SCRIPT } from "@/lib/pwa/install-event";
+import { iconUrl } from "@/lib/pwa/icons";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,10 +38,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icons/icon.svg", type: "image/svg+xml" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: iconUrl("icon.svg"), type: "image/svg+xml" },
+      { url: iconUrl("icon-192.png"), sizes: "192x192", type: "image/png" },
     ],
-    apple: "/icons/apple-touch-icon.png",
+    // Ícone da tela inicial do iPhone. O iOS só lê ao "Adicionar à Tela de Início".
+    apple: iconUrl("apple-touch-icon.png"),
   },
 };
 
