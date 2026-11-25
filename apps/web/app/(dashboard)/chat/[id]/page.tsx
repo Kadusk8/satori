@@ -26,6 +26,7 @@ import { getChat, getMessagesSince, assumeConversation, closeConversation } from
 import { AiSummaryCard } from '@/components/chat/ai-summary-card'
 import { returnConversationToAI } from '@/lib/data/conversations'
 import { getPusherClient, conversationChannel } from '@/lib/realtime/client'
+import { useOnAppResume } from '@/lib/pwa/use-app-resume'
 import { toast } from 'sonner'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -98,10 +99,13 @@ export default function ChatPage() {
 
   // ── Carrega conversa e mensagens ────────────────────────────────────────
 
-  const loadChat = useCallback(async () => {
+  // silent: recarga de fundo (app voltou do segundo plano) — falha de rede ali é
+  // normal por alguns segundos e não pode tirar o operador da conversa.
+  const loadChat = useCallback(async (opts?: { silent?: boolean }) => {
     try {
       const res = await getChat(conversationId)
       if (!res) {
+        if (opts?.silent) return
         toast.error('Conversa não encontrada')
         router.push('/conversations')
         return
@@ -110,10 +114,14 @@ export default function ChatPage() {
       contactIdRef.current = res.conversation.contacts.id
       setMessages(res.messages.map((m) => mapMessage(m as unknown as DBMessage)))
     } catch {
+      if (opts?.silent) return
       toast.error('Erro ao carregar a conversa')
       router.push('/conversations')
     }
   }, [conversationId, router])
+
+  // Mensagens que chegaram com o app em segundo plano (WebSocket derrubado).
+  useOnAppResume(() => { void loadChat({ silent: true }) })
 
   useEffect(() => {
     async function load() {
@@ -336,7 +344,7 @@ export default function ChatPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen text-muted-foreground text-sm">
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
         Carregando conversa...
       </div>
     )
@@ -354,7 +362,7 @@ export default function ChatPage() {
   const canAssume = convStatus === 'ai_handling' || convStatus === 'waiting_human'
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-4 px-6 py-4 border-b bg-background shrink-0">
         <Button

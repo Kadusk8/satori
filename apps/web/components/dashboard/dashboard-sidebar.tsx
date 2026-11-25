@@ -190,16 +190,18 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
 
   return (
     <>
-      <aside className="hidden md:flex h-screen w-56 flex-col border-r border-border/60 bg-[oklch(0.12_0.015_240)] shrink-0">
+      {/* pt-safe/pb-safe: iPad e iPhone com o app instalado (tela cheia sob a status bar). */}
+      <aside className="hidden md:flex h-full w-56 flex-col border-r border-border/60 bg-[oklch(0.12_0.015_240)] shrink-0 pt-safe pb-safe">
         <SidebarContent />
       </aside>
 
-      <div className="md:hidden flex h-14 items-center gap-3 px-4 border-b border-border/60 bg-[oklch(0.12_0.015_240)] shrink-0">
+      {/* box-content: a altura útil continua 56px e o recuo do notch soma por fora. */}
+      <div className="md:hidden flex box-content h-14 pt-safe items-center gap-3 px-4 border-b border-border/60 bg-[oklch(0.12_0.015_240)] shrink-0">
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetTrigger className="text-muted-foreground hover:text-foreground">
             <Menu className="h-6 w-6" />
           </SheetTrigger>
-          <SheetContent side="left" className="w-64 p-0 bg-[oklch(0.12_0.015_240)] border-border/60">
+          <SheetContent side="left" className="w-64 p-0 pt-safe pb-safe bg-[oklch(0.12_0.015_240)] border-border/60">
             <SidebarContent onItemClick={() => setIsMobileMenuOpen(false)} />
           </SheetContent>
         </Sheet>

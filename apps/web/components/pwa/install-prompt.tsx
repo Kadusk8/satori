@@ -10,69 +10,32 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { detectPlatform } from '@/lib/pwa/platform'
+import { getInstallPrompt, promptInstall } from '@/lib/pwa/install-event'
+import { InstallGuide } from '@/components/pwa/install-guide'
 
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[]
-  readonly userChoice: Promise<{
-    outcome: 'accepted' | 'dismissed'
-    platform: string
-  }>
-  prompt(): Promise<void>
-}
-
+/** Botão "Instalar App" da sidebar. Some quando o app já está instalado. */
 export function InstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [isIOS, setIsIOS] = useState(false)
-  const [isStandalone, setIsStandalone] = useState(false)
+  const [isStandalone, setIsStandalone] = useState(true)
   const [isOpen, setIsOpen] = useState(false)
 
   useEffect(() => {
-    // Detect iOS
-    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    setIsIOS(iOS)
-
-    // Detect if already installed
-    const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as unknown as { standalone: boolean }).standalone === true
-    setIsStandalone(standalone)
-
-    // Chrome / Android WebAPK prompt
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault()
-      setDeferredPrompt(e as BeforeInstallPromptEvent)
-    }
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
-    }
+    setIsStandalone(detectPlatform().isStandalone)
   }, [])
 
+  if (isStandalone) return null
+
   const handleInstallClick = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt()
-      const { outcome } = await deferredPrompt.userChoice
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null)
-      }
-      setIsOpen(false)
-    } else if (isIOS) {
-      setIsOpen(true)
-    } else {
-      // Navegador não suporta prompt de instalação e não é iOS
-      setIsOpen(true)
+    // Diálogo nativo (Chrome/Edge/Samsung) quando disponível — evento capturado
+    // no <head> do layout raiz, então não se perde antes da hidratação.
+    if (getInstallPrompt()) {
+      await promptInstall()
+      return
     }
+    // iPhone, Firefox, navegador embutido etc.: mesmo guia da página /instalar.
+    setIsOpen(true)
   }
 
-  // Se já está instalado, não mostra botão extra (isso pode ser deixado pro sidebar decidir
-  // mas aqui só expomos a função caso precisem).
-  if (isStandalone) {
-    return null
-  }
-
-  // O componente pode ser usado de duas formas:
-  // 1. Um botão explícito exportado
-  // 2. O Modal/Dialog de instrução
   return (
     <>
       <Button
@@ -88,37 +51,14 @@ export function InstallPrompt() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Instalar o SATORI</DialogTitle>
+            <DialogTitle>Instalar o Satori</DialogTitle>
             <DialogDescription>
-              Instale nosso app para ter uma experiência nativa e receber notificações push.
+              Instale o app para ser avisado quando um cliente precisar de atendimento.
             </DialogDescription>
           </DialogHeader>
-
-          {isIOS ? (
-            <div className="space-y-4 py-4 text-sm text-zinc-300">
-              <p>No seu iPhone ou iPad:</p>
-              <ol className="list-decimal list-inside space-y-2">
-                <li>
-                  Toque no botão <strong>Compartilhar</strong> na barra inferior do Safari
-                  (um quadrado com uma seta para cima).
-                </li>
-                <li>
-                  Role para baixo e toque em <strong>&quot;Adicionar à Tela de Início&quot;</strong>.
-                </li>
-                <li>
-                  Toque em <strong>&quot;Adicionar&quot;</strong> no canto superior direito.
-                </li>
-              </ol>
-            </div>
-          ) : (
-            <div className="space-y-4 py-4 text-sm text-zinc-300">
-              <p>Para instalar neste navegador:</p>
-              <p>
-                Acesse o menu do seu navegador (geralmente três pontos no canto superior direito) 
-                e clique em <strong>&quot;Instalar aplicativo&quot;</strong> ou <strong>&quot;Adicionar à tela inicial&quot;</strong>.
-              </p>
-            </div>
-          )}
+          <div className="py-2">
+            <InstallGuide />
+          </div>
         </DialogContent>
       </Dialog>
     </>

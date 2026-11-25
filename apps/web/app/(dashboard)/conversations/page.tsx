@@ -15,6 +15,7 @@ import { isManager } from '@/lib/auth/permissions'
 import { AI_SALES_MODES, AI_SALES_MODE_DESCRIPTIONS, AI_SALES_MODE_LABELS, normalizeAiSalesMode, type AiSalesModeSetting } from '@/lib/ai-sales-mode'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
+import { useOnAppResume } from '@/lib/pwa/use-app-resume'
 import { toast } from 'sonner'
 
 // ── Tipos do banco ────────────────────────────────────────────────────────────
@@ -147,6 +148,9 @@ export default function ConversationsPage() {
     loadData().finally(() => setIsLoading(false))
   }, [loadData])
 
+  // Eventos perdidos com o app em segundo plano (WebSocket derrubado pelo sistema).
+  useOnAppResume(() => { void loadData() })
+
   // ── Realtime: qualquer mudança em conversas do tenant recarrega o kanban ──
 
   useEffect(() => {
@@ -211,7 +215,7 @@ export default function ConversationsPage() {
   const hasActiveFilters = filterStatus !== 'all' || filterPriority !== 'all' || filterSearch !== ''
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-5 border-b bg-background shrink-0">
         <div>

@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { getTenantScheduleConfig, listAppointments, saveAppointment } from '@/lib/data/appointments'
 import { getPusherClient, tenantChannel } from '@/lib/realtime/client'
+import { useOnAppResume } from '@/lib/pwa/use-app-resume'
 import { toast } from 'sonner'
 
 // ── Tipos do banco ────────────────────────────────────────────────────────────
@@ -163,6 +164,9 @@ export default function AppointmentsPage() {
     setIsLoading(true)
     loadData().finally(() => setIsLoading(false))
   }, [loadData])
+
+  // Eventos perdidos com o app em segundo plano (WebSocket derrubado pelo sistema).
+  useOnAppResume(() => { void loadData() })
 
   // ── Realtime: qualquer agendamento alterado no tenant recarrega a lista ───
 
@@ -427,7 +431,7 @@ export default function AppointmentsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen text-muted-foreground text-sm gap-2">
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         Carregando agenda...
       </div>
@@ -435,7 +439,7 @@ export default function AppointmentsPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-4 px-8 py-4 border-b bg-background shrink-0">
         <h1 className="text-xl font-bold">Agenda</h1>

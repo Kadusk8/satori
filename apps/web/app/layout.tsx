@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegister } from "@/components/pwa/sw-register";
+import { iosStartupImages } from "@/lib/pwa/ios-splash";
+import { INSTALL_CAPTURE_SCRIPT } from "@/lib/pwa/install-event";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,12 +25,15 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "SATORI",
+  title: "Satori",
   description: "Plataforma SaaS de atendimento automatizado via WhatsApp com IA",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "SATORI",
+    // Nome embaixo do ícone na tela inicial do iPhone.
+    title: "Satori",
+    // Sem isso o app instalado abre com tela branca no iPhone.
+    startupImage: iosStartupImages(),
   },
   icons: {
     icon: [
@@ -49,9 +54,19 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
+      <head>
+        {/* Captura o evento de instalação antes da hidratação (ver lib/pwa/install-event.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: INSTALL_CAPTURE_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         {children}
-        <Toaster richColors position="top-right" />
+        {/* Recuo do notch: no app instalado no iPhone o toast ficava sob o relógio. */}
+        <Toaster
+          richColors
+          position="top-right"
+          offset={{ top: 'calc(env(safe-area-inset-top, 0px) + 24px)' }}
+          mobileOffset={{ top: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
+        />
         <ServiceWorkerRegister />
       </body>
     </html>

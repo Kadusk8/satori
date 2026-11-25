@@ -92,7 +92,8 @@ export function ChatInput({ onSend, onSendMedia, onSendLocation, disabled }: Cha
   }
 
   return (
-    <div className="flex items-end gap-2 p-4 border-t bg-background">
+    // pb: no iPhone com o app instalado, a barra de gestos cobria o campo de digitar.
+    <div className="flex items-end gap-2 p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] border-t bg-background">
       <input
         ref={fileInputRef}
         type="file"
