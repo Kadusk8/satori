@@ -79,7 +79,7 @@ export default async function AdminDashboardPage() {
   )
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
 
       {/* ── Alerta: IA parou de responder por erro de LLM ── */}
       {llmErrors.length > 0 && (

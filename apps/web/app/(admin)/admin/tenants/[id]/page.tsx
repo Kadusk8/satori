@@ -114,7 +114,7 @@ export default async function TenantDetailPage({ params }: TenantPageProps) {
     : '—'
 
   return (
-    <div className="p-8 space-y-6 max-w-4xl mx-auto">
+    <div className="p-4 md:p-8 space-y-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" render={<Link href="/admin/tenants" />} nativeButton={false}>
