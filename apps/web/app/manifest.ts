@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next'
+import { iconUrl } from '@/lib/pwa/icons'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -19,15 +20,16 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: 'any',
     categories: ['business', 'productivity'],
     prefer_related_applications: false,
+    // URLs versionadas: mudar a URL faz o Android atualizar o ícone do app já instalado.
     icons: [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-      { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: iconUrl('icon-192.png'), sizes: '192x192', type: 'image/png' },
+      { src: iconUrl('icon-512.png'), sizes: '512x512', type: 'image/png' },
+      { src: iconUrl('icon-maskable-512.png'), sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
     // Atalhos no toque longo do ícone (Android).
     shortcuts: [
-      { name: 'CRM', short_name: 'CRM', url: '/conversations', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
-      { name: 'Agenda', short_name: 'Agenda', url: '/appointments', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
+      { name: 'CRM', short_name: 'CRM', url: '/conversations', icons: [{ src: iconUrl('icon-192.png'), sizes: '192x192' }] },
+      { name: 'Agenda', short_name: 'Agenda', url: '/appointments', icons: [{ src: iconUrl('icon-192.png'), sizes: '192x192' }] },
     ],
   }
 }

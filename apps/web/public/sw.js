@@ -11,7 +11,9 @@
 //
 // Ao alterar este arquivo, suba SW_VERSION — é o que descarta o cache antigo.
 
-const SW_VERSION = 'satori-sw-v2'
+const SW_VERSION = 'satori-sw-v3'
+// Igual a ICON_VERSION em lib/pwa/icons.ts (este arquivo não importa módulos).
+const ICON_QS = '?v=2'
 const CACHE_NAME = `satori-shell-${SW_VERSION}`
 
 const SHELL_URLS = ['/offline']
@@ -108,8 +110,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: typeof data.body === 'string' ? data.body : 'Você tem uma nova atualização no Satori.',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/badge-72.png',
+    icon: '/icons/icon-192.png' + ICON_QS,
+    badge: '/icons/badge-72.png' + ICON_QS,
     // Mesma conversa substitui a notificação anterior em vez de empilhar
     tag: conversationId || 'satori-geral',
     renotify: true,
