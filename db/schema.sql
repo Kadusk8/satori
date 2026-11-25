@@ -394,6 +394,42 @@ CREATE POLICY "super_admin_full_access" ON users
 CREATE POLICY "service_role_full_access" ON users
   FOR ALL USING (auth.role() = 'service_role');
 
+-- operator_self_update não restringe colunas (e `authenticated` tem UPDATE em
+-- todas): sem este trigger, um operador podia se promover a owner, trocar de
+-- tenant ou de e-mail via qualquer UPDATE na própria linha. Em requisição de
+-- usuário (withClaims → role authenticated), id/tenant_id/role/active/email não
+-- mudam — só via withAdmin (service_role), com checagem no código.
+-- Ver db/migrations/2026-11-25-users-guard-privileged-columns.sql.
+CREATE OR REPLACE FUNCTION users_guard_privileged_columns() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF current_user <> 'authenticated' THEN
+    RETURN NEW;
+  END IF;
+
+  IF COALESCE((auth.jwt() ->> 'is_super_admin')::boolean, false) THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.id        IS DISTINCT FROM OLD.id
+  OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+  OR NEW.role      IS DISTINCT FROM OLD.role
+  OR NEW.active    IS DISTINCT FROM OLD.active
+  OR NEW.email     IS DISTINCT FROM OLD.email
+  THEN
+    RAISE EXCEPTION 'Alteração de id/tenant_id/role/active/email de usuário não permitida nesta operação.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS users_guard_privileged_columns ON users;
+CREATE TRIGGER users_guard_privileged_columns
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION users_guard_privileged_columns();
+
 -- FK de tenants.last_lead_assigned_to → users(id), adicionada aqui porque
 -- users só existe a partir deste ponto do arquivo (tenants vem antes).
 DO $$ BEGIN
