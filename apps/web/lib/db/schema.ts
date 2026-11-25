@@ -156,6 +156,10 @@ export const users = pgTable(
     isAvailable: boolean('is_available').notNull().default(true),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Preferências de push — gravar só via lib/actions/notification-preferences.ts.
+    pushOnlyAssigned: boolean('push_only_assigned').notNull().default(false),
+    pushQuietStart: time('push_quiet_start'),
+    pushQuietEnd: time('push_quiet_end'),
   },
   (t) => [
     index('idx_users_tenant_id').on(t.tenantId),

@@ -1,11 +1,16 @@
 import webpush, { type RequestOptions } from 'web-push'
+import {
+  countWaitingConversations,
+  deleteSubscription,
+  loadRecipientPrefs,
+  loadSubscriptions,
+  loadTenantTimezone,
+} from './push-context.js'
+import { filterByPreferences } from './push-preferences.js'
 
 // Acesso pelo default: web-push é CommonJS e o import nomeado da classe não é
 // garantido em runtime no ESM do Node.
 const { WebPushError } = webpush
-import { db } from '../db/index.js'
-import { pushSubscriptions } from '../db/schema.js'
-import { eq, inArray, and } from 'drizzle-orm'
 
 // Inicializa a configuração do web-push (singleton)
 let webpushConfigured = false
@@ -44,6 +49,13 @@ export interface PushPayload {
   kind: 'escalation' | 'message'
 }
 
+export interface PushOptions {
+  /** Dono da conversa — usado pela preferência "só conversas atribuídas a mim". */
+  assignedUserId?: string | null
+  /** Injetável nos testes. */
+  now?: Date
+}
+
 /**
  * Opções de envio por tipo. O `topic` faz o serviço de push substituir uma
  * notificação ainda não entregue da mesma conversa em vez de empilhar várias.
@@ -64,26 +76,36 @@ export function isGoneError(err: unknown): boolean {
   return err instanceof WebPushError && (err.statusCode === 404 || err.statusCode === 410)
 }
 
-export async function sendPushNotification(tenantId: string, userIds: string[], payload: PushPayload) {
+export async function sendPushNotification(
+  tenantId: string,
+  userIds: string[],
+  payload: PushPayload,
+  opts: PushOptions = {}
+) {
   initWebPush()
   if (!webpushConfigured || userIds.length === 0) return
 
   try {
-    // Busca todas as subscriptions dos usuários especificados neste tenant
-    const subs = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(
-        and(
-          eq(pushSubscriptions.tenantId, tenantId),
-          inArray(pushSubscriptions.userId, userIds)
-        )
-      )
+    // Preferências de cada usuário (só atribuídas a mim / horário silencioso).
+    const [prefs, timezone] = await Promise.all([
+      loadRecipientPrefs(tenantId, userIds),
+      loadTenantTimezone(tenantId),
+    ])
+    const recipients = filterByPreferences(prefs, {
+      assignedUserId: opts.assignedUserId ?? null,
+      now: opts.now ?? new Date(),
+      timezone,
+    })
+    if (recipients.length === 0) return
 
+    const subs = await loadSubscriptions(tenantId, recipients)
     if (subs.length === 0) return
 
+    // Número no ícone do app = conversas esperando atendimento (igual à sidebar).
+    const badge = await countWaitingConversations(tenantId).catch(() => null)
+
     const { kind: _kind, ...body } = payload
-    const payloadString = JSON.stringify(body)
+    const payloadString = JSON.stringify({ ...body, badge })
     const options = buildSendOptions(payload)
 
     const promises = subs.map(async (sub) => {
@@ -102,7 +124,7 @@ export async function sendPushNotification(tenantId: string, userIds: string[], 
       } catch (err: unknown) {
         if (isGoneError(err)) {
           console.log('[push-sender] Removendo subscription expirada')
-          await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, sub.endpoint))
+          await deleteSubscription(sub.endpoint)
         } else if (err instanceof WebPushError) {
           // 403 = chave VAPID do frontend ≠ do backend, ou subject inválido (Apple).
           // 413 = payload grande demais. O corpo da resposta diz o motivo.

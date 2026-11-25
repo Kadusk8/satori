@@ -7,7 +7,8 @@ import {
   DragOverEvent,
   DragOverlay,
   DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -33,9 +34,16 @@ export function KanbanBoard({ stages, conversations, onMoveCard, onCardClick }: 
     setLocalConversations(conversations)
   }, [conversations])
 
+  // Mouse: arrasta depois de mover 8px (igual antes).
+  // Dedo: só arrasta depois de segurar 250ms parado (tolerância de 8px). Antes
+  // um sensor único de "8px de movimento" também valia pro toque, e deslizar o
+  // dedo pra rolar o quadro no celular pegava e arrastava o card sem querer.
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 8 },
     })
   )
 

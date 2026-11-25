@@ -11,7 +11,7 @@
 //
 // Ao alterar este arquivo, suba SW_VERSION — é o que descarta o cache antigo.
 
-const SW_VERSION = 'satori-sw-v3'
+const SW_VERSION = 'satori-sw-v4'
 // Igual a ICON_VERSION em lib/pwa/icons.ts (este arquivo não importa módulos).
 const ICON_QS = '?v=2'
 const CACHE_NAME = `satori-shell-${SW_VERSION}`
@@ -126,9 +126,14 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(title, options),
-      // Bolinha no ícone do app (iOS 16.4+ instalado, Android). Zerada ao abrir o app.
+      // Número no ícone do app = conversas esperando atendimento (iOS 16.4+
+      // instalado, Android). Sem contagem, só a marcação. Com o app aberto, a
+      // sidebar mantém o número em dia.
       self.navigator && 'setAppBadge' in self.navigator
-        ? self.navigator.setAppBadge().catch(() => {})
+        ? (typeof data.badge === 'number' && data.badge > 0
+            ? self.navigator.setAppBadge(data.badge)
+            : self.navigator.setAppBadge()
+          ).catch(() => {})
         : Promise.resolve(),
     ])
   )

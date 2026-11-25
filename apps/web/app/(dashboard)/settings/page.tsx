@@ -1,10 +1,12 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { Bot, MessagesSquare, UserCog, ArrowRight, Kanban, UserRound, Tags, Trophy } from 'lucide-react'
+import { Bell, Bot, MessagesSquare, UserCog, ArrowRight, Kanban, UserRound, Tags, Trophy } from 'lucide-react'
 import { getSessionClaims } from '@/lib/auth/session'
 import { isManager } from '@/lib/auth/permissions'
 import { ChangePasswordDialog } from './change-password-dialog'
+import { NotificationSettings } from './notification-settings'
+import { getMyNotificationPreferences } from '@/lib/actions/notification-preferences'
 import { getCatalogContext } from '@/lib/data/products'
 
 const managedSections = [
@@ -24,9 +26,11 @@ export default async function SettingsPage() {
   const claims = await getSessionClaims()
   const canManage = isManager(claims.userRole)
   const { businessModel } = claims.tenantId ? await getCatalogContext() : { businessModel: 'product' as const }
+  // Push é por usuário de tenant (super admin puro não recebe push).
+  const notificationPrefs = claims.tenantId ? await getMyNotificationPreferences() : null
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl mx-auto">
+    <div className="p-4 md:p-8 space-y-6 max-w-2xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold">Configurações</h1>
         <p className="text-muted-foreground text-sm mt-1">
@@ -47,6 +51,22 @@ export default async function SettingsPage() {
           <ChangePasswordDialog />
         </div>
       </div>
+
+      {/* Notificações — disponível pra qualquer papel (cada um ajusta as próprias) */}
+      {notificationPrefs && (
+        <div className="border rounded-lg p-6 flex gap-4 items-start">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+            <Bell className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-semibold">Notificações</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-4">
+              Avisos de cliente esperando atendimento no celular ou no computador.
+            </p>
+            <NotificationSettings initial={notificationPrefs} />
+          </div>
+        </div>
+      )}
 
       {canManage && (
         <>

@@ -355,7 +355,16 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url   TEXT,
   is_available BOOLEAN     NOT NULL DEFAULT true,
   active       BOOLEAN     NOT NULL DEFAULT true,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Preferências de push (migration 2026-11-25-push-preferences). Cada usuário
+  -- grava as próprias (lib/actions/notification-preferences.ts).
+  push_only_assigned BOOLEAN NOT NULL DEFAULT false,
+  push_quiet_start   TIME,
+  push_quiet_end     TIME,
+  CONSTRAINT users_push_quiet_hours_check CHECK (
+    (push_quiet_start IS NULL AND push_quiet_end IS NULL)
+    OR (push_quiet_start IS NOT NULL AND push_quiet_end IS NOT NULL AND push_quiet_start <> push_quiet_end)
+  )
 );
 
 COMMENT ON TABLE users IS 'Operadores do painel tenant (owner/admin/operator).';

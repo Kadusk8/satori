@@ -31,7 +31,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams): Promise
 }
 
 function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://app.satori.com'
+  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? 'https://satori.ia.br'
 }
 
 /** Email de redefinição de senha (link com token). */
@@ -48,15 +48,28 @@ export async function sendPasswordResetEmail(to: string, token: string): Promise
   })
 }
 
-/** Email de convite de operador (link com token pra definir a senha). */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+}
+
+/**
+ * Email de convite de operador (link com token pra definir a senha) + convite
+ * pra instalar o app no celular — sem o app, o operador não recebe aviso de
+ * cliente esperando atendimento.
+ */
 export async function sendOperatorInviteEmail(to: string, token: string, companyName: string): Promise<void> {
   const link = `${appUrl()}/auth/reset-password?token=${encodeURIComponent(token)}&invite=1`
+  const installLink = `${appUrl()}/instalar`
+  const company = escapeHtml(companyName)
   await sendEmail({
     to,
     subject: `Convite para a equipe — ${companyName}`,
     html: `
-      <p>Você foi convidado para atender no painel da <strong>${companyName}</strong> no Satori.</p>
-      <p><a href="${link}">Clique aqui para definir sua senha e acessar</a>. O link expira em 24 horas.</p>
+      <p>Você foi convidado para atender no painel da <strong>${company}</strong> no Satori.</p>
+      <p><strong>1.</strong> <a href="${link}">Clique aqui para definir sua senha e acessar</a>. O link expira em 24 horas.</p>
+      <p><strong>2.</strong> Instale o app no seu celular para ser avisado na hora quando um cliente precisar de você:
+        <a href="${installLink}">${installLink.replace(/^https?:\/\//, '')}</a></p>
+      <p style="color:#666;font-size:13px">No iPhone, abra o link no Safari. No Android, no Chrome.</p>
     `,
   })
 }

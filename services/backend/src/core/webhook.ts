@@ -548,7 +548,7 @@ async function handleMessageEvent(tenant: TenantRow, data: EvolutionMessageData)
           body: bodyText.length > 100 ? bodyText.substring(0, 97) + '...' : bodyText,
           conversationId,
           kind: 'message',
-        }).catch(err => console.error('[webhook] Erro não tratado no push:', err))
+        }, { assignedUserId: assignedTo }).catch(err => console.error('[webhook] Erro não tratado no push:', err))
       }
     }
   } catch (err) {

@@ -16,6 +16,8 @@ import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
 import { unsubscribe as unsubscribePush } from '@/lib/pwa/push-client'
+import { setAppBadgeCount } from '@/lib/pwa/app-badge'
+import { useOnAppResume } from '@/lib/pwa/use-app-resume'
 import { SatoriMark, SatoriWordmark, SatoriLogo } from '@/components/brand/satori-logo'
 
 function NotificationBadge({ count }: { count: number }) {
@@ -67,12 +69,23 @@ export function DashboardSidebar({ tenantId, userRole, businessModel }: Dashboar
     }
   }, [tenantId])
 
+  // Contagem perdida com o app em segundo plano (WebSocket derrubado pelo sistema).
+  useOnAppResume(() => {
+    if (tenantId) getWaitingCount().then(setWaitingCount).catch(() => {})
+  })
+
+  // Número no ícone do app instalado = mesmo contador do item CRM.
+  useEffect(() => {
+    setAppBadgeCount(waitingCount)
+  }, [waitingCount])
+
   async function handleLogout() {
     try {
       setIsLoggingOut(true)
       // Antes de encerrar a sessão (a API de unsubscribe exige login): sem isso, o
       // próximo usuário deste aparelho receberia os pushes deste. Limitada a 3s.
       await unsubscribePush()
+      setAppBadgeCount(0)
       await logout()
     } catch (err) {
       if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) return
